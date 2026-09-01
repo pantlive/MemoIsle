@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# MemoIsle 本地数据与前端/Android 构建产物
+/data/
+/web/node_modules/
+/web/dist/
+/android/.gradle/
+/android/local.properties
+/android/**/build/
+*.iml
+.idea/
