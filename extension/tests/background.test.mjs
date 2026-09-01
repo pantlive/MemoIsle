@@ -8,6 +8,9 @@ const backgroundSource = await readFile(
   new URL("../background.js", import.meta.url),
   "utf8",
 );
+const manifest = JSON.parse(
+  await readFile(new URL("../manifest.json", import.meta.url), "utf8"),
+);
 
 function jsonValue(value) {
   return JSON.parse(JSON.stringify(value));
@@ -19,10 +22,12 @@ function createHarness({
     title: "Web API",
     favIconUrl: "https://developer.mozilla.org/favicon.ico",
   },
+  openTabs,
   fetchImpl,
   storedConfig = {},
 } = {}) {
   const listeners = {};
+  const resolvedOpenTabs = openTabs ?? [activeTab];
   const calls = {
     contextMenus: [],
     fetches: [],
@@ -45,6 +50,11 @@ function createHarness({
       onInstalled: {
         addListener(callback) {
           listeners.installed = callback;
+        },
+      },
+      onStartup: {
+        addListener(callback) {
+          listeners.startup = callback;
         },
       },
     },
@@ -82,10 +92,30 @@ function createHarness({
     tabs: {
       query(query, callback) {
         calls.queries.push(jsonValue(query));
-        callback([activeTab]);
+        callback(query.active ? [activeTab] : resolvedOpenTabs);
       },
       async create(options) {
         calls.tabsCreated.push(jsonValue(options));
+      },
+      onCreated: {
+        addListener(callback) {
+          listeners.tabCreated = callback;
+        },
+      },
+      onUpdated: {
+        addListener(callback) {
+          listeners.tabUpdated = callback;
+        },
+      },
+      onActivated: {
+        addListener(callback) {
+          listeners.tabActivated = callback;
+        },
+      },
+      onRemoved: {
+        addListener(callback) {
+          listeners.tabRemoved = callback;
+        },
       },
     },
   };
@@ -129,18 +159,73 @@ test("安装时注册最小化的网页右键菜单", () => {
   ]);
 });
 
-test("点击扩展图标会提交当前页并打开带一次性令牌的 Web", async () => {
-  const harness = createHarness();
+test("扩展清单允许读取当前浏览器打开的标签页", () => {
+  assert.equal(manifest.permissions.includes("tabs"), true);
+});
+
+test("点击扩展图标会同步当前浏览器网页并打开带一次性令牌的 Web", async () => {
+  const harness = createHarness({
+    openTabs: [
+      {
+        id: 7,
+        windowId: 1,
+        url: "https://developer.mozilla.org/zh-CN/docs/Web/API",
+        title: "Web API",
+        favIconUrl: "https://developer.mozilla.org/favicon.ico",
+      },
+      {
+        id: 8,
+        windowId: 1,
+        url: "https://example.com/course",
+        title: "公开课程",
+        favIconUrl: "https://example.com/favicon.ico",
+      },
+      {
+        id: 9,
+        windowId: 1,
+        url: "chrome://extensions",
+        title: "扩展",
+      },
+    ],
+  });
 
   harness.listeners.action({
+    id: 7,
+    windowId: 1,
     url: "https://example.com/learning?id=42",
     title: "学习资料",
     favIconUrl: "https://example.com/favicon.ico",
   });
   await waitFor(() => harness.calls.tabsCreated.length === 1);
 
-  assert.equal(harness.calls.fetches.length, 1);
-  const request = harness.calls.fetches[0];
+  assert.equal(harness.calls.fetches.length, 2);
+  const syncRequest = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-tabs/sync"),
+  );
+  assert.ok(syncRequest);
+  assert.equal(syncRequest.options.method, "POST");
+  const syncBody = JSON.parse(syncRequest.options.body);
+  assert.deepEqual(syncBody.tabs, [
+    {
+      tab_id: 7,
+      window_id: 1,
+      page_url: "https://developer.mozilla.org/zh-CN/docs/Web/API",
+      page_title: "Web API",
+      favicon_url: "https://developer.mozilla.org/favicon.ico",
+    },
+    {
+      tab_id: 8,
+      window_id: 1,
+      page_url: "https://example.com/course",
+      page_title: "公开课程",
+      favicon_url: "https://example.com/favicon.ico",
+    },
+  ]);
+
+  const request = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-captures"),
+  );
+  assert.ok(request);
   assert.equal(
     request.url,
     "http://127.0.0.1:8000/api/v1/browser-captures",
@@ -151,6 +236,8 @@ test("点击扩展图标会提交当前页并打开带一次性令牌的 Web", a
   });
   const body = JSON.parse(request.options.body);
   assert.equal(body.extension_id, "abcdefghijklmnopabcdefghijklmnop");
+  assert.equal(body.tab_id, 7);
+  assert.equal(body.window_id, 1);
   assert.equal(body.page_url, "https://example.com/learning?id=42");
   assert.equal(body.page_title, "学习资料");
   assert.equal(body.favicon_url, "https://example.com/favicon.ico");
@@ -170,10 +257,11 @@ test("快捷键与右键菜单只在明确触发时捕获当前页", async () =>
 
   shortcutHarness.listeners.command("capture-current-page");
   await waitFor(() => shortcutHarness.calls.tabsCreated.length === 1);
-  assert.deepEqual(shortcutHarness.calls.queries, [
+  assert.deepEqual(shortcutHarness.calls.queries.slice(-2), [
     { active: true, currentWindow: true },
+    {},
   ]);
-  assert.equal(shortcutHarness.calls.fetches.length, 1);
+  assert.equal(shortcutHarness.calls.fetches.length, 2);
 
   const contextHarness = createHarness();
   contextHarness.listeners.contextMenu({ menuItemId: "unrelated" }, {});
@@ -188,7 +276,27 @@ test("快捷键与右键菜单只在明确触发时捕获当前页", async () =>
     },
   );
   await waitFor(() => contextHarness.calls.tabsCreated.length === 1);
-  assert.equal(contextHarness.calls.fetches.length, 1);
+  assert.equal(contextHarness.calls.fetches.length, 2);
+});
+
+test("浏览器标签页变化会刷新当前打开网页快照", async () => {
+  const harness = createHarness();
+
+  harness.listeners.tabCreated();
+  await waitFor(() => harness.calls.fetches.length === 1);
+  harness.listeners.tabUpdated(7, { status: "complete" }, {});
+  await waitFor(() => harness.calls.fetches.length === 2);
+  harness.listeners.tabActivated({ tabId: 7, windowId: 1 });
+  await waitFor(() => harness.calls.fetches.length === 3);
+  harness.listeners.tabRemoved(7, { windowId: 1, isWindowClosing: false });
+  await waitFor(() => harness.calls.fetches.length === 4);
+
+  assert.equal(
+    harness.calls.fetches.every((request) =>
+      request.url.endsWith("/browser-tabs/sync"),
+    ),
+    true,
+  );
 });
 
 test("内部页、本地文件和内网地址不会提交空资料", async (context) => {
@@ -271,8 +379,13 @@ test("自定义 API 与 Web 地址会被正确使用", async () => {
   });
   await waitFor(() => harness.calls.tabsCreated.length === 1);
 
+  assert.equal(harness.calls.fetches.length, 2);
+  const captureRequest = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-captures"),
+  );
+  assert.ok(captureRequest);
   assert.equal(
-    harness.calls.fetches[0].url,
+    captureRequest.url,
     "https://api.memoisle.test/api/v1/browser-captures",
   );
   const openedUrl = new URL(harness.calls.tabsCreated[0].url);

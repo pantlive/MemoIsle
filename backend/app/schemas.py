@@ -483,6 +483,8 @@ class BrowserCaptureCreate(BaseModel):
     """扩展提交的当前网页一次性上下文。"""
 
     extension_id: str = Field(pattern=r"^[a-p]{32}$")
+    tab_id: int | None = Field(default=None, ge=0)
+    window_id: int | None = Field(default=None, ge=0)
     nonce: str = Field(min_length=16, max_length=100)
     page_url: str = Field(min_length=1, max_length=2_048)
     page_title: str = Field(default="", max_length=300)
@@ -530,6 +532,70 @@ class BrowserCaptureContext(BaseModel):
     page_title: str
     favicon_url: str | None
     nonce: str
+
+
+class BrowserTabSyncItem(BaseModel):
+    """浏览器当前打开标签页的基础信息。"""
+
+    tab_id: int = Field(ge=0)
+    window_id: int | None = Field(default=None, ge=0)
+    page_url: str = Field(min_length=1, max_length=2_048)
+    page_title: str = Field(default="", max_length=300)
+    favicon_url: str | None = Field(default=None, max_length=2_048)
+
+    @field_validator("page_url", "favicon_url")
+    @classmethod
+    def normalize_tab_url(cls, value: str | None) -> str | None:
+        """清理标签页地址，公网校验由服务端统一执行。"""
+
+        return normalize_optional_text(value)
+
+    @field_validator("page_title")
+    @classmethod
+    def normalize_tab_title(cls, value: str) -> str:
+        """清理标签页标题。"""
+
+        return " ".join(value.split()).strip()
+
+
+class BrowserTabSyncRequest(BaseModel):
+    """扩展提交的当前浏览器标签页快照。"""
+
+    extension_id: str = Field(pattern=r"^[a-p]{32}$")
+    tabs: list[BrowserTabSyncItem] = Field(default_factory=list, max_length=200)
+
+
+class BrowserOpenTabRead(BaseModel):
+    """Web 可选择的当前浏览器打开标签页。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tab_id: int
+    window_id: int | None
+    page_url: str
+    page_title: str
+    favicon_url: str | None
+    last_seen_at: datetime
+
+    @field_serializer("last_seen_at")
+    def serialize_utc_datetime(self, value: datetime) -> str:
+        """统一输出标签页最近同步时间。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class BrowserOpenTabListResponse(BaseModel):
+    """当前浏览器打开标签页列表。"""
+
+    items: list[BrowserOpenTabRead]
+
+
+class BrowserTabSyncResponse(BaseModel):
+    """浏览器标签页快照同步结果。"""
+
+    synced_count: int
 
 
 def normalize_optional_text(value: str | None) -> str | None:

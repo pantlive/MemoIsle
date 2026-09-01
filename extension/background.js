@@ -60,6 +60,38 @@ async function openWebCapture(config, token, errorCode) {
   await chrome.tabs.create({ url: target.toString() });
 }
 
+function queryAllTabs() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({}, resolve);
+  });
+}
+
+async function syncOpenTabs(config = null) {
+  try {
+    const resolvedConfig = config || await readConfig();
+    const tabs = await queryAllTabs();
+    const openTabs = tabs
+      .filter((tab) => Number.isInteger(tab?.id) && isSupportedPage(tab.url))
+      .map((tab) => ({
+        tab_id: tab.id,
+        window_id: Number.isInteger(tab.windowId) ? tab.windowId : null,
+        page_url: tab.url,
+        page_title: tab.title || "",
+        favicon_url: tab.favIconUrl || null,
+      }));
+    await fetch(`${resolvedConfig.apiBaseUrl}/browser-tabs/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extension_id: chrome.runtime.id,
+        tabs: openTabs,
+      }),
+    });
+  } catch {
+    // 浏览器标签页同步失败不阻止当前页的一次性收藏流程。
+  }
+}
+
 async function captureTab(tab) {
   const config = await readConfig();
   if (!tab?.url || !isSupportedPage(tab.url)) {
@@ -67,12 +99,16 @@ async function captureTab(tab) {
     return;
   }
 
+  await syncOpenTabs(config);
+
   try {
     const response = await fetch(`${config.apiBaseUrl}/browser-captures`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         extension_id: chrome.runtime.id,
+        tab_id: Number.isInteger(tab.id) ? tab.id : null,
+        window_id: Number.isInteger(tab.windowId) ? tab.windowId : null,
         nonce: crypto.randomUUID().replaceAll("-", ""),
         page_url: tab.url,
         page_title: tab.title || "",
@@ -97,6 +133,34 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "收藏到 MemoIsle",
     contexts: ["page"],
   });
+  void readConfig().then((config) => syncOpenTabs(config));
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void readConfig().then((config) => syncOpenTabs(config));
+});
+
+chrome.tabs.onCreated.addListener(() => {
+  void syncOpenTabs();
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  if (
+    changeInfo.url !== undefined ||
+    changeInfo.title !== undefined ||
+    changeInfo.favIconUrl !== undefined ||
+    changeInfo.status === "complete"
+  ) {
+    void syncOpenTabs();
+  }
+});
+
+chrome.tabs.onActivated.addListener(() => {
+  void syncOpenTabs();
+});
+
+chrome.tabs.onRemoved.addListener(() => {
+  void syncOpenTabs();
 });
 
 chrome.action.onClicked.addListener((tab) => {

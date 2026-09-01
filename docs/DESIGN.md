@@ -83,7 +83,7 @@ Always pair unfamiliar icons with labels or accessible names.
 - Looks like an inviting composer, with placeholder “Save a word, link, or thought…”.
 - Supports type switch, text/URL input, microphone, and one clear Save action.
 - Advanced metadata stays collapsed until requested.
-- Typing `@` in Web capture opens a command menu; `@网页` renders the explicitly authorized current Chrome page as an attachment card rather than plain text.
+- Typing `@` in Web capture opens a command menu; `@网页` lists the currently open HTTP(S) pages from the connected Chrome browser and renders the selected page as an attachment card rather than plain text.
 
 ### Memo Row
 

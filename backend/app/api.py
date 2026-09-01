@@ -36,6 +36,8 @@ from app.browser_capture_service import (
     BrowserCaptureOriginError,
     create_browser_capture,
     exchange_browser_capture,
+    list_open_browser_tabs,
+    sync_open_browser_tabs,
 )
 from app.config import Settings
 from app.dependencies import get_current_user_id, get_session, get_settings
@@ -54,6 +56,10 @@ from app.schemas import (
     BrowserCaptureCreate,
     BrowserCaptureCreated,
     BrowserCaptureExchangeRequest,
+    BrowserOpenTabListResponse,
+    BrowserOpenTabRead,
+    BrowserTabSyncRequest,
+    BrowserTabSyncResponse,
     LinkHealthActionRequest,
     LinkHealthListResponse,
     LinkHealthStatus,
@@ -149,6 +155,51 @@ def exchange_browser_capture_route(
         ) from error
     except BrowserCaptureConsumedError as error:
         raise HTTPException(status_code=409, detail="网页授权已经使用") from error
+
+
+@router.post(
+    "/browser-tabs/sync",
+    response_model=BrowserTabSyncResponse,
+    tags=["browser-tabs"],
+)
+def sync_browser_tabs_route(
+    payload: BrowserTabSyncRequest,
+    request: Request,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> BrowserTabSyncResponse:
+    """接收扩展同步的当前浏览器打开标签页快照。"""
+
+    try:
+        synced_count = sync_open_browser_tabs(
+            session,
+            user_id,
+            payload,
+            request.headers.get("origin"),
+        )
+    except BrowserCaptureOriginError as error:
+        raise HTTPException(status_code=403, detail="浏览器扩展来源不匹配") from error
+    except (ValueError, OSError) as error:
+        raise HTTPException(status_code=422, detail="浏览器标签页快照无效") from error
+    return BrowserTabSyncResponse(synced_count=synced_count)
+
+
+@router.get(
+    "/browser-tabs/open",
+    response_model=BrowserOpenTabListResponse,
+    tags=["browser-tabs"],
+)
+def list_open_browser_tabs_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> BrowserOpenTabListResponse:
+    """读取当前浏览器正在打开、且可安全收藏的网页。"""
+
+    items = list_open_browser_tabs(session, user_id, limit=limit)
+    return BrowserOpenTabListResponse(
+        items=[BrowserOpenTabRead.model_validate(item) for item in items]
+    )
 
 
 @router.post(

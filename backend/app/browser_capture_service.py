@@ -1,4 +1,4 @@
-"""浏览器扩展当前页捕获业务。"""
+"""浏览器扩展网页捕获与打开标签页快照业务。"""
 
 from __future__ import annotations
 
@@ -12,15 +12,17 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BrowserCapture
+from app.models import BrowserCapture, BrowserOpenTab
 from app.resource_processing import validate_public_resource_url
 from app.schemas import (
     BrowserCaptureContext,
     BrowserCaptureCreate,
     BrowserCaptureCreated,
+    BrowserTabSyncRequest,
 )
 
 PublicUrlValidator = Callable[[str], str]
+OPEN_TAB_STALE_AFTER = timedelta(minutes=10)
 
 
 class BrowserCaptureOriginError(PermissionError):
@@ -60,6 +62,51 @@ def safe_capture_title(title: str, page_url: str) -> str:
     return (urlsplit(page_url).hostname or "网页资料").removeprefix("www.")[:300]
 
 
+def _upsert_open_tab(
+    session: Session,
+    user_id: str,
+    extension_id: str,
+    tab_id: int,
+    window_id: int | None,
+    page_url: str,
+    page_title: str,
+    favicon_url: str | None,
+    now: datetime,
+) -> BrowserOpenTab:
+    """更新一个当前打开的浏览器标签页快照。"""
+
+    page = session.scalar(
+        select(BrowserOpenTab).where(
+            BrowserOpenTab.user_id == user_id,
+            BrowserOpenTab.extension_id == extension_id,
+            BrowserOpenTab.tab_id == tab_id,
+        )
+    )
+    if page is None:
+        page = BrowserOpenTab(
+            id=str(uuid4()),
+            user_id=user_id,
+            extension_id=extension_id,
+            tab_id=tab_id,
+            window_id=window_id,
+            page_url=page_url,
+            page_title=safe_capture_title(page_title, page_url),
+            favicon_url=favicon_url,
+            status="open",
+            last_seen_at=now,
+        )
+        session.add(page)
+        return page
+
+    page.window_id = window_id
+    page.page_url = page_url
+    page.page_title = safe_capture_title(page_title, page_url)
+    page.favicon_url = favicon_url
+    page.status = "open"
+    page.last_seen_at = now
+    return page
+
+
 def create_browser_capture(
     session: Session,
     user_id: str,
@@ -86,6 +133,19 @@ def create_browser_capture(
     token = secrets.token_urlsafe(32)
     now = datetime.now(UTC)
     expires_at = now + timedelta(minutes=5)
+    # 扩展点击当前页时顺便更新该标签页，完整快照由扩展事件持续同步。
+    if payload.tab_id is not None:
+        _upsert_open_tab(
+            session,
+            user_id,
+            payload.extension_id,
+            payload.tab_id,
+            payload.window_id,
+            page_url,
+            payload.page_title,
+            favicon_url,
+            now,
+        )
     session.add(
         BrowserCapture(
             id=str(uuid4()),
@@ -103,6 +163,88 @@ def create_browser_capture(
     )
     session.commit()
     return BrowserCaptureCreated(token=token, expires_at=expires_at)
+
+
+def sync_open_browser_tabs(
+    session: Session,
+    user_id: str,
+    payload: BrowserTabSyncRequest,
+    request_origin: str | None,
+    url_validator: PublicUrlValidator = validate_public_resource_url,
+) -> int:
+    """同步当前浏览器所有可收藏的 HTTP(S) 标签页。"""
+
+    expected_origin = f"chrome-extension://{payload.extension_id}"
+    if request_origin != expected_origin:
+        raise BrowserCaptureOriginError
+    now = datetime.now(UTC)
+    existing_pages = session.scalars(
+        select(BrowserOpenTab).where(
+            BrowserOpenTab.user_id == user_id,
+            BrowserOpenTab.extension_id == payload.extension_id,
+        )
+    ).all()
+    seen_tab_ids: set[int] = set()
+    synced_count = 0
+    for tab in payload.tabs:
+        if tab.tab_id in seen_tab_ids:
+            continue
+        try:
+            page_url = url_validator(tab.page_url)
+        except (OSError, ValueError):
+            # chrome://、file://、本地地址等不进入网页资料选择器。
+            continue
+        favicon_url: str | None = None
+        if tab.favicon_url:
+            try:
+                favicon_url = url_validator(tab.favicon_url)
+            except (OSError, ValueError):
+                # 图标不可用不应阻止当前打开网页进入选择器。
+                favicon_url = None
+        _upsert_open_tab(
+            session,
+            user_id,
+            payload.extension_id,
+            tab.tab_id,
+            tab.window_id,
+            page_url,
+            tab.page_title,
+            favicon_url,
+            now,
+        )
+        seen_tab_ids.add(tab.tab_id)
+        synced_count += 1
+
+    # 快照中缺失的标签页已关闭，Web 下次输入 @ 时不会继续展示。
+    for page in existing_pages:
+        if page.tab_id not in seen_tab_ids:
+            page.status = "closed"
+    session.commit()
+    return synced_count
+
+
+def list_open_browser_tabs(
+    session: Session,
+    user_id: str,
+    limit: int = 20,
+) -> list[BrowserOpenTab]:
+    """读取扩展最近同步的当前打开网页。"""
+
+    stale_before = datetime.now(UTC) - OPEN_TAB_STALE_AFTER
+    query = (
+        select(BrowserOpenTab)
+        .where(
+            BrowserOpenTab.user_id == user_id,
+            BrowserOpenTab.status == "open",
+            BrowserOpenTab.last_seen_at >= stale_before,
+        )
+        .order_by(
+            BrowserOpenTab.last_seen_at.desc(),
+            BrowserOpenTab.id.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.scalars(query).all())
 
 
 def exchange_browser_capture(

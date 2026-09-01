@@ -15,6 +15,7 @@ import {
   enrichResource,
   exchangeBrowserCapture,
   getLinkHealthCenter,
+  listOpenBrowserTabs,
   listMemos,
   memoAudioUrl,
   reviewWord,
@@ -23,6 +24,7 @@ import {
 } from "./api";
 import type {
   BrowserCaptureContext,
+  BrowserOpenTab,
   LinkHealthStatus,
   Memo,
   MemoSort,
@@ -232,7 +234,11 @@ export default function App() {
   const [newTitle, setNewTitle] = useState("");
   const [newPhonetic, setNewPhonetic] = useState("");
   const [newExample, setNewExample] = useState("");
-  const [webAttachment, setWebAttachment] = useState<BrowserCaptureContext | null>(null);
+  const [webAttachment, setWebAttachment] = useState<
+    BrowserCaptureContext | BrowserOpenTab | null
+  >(null);
+  const [openBrowserTabs, setOpenBrowserTabs] = useState<BrowserOpenTab[]>([]);
+  const [openBrowserTabsLoading, setOpenBrowserTabsLoading] = useState(false);
   const [webAttachmentHelp, setWebAttachmentHelp] = useState(false);
   const [webCommandOpen, setWebCommandOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -288,6 +294,19 @@ export default function App() {
     }
   }, []);
 
+  const refreshOpenBrowserTabs = useCallback(async () => {
+    setOpenBrowserTabsLoading(true);
+    try {
+      const tabs = await listOpenBrowserTabs();
+      setOpenBrowserTabs(tabs);
+    } catch {
+      // 当前浏览器标签页读取失败时仍保留粘贴网址和一次性捕获入口。
+      setOpenBrowserTabs([]);
+    } finally {
+      setOpenBrowserTabsLoading(false);
+    }
+  }, []);
+
   const focusCapture = useCallback(() => {
     if (activeType === "all") {
       setActiveType("idea");
@@ -317,6 +336,18 @@ export default function App() {
     const timer = window.setInterval(() => void refreshHealthSummary(), 60_000);
     return () => window.clearInterval(timer);
   }, [refreshHealthSummary]);
+
+  useEffect(() => {
+    if (!webCommandOpen) {
+      return;
+    }
+    void refreshOpenBrowserTabs();
+    const timer = window.setInterval(
+      () => void refreshOpenBrowserTabs(),
+      5_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [webCommandOpen, refreshOpenBrowserTabs]);
 
   useEffect(() => {
     const currentUrl = new URL(window.location.href);
@@ -349,13 +380,14 @@ export default function App() {
         setWebAttachmentHelp(false);
         setNewUrl(capture.page_url);
         setNewTitle(capture.page_title);
-        setMessage("已附加扩展授权的当前网页，可以补充备注后保存。");
+        setMessage("已附加当前网页；输入 @ 可从当前浏览器的其他打开网页中选择。");
+        void refreshOpenBrowserTabs();
       })
       .catch((captureExchangeError) => {
         setWebAttachmentHelp(true);
         setMessage(describeError(captureExchangeError));
       });
-  }, []);
+  }, [refreshOpenBrowserTabs]);
 
   const loadCurrentMemos = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -505,9 +537,22 @@ export default function App() {
     setWebCommandOpen(activeType === "resource" && /(^|\s)@$/.test(value));
   };
 
-  const chooseWebCommand = () => {
+  const clearWebCommandMarker = () => {
     setNewBody((current) => current.replace(/(^|\s)@$/, "$1"));
     setWebCommandOpen(false);
+  };
+
+  const chooseOpenBrowserTab = (tab: BrowserOpenTab) => {
+    clearWebCommandMarker();
+    setWebAttachment(tab);
+    setWebAttachmentHelp(false);
+    setNewUrl(tab.page_url);
+    setNewTitle(tab.page_title);
+    setMessage("已附加当前浏览器中的网页，可以补充备注后保存。");
+  };
+
+  const showBrowserPageHelp = () => {
+    clearWebCommandMarker();
     if (!webAttachment) {
       setWebAttachmentHelp(true);
     }
@@ -972,8 +1017,8 @@ export default function App() {
             {activeType === "resource" && webAttachmentHelp && !webAttachment && (
               <div className="web-attachment-help">
                 <div>
-                  <strong>@网页尚未连接</strong>
-                  <span>在目标网页点击 MemoIsle 扩展图标，再回到自动打开的捕获页。</span>
+                  <strong>@网页暂未连接当前浏览器</strong>
+                  <span>请启用 MemoIsle 扩展并刷新浏览器页面，然后输入 @ 选择当前打开的网页。</span>
                   <small>开发安装：Chrome 扩展管理 → 加载已解压扩展 → 选择项目 extension 目录。</small>
                 </div>
                 <button
@@ -1014,7 +1059,7 @@ export default function App() {
                   activeType === "idea"
                     ? "写下此刻的想法，稍后再整理……"
                     : activeType === "resource"
-                      ? "添加备注，输入 @ 可附加扩展授权的当前网页（可选）"
+                      ? "添加备注，输入 @ 可选择当前浏览器打开的网页（可选）"
                       : "填写中文释义或个人理解（可选）"
                 }
                 rows={activeType === "idea" ? 3 : 2}
@@ -1022,10 +1067,41 @@ export default function App() {
               />
               {activeType === "resource" && webCommandOpen && (
                 <div className="capture-command-menu" role="menu">
-                  <button type="button" role="menuitem" onClick={chooseWebCommand}>
-                    <span>↗</span>
-                    <span><strong>@网页</strong><small>附加扩展刚刚授权的当前页面</small></span>
-                  </button>
+                  <div className="capture-command-heading">
+                    <strong>@网页 · 当前浏览器</strong>
+                    <small>选择当前浏览器正在打开的网页，不限当前标签页</small>
+                  </div>
+                  {openBrowserTabsLoading && (
+                    <div className="capture-command-empty">正在读取当前浏览器网页……</div>
+                  )}
+                  {!openBrowserTabsLoading && openBrowserTabs.map((tab) => (
+                    <div className="capture-open-tab" key={tab.id}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="capture-open-tab-select"
+                        onClick={() => chooseOpenBrowserTab(tab)}
+                      >
+                        {tab.favicon_url ? (
+                          <img src={tab.favicon_url} alt="" />
+                        ) : (
+                          <span className="capture-command-icon">↗</span>
+                        )}
+                        <span>
+                          <strong>{tab.page_title}</strong>
+                          <small>
+                            {sourceHost(tab.page_url)} · 最近同步 {timeFormatter.format(new Date(tab.last_seen_at))}
+                          </small>
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                  {!openBrowserTabsLoading && openBrowserTabs.length === 0 && (
+                    <div className="capture-command-empty">
+                      <span>未发现当前浏览器打开的网页</span>
+                      <button type="button" onClick={showBrowserPageHelp}>查看连接方式</button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

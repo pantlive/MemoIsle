@@ -299,6 +299,37 @@ class BookmarkImportItem(Base):
     )
 
 
+class BrowserOpenTab(Base):
+    """浏览器扩展同步的当前打开标签页。"""
+
+    __tablename__ = "browser_open_tab"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "extension_id",
+            "tab_id",
+            name="uq_browser_open_tab_identity",
+        ),
+        Index("ix_browser_open_tab_user_status", "user_id", "status"),
+        Index("ix_browser_open_tab_user_seen", "user_id", "last_seen_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    extension_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tab_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    page_title: Mapped[str] = mapped_column(String(300), nullable=False)
+    favicon_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="open")
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
 class BrowserCapture(Base):
     """浏览器扩展授权的短时一次性网页上下文。"""
 

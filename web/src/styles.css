@@ -347,7 +347,55 @@ textarea:focus-visible {
   box-shadow: 0 12px 32px rgb(18 30 28 / 14%);
 }
 
-.capture-command-menu button {
+.capture-command-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 9px 7px;
+}
+
+.capture-command-heading strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.capture-command-heading small,
+.capture-command-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.capture-command-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 9px;
+}
+
+.capture-command-empty button {
+  width: auto;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  padding: 2px 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.capture-command-empty button:hover {
+  text-decoration: underline;
+}
+
+.capture-open-tab {
+  display: flex;
+  align-items: stretch;
+}
+
+.capture-open-tab-select {
   display: flex;
   width: 100%;
   align-items: center;
@@ -360,11 +408,12 @@ textarea:focus-visible {
   text-align: left;
 }
 
-.capture-command-menu button:hover {
+.capture-open-tab-select:hover {
   background: var(--primary-soft);
 }
 
-.capture-command-menu button > span:first-child,
+.capture-open-tab-select img,
+.capture-command-icon,
 .web-attachment-icon {
   display: grid;
   width: 34px;
@@ -376,14 +425,29 @@ textarea:focus-visible {
   color: var(--primary);
 }
 
-.capture-command-menu button > span:last-child {
+.capture-open-tab-select img {
+  object-fit: contain;
+}
+
+.capture-open-tab-select > span:last-child {
   display: flex;
   flex-direction: column;
 }
 
-.capture-command-menu small {
+.capture-open-tab-select strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capture-open-tab-select small {
+  overflow: hidden;
   color: var(--muted);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .web-attachment-card,

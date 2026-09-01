@@ -3,6 +3,8 @@ import type {
   BookmarkImportPreview,
   BookmarkInput,
   BrowserCaptureContext,
+  BrowserOpenTab,
+  BrowserOpenTabListResponse,
   LinkHealthAction,
   LinkHealthCenter,
   LinkHealthStatus,
@@ -171,6 +173,13 @@ export async function exchangeBrowserCapture(
     method: "POST",
     body: JSON.stringify({ token }),
   });
+}
+
+export async function listOpenBrowserTabs(): Promise<BrowserOpenTab[]> {
+  const response = await request<BrowserOpenTabListResponse>(
+    "/browser-tabs/open",
+  );
+  return response.items;
 }
 
 export async function getLinkHealthCenter(

@@ -78,6 +78,8 @@ Web / Android 搜索
 | GET | `/api/v1/bookmark-imports/{id}` | 获取批次和逐项进度 |
 | POST | `/api/v1/bookmark-imports/{id}/retry` | 重试失败项目 |
 | POST | `/api/v1/bookmark-imports/{id}/undo` | 撤销未编辑的本批资料 |
+| POST | `/api/v1/browser-tabs/sync` | 扩展同步当前浏览器打开网页快照 |
+| GET | `/api/v1/browser-tabs/open` | Web 读取当前浏览器可选择的打开网页 |
 | POST | `/api/v1/browser-captures` | 扩展提交当前页并换取短时凭据 |
 | POST | `/api/v1/browser-captures/exchange` | Web 一次性消费当前页凭据 |
 | POST | `/api/v1/resources/{id}/enrich` | 重试网页元数据与分类 |
@@ -99,7 +101,7 @@ Web / Android 搜索
 - 资料库支持列表和卡片两种视图；网页详情可编辑资源形态、阅读进度、标签、收藏夹、星标和状态。
 - 支持 Chrome 书签 HTML 本地解析、预览、文件夹追溯、批次进度、失败重试和撤销。
 - 书签导入先完成可搜索写入，再由后台补充元数据与分类；服务重启会自动恢复等待中或处理中批次。
-- 支持 Chrome Manifest V3 扩展通过 `activeTab` 捕获当前页，Web 使用一次性令牌显示 `@网页` 附件。
+- 支持 Chrome Manifest V3 扩展同步当前浏览器各窗口的 HTTP(S) 打开网页，Web 输入 `@` 可选择任意网页；扩展动作仍通过一次性令牌直接捕获当前页。
 - 支持网页巡检中心、失效网页角标、状态摘要、人工重试、采用跳转网址、更新网址/资料、忽略和删除。
 - 支持单词、音标、释义和例句的收藏与编辑。
 - 单词复习默认隐藏答案，显示后可提交三档反馈。
@@ -197,8 +199,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 | 语音真实联调 | Android 录音 → 创建灵感 → 上传 → 下载 | 243,944 字节有效 MP4 |
 | 搜索 API 联调 | `GET /memos?q=...` → 跨类型结果 | 通过 |
 | Chrome 扩展静态检查 | `node --check extension/background.js`、Manifest JSON 校验 | 通过 |
-| Chrome 扩展行为测试 | `cd extension && npm test` | 15 项测试通过，覆盖明确触发、协议/地址拦截、失败回退和配置地址 |
-| 现有 Chrome Web 捕获 | 一次性凭据 → Web 消费 → `@网页` 附件标题/网址渲染 | 通过（Chrome 151） |
+| Chrome 扩展行为测试 | `cd extension && npm test` | 17 项测试通过，覆盖清单权限、打开网页快照、标签页变化、协议/地址拦截、失败回退和配置地址 |
+| Chrome Web 捕获 | 当前浏览器多个打开网页快照 → Web `@网页` 选择 → 附件标题/网址渲染；当前页动作仍支持一次性凭据 | 自动化通过；需在现有 Chrome 加载扩展后手动验收 |
 | 书签导入接口 | 预览 → 去重 → 导入 → 搜索 → 重试 → 撤销 | 通过（测试覆盖） |
 | 书签任务恢复 | `processing` 项重置 → 服务重启恢复 → 批次完成 | 通过（测试覆盖） |
 | 网页巡检接口 | 失败阈值 → 变化/跳转 → 处理动作 → 调度限流 | 通过（测试覆盖） |
@@ -207,7 +209,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 ## 5. 当前边界
 
-- 网页资料核心 P0 已完成代码、接口和 Web/Android 运行时验收；现有 Chrome 已验证一次性凭据消费和附件渲染。扩展的图标/快捷键属于浏览器安装态入口，仍需在现有 Chrome 的开发者模式下手动加载后点击确认。
+- 网页资料核心 P0 已完成代码、接口和 Web/Android 运行时验收；扩展已覆盖当前浏览器打开网页快照和当前页一次性捕获。扩展的图标/快捷键属于浏览器安装态入口，仍需在现有 Chrome 的开发者模式下手动加载后点击确认。
 - 生产部署时需将扩展清单中的本地 API 主机权限替换为正式 API 域名，并配置正式 Web 地址。
 - 账号认证尚未实现，目前使用服务端固定的本地开发用户。
 - 开发环境默认 SQLite，生产环境迁移 PostgreSQL 时需要补数据库迁移脚本。

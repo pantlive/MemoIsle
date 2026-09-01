@@ -205,6 +205,20 @@ export interface BrowserCaptureContext {
   nonce: string;
 }
 
+export interface BrowserOpenTab {
+  id: string;
+  tab_id: number;
+  window_id: number | null;
+  page_url: string;
+  page_title: string;
+  favicon_url: string | null;
+  last_seen_at: string;
+}
+
+export interface BrowserOpenTabListResponse {
+  items: BrowserOpenTab[];
+}
+
 export interface LinkHealthCenter {
   items: Memo[];
   counts: Record<LinkHealthStatus, number>;
