@@ -2,6 +2,7 @@ package com.memoisle.app.network
 
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.SyncState
+import com.memoisle.app.data.TYPE_WORD
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
@@ -9,10 +10,23 @@ import java.nio.file.Path
 import org.json.JSONArray
 import org.json.JSONObject
 
+class DuplicateLemmaException(
+    val existing: Memo,
+) : RuntimeException("已收藏相同词形")
+
 class ApiException(
     val statusCode: Int,
     responseBody: String,
-) : RuntimeException("API 请求失败（$statusCode）：$responseBody")
+) : RuntimeException("API 请求失败（$statusCode）：$responseBody") {
+    val code: String?
+    val current: Memo?
+
+    init {
+        val detail = runCatching { JSONObject(responseBody).optJSONObject("detail") }.getOrNull()
+        code = detail?.optString("code")?.takeIf { it.isNotBlank() }
+        current = runCatching { detail?.optJSONObject("current")?.toMemo() }.getOrNull()
+    }
+}
 
 class MemoApiClient(baseUrl: String) {
     private val normalizedBaseUrl = baseUrl.trimEnd('/') + "/"
@@ -32,7 +46,7 @@ class MemoApiClient(baseUrl: String) {
         }
     }
 
-    fun createMemo(memo: Memo): Memo {
+    fun createMemo(memo: Memo, allowDuplicate: Boolean = false): Memo {
         val body = JSONObject().apply {
             put("client_id", memo.clientId)
             put("type", memo.type)
@@ -43,6 +57,9 @@ class MemoApiClient(baseUrl: String) {
             memo.wordPhonetic?.let { put("word_phonetic", it) }
             memo.wordMeaning?.let { put("word_meaning", it) }
             memo.wordExample?.let { put("word_example", it) }
+            if (allowDuplicate && memo.type == TYPE_WORD) {
+                put("allow_duplicate", true)
+            }
             put("tags", JSONArray(memo.tags))
             put("collections", JSONArray(memo.collections))
             memo.resourceKind?.let { put("resource_kind", it) }
@@ -50,6 +67,19 @@ class MemoApiClient(baseUrl: String) {
             put("starred", memo.starred)
         }
         return execute("POST", "memos", body).toMemo()
+    }
+
+    fun mergeWord(memo: Memo, incoming: Memo): Memo {
+        val remoteId = requireNotNull(memo.id) { "合并前必须先完成单词同步" }
+        val body = JSONObject().apply {
+            put("expected_version", memo.version)
+            incoming.wordPhonetic?.let { put("word_phonetic", it) }
+            incoming.wordMeaning?.let { put("word_meaning", it) }
+            incoming.wordExample?.let { put("word_example", it) }
+            incoming.sourceUrl?.let { put("source_url", it) }
+            incoming.sourceTitle?.let { put("source_title", it) }
+        }
+        return execute("POST", "words/$remoteId/merge", body).toMemo()
     }
 
     fun updateMemo(memo: Memo): Memo {
@@ -79,6 +109,14 @@ class MemoApiClient(baseUrl: String) {
             put("feedback", feedback)
         }
         return execute("POST", "words/$remoteId/reviews", body).toMemo()
+    }
+
+    fun skipReview(memo: Memo): Memo {
+        val remoteId = requireNotNull(memo.id) { "跳过回顾前必须先完成同步" }
+        val body = JSONObject().apply {
+            put("expected_version", memo.version)
+        }
+        return execute("POST", "review-queue/$remoteId/skip", body).toMemo()
     }
 
     fun uploadAudio(memo: Memo, audioPath: Path, durationMs: Int): Memo {

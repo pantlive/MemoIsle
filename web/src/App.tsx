@@ -8,7 +8,10 @@ import {
 } from "react";
 
 import BookmarkImportDialog from "./BookmarkImportDialog";
+import { parseClipboardWord } from "./clipboardWord";
 import LinkHealthDialog from "./LinkHealthDialog";
+import ReviewPanel, { type ReviewQueueFilter } from "./ReviewPanel";
+import WordPronunciation from "./WordPronunciation";
 import {
   ApiError,
   browserExtensionDownloadUrl,
@@ -21,10 +24,13 @@ import {
   getResourceCategoryRules,
   getMemoCounts,
   getLinkHealthCenter,
+  getReviewQueue,
   listOpenBrowserTabs,
   listMemos,
   memoAudioUrl,
+  mergeWord,
   reviewWord,
+  skipReview,
   updateResourceCategory,
   updateMemo,
   uploadMemoAudio,
@@ -41,13 +47,14 @@ import type {
   ResourceCategoryRule,
   ResourceCategoryRuleMatchType,
   ReviewFeedback,
+  ReviewQueueResponse,
 } from "./types";
 
 type LoadState = "loading" | "ready" | "error";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type VoiceState = "idle" | "requesting" | "recording" | "ready" | "saving";
 type ActiveType = Extract<MemoType, "idea" | "resource" | "word">;
-type ActiveView = ActiveType | "all";
+type ActiveView = ActiveType | "all" | "review";
 type ResourceViewMode = "list" | "cards";
 
 const RESOURCE_PAGE_SIZE = 10;
@@ -67,7 +74,7 @@ const navigation: NavigationItem[] = [
   { label: "网页资料", icon: "↗", view: "resource" },
   { label: "网页巡检", icon: "!", action: "health" },
   { label: "灵感", icon: "✦", view: "idea" },
-  { label: "回顾", icon: "◷" },
+  { label: "回顾", icon: "◷", view: "review" },
 ];
 
 const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
@@ -182,6 +189,14 @@ const viewCopy = {
     emptyTitle: "从第一个英语单词开始",
     emptyBody: "保存词形、释义和例句，稍后使用三档反馈进行复习。",
   },
+  review: {
+    title: "今日回顾",
+    eyebrow: "用几分钟再次遇见值得留下的内容",
+    icon: "◷",
+    itemLabel: "回顾",
+    emptyTitle: "今天没有需要回顾的内容",
+    emptyBody: "到期单词、未读资料和待整理灵感会显示在这里。",
+  },
 } as const;
 
 function describeError(error: unknown): string {
@@ -257,11 +272,24 @@ export default function App() {
   const [bookmarkImportOpen, setBookmarkImportOpen] = useState(false);
   const [healthCenterOpen, setHealthCenterOpen] = useState(false);
   const [healthIssueCount, setHealthIssueCount] = useState(0);
+  const [reviewQueue, setReviewQueue] = useState<ReviewQueueResponse | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<ReviewQueueFilter>("all");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [undoMemo, setUndoMemo] = useState<Memo | null>(null);
+  const [wordSourceUrl, setWordSourceUrl] = useState("");
+  const [duplicateWord, setDuplicateWord] = useState<Memo | null>(null);
   const [newBody, setNewBody] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [newPhonetic, setNewPhonetic] = useState("");
   const [newExample, setNewExample] = useState("");
+  const [pendingWord, setPendingWord] = useState<{
+    title: string;
+    meaning: string;
+    phonetic: string;
+    example: string;
+    sourceUrl: string | null;
+  } | null>(null);
   const [webAttachment, setWebAttachment] = useState<
     BrowserCaptureContext | BrowserOpenTab | null
   >(null);
@@ -323,6 +351,19 @@ export default function App() {
       // 数量摘要失败不应阻断最近内容列表。
     }
   }, []);
+
+  const loadReviewQueue = useCallback(async (filter: ReviewQueueFilter = reviewFilter) => {
+    try {
+      setReviewQueue(
+        await getReviewQueue({
+          limit: 10,
+          type: filter === "all" ? undefined : filter,
+        }),
+      );
+    } catch (error) {
+      setMessage(describeError(error));
+    }
+  }, [reviewFilter]);
 
   const refreshCategorySettings = useCallback(async () => {
     setCategorySettingsLoading(true);
@@ -462,6 +503,74 @@ export default function App() {
     }
   }, []);
 
+  const fillWordFromClipboard = useCallback(async (options?: {
+    overwrite?: boolean;
+    silent?: boolean;
+  }) => {
+    const overwrite = options?.overwrite ?? false;
+    const silent = options?.silent ?? true;
+    if (!overwrite && newTitle.trim()) {
+      return false;
+    }
+    if (!navigator.clipboard?.readText) {
+      if (!silent) {
+        setMessage("当前浏览器不能读取剪贴板，请直接粘贴单词。");
+      }
+      return false;
+    }
+    try {
+      const draft = parseClipboardWord(await navigator.clipboard.readText());
+      if (!draft) {
+        if (!silent) {
+          setMessage("剪贴板里没有可收藏的英语单词。");
+        }
+        return false;
+      }
+      setNewTitle((current) =>
+        overwrite || !current.trim() ? draft.lemma : current,
+      );
+      if (draft.phonetic) {
+        setNewPhonetic((current) =>
+          overwrite || !current.trim() ? draft.phonetic ?? current : current,
+        );
+      }
+      if (draft.meaning) {
+        setNewBody((current) =>
+          overwrite || !current.trim() ? draft.meaning ?? current : current,
+        );
+      }
+      if (draft.example) {
+        setNewExample((current) =>
+          overwrite || !current.trim() ? draft.example ?? current : current,
+        );
+      }
+      setMessage(`已从剪贴板填入「${draft.lemma}」，确认后保存。`);
+      return true;
+    } catch {
+      if (!silent) {
+        setMessage("无法读取剪贴板，请允许访问或直接粘贴单词。");
+      }
+      return false;
+    }
+  }, [newTitle]);
+
+  const enterWordCapture = useCallback(() => {
+    const alreadyOnWord = activeType === "word";
+    if (!alreadyOnWord) {
+      setNewTitle("");
+      setNewPhonetic("");
+      setNewExample("");
+      setNewBody("");
+      setWordSourceUrl("");
+    }
+    switchType("word");
+    void fillWordFromClipboard({
+      overwrite: !alreadyOnWord,
+      silent: true,
+    });
+    window.setTimeout(() => wordRef.current?.focus(), 0);
+  }, [activeType, fillWordFromClipboard]);
+
   const focusCapture = useCallback(() => {
     if (activeType === "all") {
       setActiveType("idea");
@@ -473,11 +582,12 @@ export default function App() {
     if (activeType === "resource") {
       urlRef.current?.focus();
     } else if (activeType === "word") {
+      void fillWordFromClipboard({ silent: true });
       wordRef.current?.focus();
     } else {
       captureRef.current?.focus();
     }
-  }, [activeType]);
+  }, [activeType, fillWordFromClipboard]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -556,6 +666,31 @@ export default function App() {
 
   const loadCurrentMemos = useCallback(async (showLoading = true) => {
     const requestId = ++loadRequestRef.current;
+    if (activeType === "review") {
+      if (showLoading) {
+        setLoadState("loading");
+      }
+      try {
+        const queue = await getReviewQueue({
+          limit: 10,
+          type: reviewFilter === "all" ? undefined : reviewFilter,
+        });
+        if (requestId !== loadRequestRef.current) {
+          return;
+        }
+        setReviewQueue(queue);
+        setLoadState("ready");
+      } catch (error) {
+        if (requestId !== loadRequestRef.current) {
+          return;
+        }
+        if (showLoading) {
+          setMessage(describeError(error));
+          setLoadState("error");
+        }
+      }
+      return;
+    }
     if (showLoading) {
       setLoadState("loading");
     }
@@ -593,6 +728,7 @@ export default function App() {
     resourceCategoryFilter,
     resourcePage,
     resourceStarredOnly,
+    reviewFilter,
   ]);
 
   useEffect(() => {
@@ -600,6 +736,12 @@ export default function App() {
     setMessage("");
     void loadCurrentMemos();
   }, [loadCurrentMemos]);
+
+  useEffect(() => {
+    if (activeType === "all") {
+      void loadReviewQueue();
+    }
+  }, [activeType, loadReviewQueue]);
 
   useEffect(() => {
     if (activeType !== "resource") {
@@ -739,17 +881,24 @@ export default function App() {
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (creating || activeType === "all") {
+    if (creating || activeType === "all" || activeType === "review") {
       return;
     }
     const body = newBody.trim();
     const sourceUrl = activeType === "resource" ? normalizeWebUrl(newUrl) : null;
+    const wordSource = activeType === "word" && wordSourceUrl.trim()
+      ? normalizeWebUrl(wordSourceUrl)
+      : null;
     if (activeType === "idea" && !body) {
       return;
     }
     if (activeType === "word" && !newTitle.trim()) {
       setMessage("请输入要收藏的英语单词或短语。");
       wordRef.current?.focus();
+      return;
+    }
+    if (activeType === "word" && wordSourceUrl.trim() && !wordSource) {
+      setMessage("出处链接需要是有效的网址，也可以留空。");
       return;
     }
     if (activeType === "resource" && !sourceUrl) {
@@ -760,13 +909,14 @@ export default function App() {
 
     setCreating(true);
     setMessage("");
+    setDuplicateWord(null);
     try {
       const clientId = crypto.randomUUID();
       const created = await createMemo({
         type: activeType,
         title: newTitle.trim() || undefined,
         body: body || sourceUrl || newTitle.trim(),
-        source_url: sourceUrl ?? undefined,
+        source_url: sourceUrl ?? wordSource ?? undefined,
         source_title:
           activeType === "resource" ? newTitle.trim() || undefined : undefined,
         word_phonetic:
@@ -783,20 +933,147 @@ export default function App() {
         ...current.filter((memo) => memo.id !== created.id),
       ]);
       void refreshMemoCounts();
+      void loadReviewQueue();
       setNewBody("");
       setNewUrl("");
       setNewTitle("");
       setNewPhonetic("");
       setNewExample("");
+      setWordSourceUrl("");
       setWebAttachment(null);
       setWebAttachmentHelp(false);
       setWebCommandOpen(false);
+      setUndoMemo(deduplicatedResource ? null : created);
       selectMemo(created);
       setMessage(
         deduplicatedResource
           ? "该网址已经收藏，已定位到资料库中的原有条目。"
           : `${copy.itemLabel}已保存，并可在 Android 端同步。`,
       );
+    } catch (error) {
+      if (
+        activeType === "word" &&
+        error instanceof ApiError &&
+        error.code === "duplicate_lemma" &&
+        error.current
+      ) {
+        setDuplicateWord(error.current);
+        setPendingWord({
+          title: newTitle.trim(),
+          meaning: body,
+          phonetic: newPhonetic.trim(),
+          example: newExample.trim(),
+          sourceUrl: wordSource,
+        });
+        setMessage("已收藏相同词形，可以查看、合并例句或仍然保存。");
+      } else {
+        setMessage(describeError(error));
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleUndoSave = async () => {
+    const target = undoMemo;
+    if (!target || creating) {
+      return;
+    }
+    const version =
+      selectedMemo?.id === target.id ? selectedMemo.version : target.version;
+    try {
+      await updateMemo(target.id, {
+        expected_version: version,
+        status: "trashed",
+      });
+      setMemos((current) => current.filter((memo) => memo.id !== target.id));
+      if (selectedId === target.id) {
+        setSelectedId(null);
+      }
+      setUndoMemo(null);
+      void refreshMemoCounts();
+      void loadReviewQueue();
+      setMessage("已撤销刚才的保存。");
+    } catch (error) {
+      setMessage(describeError(error));
+    }
+  };
+
+  const handleViewDuplicateWord = () => {
+    if (!duplicateWord) {
+      return;
+    }
+    selectMemo(duplicateWord);
+    setDuplicateWord(null);
+    setPendingWord(null);
+    setMessage("已打开已有单词，可继续补充语境。");
+  };
+
+  const handleMergeDuplicateWord = async () => {
+    if (!duplicateWord || !pendingWord || creating) {
+      return;
+    }
+    setCreating(true);
+    try {
+      const merged = await mergeWord(duplicateWord.id, {
+        expectedVersion: duplicateWord.version,
+        wordPhonetic: pendingWord.phonetic || undefined,
+        wordMeaning: pendingWord.meaning || undefined,
+        wordExample: pendingWord.example || undefined,
+        sourceUrl: pendingWord.sourceUrl || undefined,
+      });
+      setMemos((current) => [
+        merged,
+        ...current.filter((memo) => memo.id !== merged.id),
+      ]);
+      setNewBody("");
+      setNewTitle("");
+      setNewPhonetic("");
+      setNewExample("");
+      setWordSourceUrl("");
+      setDuplicateWord(null);
+      setPendingWord(null);
+      setUndoMemo(null);
+      selectMemo(merged);
+      setMessage("已把新语境合并进已有单词。");
+      void loadReviewQueue();
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleForceDuplicateWord = async () => {
+    if (!pendingWord || creating) {
+      return;
+    }
+    setCreating(true);
+    try {
+      const created = await createMemo({
+        type: "word",
+        title: pendingWord.title,
+        body: pendingWord.meaning || pendingWord.title,
+        source_url: pendingWord.sourceUrl || undefined,
+        word_phonetic: pendingWord.phonetic || undefined,
+        word_meaning: pendingWord.meaning || undefined,
+        word_example: pendingWord.example || undefined,
+        allow_duplicate: true,
+        tags: [],
+      });
+      setMemos((current) => [created, ...current]);
+      setNewBody("");
+      setNewTitle("");
+      setNewPhonetic("");
+      setNewExample("");
+      setWordSourceUrl("");
+      setDuplicateWord(null);
+      setPendingWord(null);
+      setUndoMemo(created);
+      selectMemo(created);
+      void refreshMemoCounts();
+      void loadReviewQueue();
+      setMessage("已另外保存这条单词。");
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -834,6 +1111,9 @@ export default function App() {
         current.map((memo) => (memo.id === updated.id ? updated : memo)),
       );
       setSaveState("saved");
+      if (undoMemo?.id === updated.id) {
+        setUndoMemo(updated);
+      }
     } catch (error) {
       setSaveState("error");
       setMessage(describeError(error));
@@ -898,6 +1178,7 @@ export default function App() {
       );
       setMessage("复习结果已记录，下次回顾时间已经更新。");
       setShowWordAnswer(false);
+      void loadReviewQueue();
     } catch (error) {
       setMessage(describeError(error));
       if (error instanceof ApiError && error.status === 409) {
@@ -905,6 +1186,134 @@ export default function App() {
       }
     } finally {
       setReviewing(false);
+    }
+  };
+
+  const handleReviewSkip = async (memo: Memo) => {
+    if (reviewBusy) {
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      await skipReview(memo.id, memo.version);
+      await loadReviewQueue();
+      setMessage("已跳过，明天之前不会再出现。");
+    } catch (error) {
+      setMessage(describeError(error));
+      if (error instanceof ApiError && error.status === 409) {
+        await loadReviewQueue();
+      }
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleReviewWord = async (memo: Memo, feedback: ReviewFeedback) => {
+    if (reviewBusy) {
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      await reviewWord(memo.id, memo.version, feedback);
+      await loadReviewQueue();
+      setMessage("复习结果已记录，下次回顾时间已经更新。");
+    } catch (error) {
+      setMessage(describeError(error));
+      if (error instanceof ApiError && error.status === 409) {
+        await loadReviewQueue();
+      }
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleReviewOpenResource = async (memo: Memo) => {
+    if (!memo.source_url || reviewBusy) {
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      window.open(memo.source_url, "_blank", "noopener,noreferrer");
+      await updateMemo(memo.id, {
+        expected_version: memo.version,
+        resource_reading_status: "reading",
+      });
+      await loadReviewQueue();
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleReviewStarResource = async (memo: Memo) => {
+    if (reviewBusy) {
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      const updated = await updateMemo(memo.id, {
+        expected_version: memo.version,
+        starred: !memo.starred,
+      });
+      setReviewQueue((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === updated.id ? updated : item,
+              ),
+            }
+          : current,
+      );
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleReviewOrganizeIdea = async (
+    memo: Memo,
+    title: string,
+    body: string,
+  ) => {
+    if (reviewBusy || !body) {
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      await updateMemo(memo.id, {
+        expected_version: memo.version,
+        title: title || undefined,
+        body,
+        status: "active",
+      });
+      await loadReviewQueue();
+      setMessage("灵感已整理，并移出今日回顾。");
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleReviewArchiveIdea = async (memo: Memo) => {
+    if (reviewBusy) {
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      await updateMemo(memo.id, {
+        expected_version: memo.version,
+        status: "archived",
+      });
+      await loadReviewQueue();
+      setMessage("灵感已归档。");
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setReviewBusy(false);
     }
   };
 
@@ -1039,7 +1448,9 @@ export default function App() {
                 disabled={!enabled}
                 key={item.label}
                 onClick={() => {
-                  if (item.view) {
+                  if (item.view === "word") {
+                    enterWordCapture();
+                  } else if (item.view) {
                     switchType(item.view);
                   } else if (item.action === "health") {
                     setHealthCenterOpen(true);
@@ -1051,6 +1462,13 @@ export default function App() {
                 {item.label}
                 {item.view === "resource" && memoCounts !== null && (
                   <span className="nav-count">{memoCounts.resource_count}</span>
+                )}
+                {item.view === "review" && reviewQueue !== null && (
+                  <span className="nav-count">
+                    {reviewQueue.word_count +
+                      reviewQueue.resource_count +
+                      reviewQueue.idea_count}
+                  </span>
                 )}
                 {item.action === "health" && healthIssueCount > 0 && (
                   <span className="nav-count">{healthIssueCount}</span>
@@ -1099,13 +1517,68 @@ export default function App() {
           <div className="page-heading">
             <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1></div>
             <span>
-              {activeType === "resource" && memoCounts !== null
-                ? `${memoCounts.resource_count} 条资料`
-                : `${memos.length} 条内容`}
+              {activeType === "review" && reviewQueue
+                ? `今天 ${reviewQueue.word_count + reviewQueue.resource_count + reviewQueue.idea_count} 条值得回顾`
+                : activeType === "resource" && memoCounts !== null
+                  ? `${memoCounts.resource_count} 条资料`
+                  : `${memos.length} 条内容`}
             </span>
           </div>
 
-          {activeType !== "all" && (
+          {activeType === "all" && !searchQuery.trim() && reviewQueue && (
+            <section className="today-review-card">
+              <div>
+                <p className="eyebrow">今日回顾</p>
+                <h2>今天有 {reviewQueue.word_count + reviewQueue.resource_count + reviewQueue.idea_count} 条值得回顾</h2>
+                <div className="today-review-stats">
+                  <span>{reviewQueue.word_count} 个单词</span>
+                  <span>{reviewQueue.resource_count} 篇待读</span>
+                  <span>{reviewQueue.idea_count} 条待整理</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="today-review-start"
+                onClick={() => switchType("review")}
+                disabled={
+                  reviewQueue.word_count +
+                    reviewQueue.resource_count +
+                    reviewQueue.idea_count ===
+                  0
+                }
+              >
+                {reviewQueue.word_count +
+                  reviewQueue.resource_count +
+                  reviewQueue.idea_count ===
+                0
+                  ? "今天已完成"
+                  : "开始回顾"}
+              </button>
+            </section>
+          )}
+
+          {activeType === "review" && (
+            <ReviewPanel
+              queue={reviewQueue}
+              filter={reviewFilter}
+              loading={loadState === "loading"}
+              busy={reviewBusy}
+              onFilterChange={(nextFilter) => {
+                setReviewFilter(nextFilter);
+                void loadReviewQueue(nextFilter);
+              }}
+              onSkip={(memo) => void handleReviewSkip(memo)}
+              onReviewWord={(memo, feedback) => void handleReviewWord(memo, feedback)}
+              onOpenResource={(memo) => void handleReviewOpenResource(memo)}
+              onStarResource={(memo) => void handleReviewStarResource(memo)}
+              onOrganizeIdea={(memo, title, body) =>
+                void handleReviewOrganizeIdea(memo, title, body)
+              }
+              onArchiveIdea={(memo) => void handleReviewArchiveIdea(memo)}
+            />
+          )}
+
+          {activeType !== "all" && activeType !== "review" && (
           <form className="capture-card" onSubmit={handleCreate}>
             <label
               htmlFor={
@@ -1188,7 +1661,23 @@ export default function App() {
                   ref={wordRef}
                   value={newTitle}
                   onChange={(event) => setNewTitle(event.target.value)}
-                  placeholder="单词或短语，例如 serendipity"
+                  onPaste={(event) => {
+                    const text = event.clipboardData.getData("text");
+                    const draft = parseClipboardWord(text);
+                    if (!draft || (!draft.phonetic && !draft.meaning)) {
+                      return;
+                    }
+                    event.preventDefault();
+                    setNewTitle(draft.lemma);
+                    if (draft.phonetic) {
+                      setNewPhonetic(draft.phonetic);
+                    }
+                    if (draft.meaning) {
+                      setNewBody(draft.meaning);
+                    }
+                    setMessage(`已从剪贴板填入「${draft.lemma}」，确认后保存。`);
+                  }}
+                  placeholder="单词或短语，点击单词时可从剪贴板填入"
                   autoCapitalize="none"
                   maxLength={200}
                 />
@@ -1266,6 +1755,26 @@ export default function App() {
                 maxLength={5_000}
               />
             )}
+            {activeType === "word" && (
+              <input
+                className="word-source"
+                value={wordSourceUrl}
+                onChange={(event) => setWordSourceUrl(event.target.value)}
+                placeholder="出处链接（可选）"
+                inputMode="url"
+                autoCapitalize="none"
+                maxLength={2_048}
+              />
+            )}
+            {activeType === "word" && (
+              <button
+                type="button"
+                className="clipboard-fill"
+                onClick={() => void fillWordFromClipboard({ overwrite: true, silent: false })}
+              >
+                从剪贴板填入
+              </button>
+            )}
             <div className="capture-footer">
               <div className="capture-types" aria-label="内容类型">
                 <button
@@ -1276,7 +1785,7 @@ export default function App() {
                 <button
                   type="button"
                   className={activeType === "word" ? "type-pill active" : "type-pill"}
-                  onClick={() => switchType("word")}
+                  onClick={enterWordCapture}
                 >Aa 单词</button>
                 <button
                   type="button"
@@ -1489,8 +1998,23 @@ export default function App() {
             </section>
           )}
 
-          {message && <div className="status-message" role="status">{message}</div>}
+          {message && (
+            <div className="status-message" role="status">
+              <span>{message}</span>
+              {undoMemo && !duplicateWord && (
+                <button type="button" onClick={() => void handleUndoSave()}>撤销</button>
+              )}
+              {duplicateWord && (
+                <span className="status-actions">
+                  <button type="button" onClick={handleViewDuplicateWord}>查看</button>
+                  <button type="button" onClick={() => void handleMergeDuplicateWord()}>合并例句</button>
+                  <button type="button" onClick={() => void handleForceDuplicateWord()}>仍然保存</button>
+                </span>
+              )}
+            </div>
+          )}
 
+          {activeType !== "review" && (
           <section className="recent-section" aria-labelledby="recent-title">
             <div className="section-heading">
               <h2 id="recent-title">
@@ -1680,7 +2204,11 @@ export default function App() {
                             </>
                           )
                           : memo.type === "word"
-                            ? `熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.review_count} 次`
+                            ? `熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.review_count} 次 · 下次 ${
+                              memo.next_review_at
+                                ? timeFormatter.format(new Date(memo.next_review_at))
+                                : "待安排"
+                            }`
                             : memo.audio_mime_type ? "语音灵感" : "灵感"}
                         {memo.type !== "resource" && ` · 版本 ${memo.version}`}
                       </small>
@@ -1759,6 +2287,7 @@ export default function App() {
               </nav>
             )}
           </section>
+          )}
         </main>
       </div>
 
@@ -1793,14 +2322,34 @@ export default function App() {
               <input value={editorTitle} onChange={(event) => setEditorTitle(event.target.value)} maxLength={200} />
             </label>
             {selectedMemo.type === "word" && (
-              <label>音标
-                <input
-                  value={editorPhonetic}
-                  onChange={(event) => setEditorPhonetic(event.target.value)}
-                  maxLength={120}
-                  placeholder="音标（可选）"
-                />
-              </label>
+              <>
+                <WordPronunciation lemma={editorTitle || selectedMemo.title} />
+                <p className="review-schedule">
+                  上次复习 {selectedMemo.last_review_at
+                    ? timeFormatter.format(new Date(selectedMemo.last_review_at))
+                    : "尚未复习"}
+                  {" · "}
+                  下次 {selectedMemo.next_review_at
+                    ? timeFormatter.format(new Date(selectedMemo.next_review_at))
+                    : "待安排"}
+                </p>
+                {selectedMemo.source_url && (
+                  <p className="review-example">
+                    出处{" "}
+                    <a href={selectedMemo.source_url} target="_blank" rel="noreferrer">
+                      {sourceHost(selectedMemo.source_url)}
+                    </a>
+                  </p>
+                )}
+                <label>音标
+                  <input
+                    value={editorPhonetic}
+                    onChange={(event) => setEditorPhonetic(event.target.value)}
+                    maxLength={120}
+                    placeholder="音标（可选）"
+                  />
+                </label>
+              </>
             )}
             {selectedMemo.type === "word" && !showWordAnswer ? (
               <div className="word-answer-hidden">
@@ -1962,7 +2511,7 @@ export default function App() {
         <button className={activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>↗<span>资料</span></button>
         <button className="mobile-create" onClick={focusCapture}>＋<span>新建</span></button>
         <button className={activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}>✦<span>灵感</span></button>
-        <button className={activeType === "word" ? "active" : ""} onClick={() => switchType("word")}>Aa<span>单词</span></button>
+        <button className={activeType === "word" ? "active" : ""} onClick={enterWordCapture}>Aa<span>单词</span></button>
       </nav>
     </div>
   );

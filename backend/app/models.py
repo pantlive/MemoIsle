@@ -180,6 +180,11 @@ class Memo(Base):
         nullable=True,
     )
     word_phonetic: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    normalized_lemma: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        index=True,
+    )
     word_meaning: Mapped[str | None] = mapped_column(Text, nullable=True)
     word_example: Mapped[str | None] = mapped_column(Text, nullable=True)
     familiarity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

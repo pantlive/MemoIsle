@@ -160,8 +160,10 @@ Android Client ───┘                       │
 | `POST /v1/memos/{id}/restore` | 从回收站恢复 |
 | `POST /v1/memos/{id}/audio-upload` | 获取录音上传凭证 |
 | `POST /v1/memos/{id}/transcriptions` | 创建或重试转写任务 |
+| `POST /v1/words/{id}/merge` | 合并已有单词的新语境 |
 | `POST /v1/words/{id}/reviews` | 提交单词复习反馈 |
-| `GET /v1/review-queue` | 获取回顾队列 |
+| `GET /v1/review-queue` | 获取今日回顾混合队列 |
+| `POST /v1/review-queue/{id}/skip` | 跳过当前回顾条目 |
 | `GET /v1/sync/changes` | 按游标增量同步 |
 | `POST /v1/exports` | 创建数据导出任务 |
 | `POST /v1/bookmark-imports/preview` | 校验结构化书签并返回去重预览 |

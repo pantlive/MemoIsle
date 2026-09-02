@@ -149,6 +149,10 @@ class MemoDatabaseHelper(context: Context) :
         insertMemo(writableDatabase, memo)
     }
 
+    fun deleteByClientId(clientId: String) {
+        writableDatabase.delete(TABLE_MEMO, "$COLUMN_CLIENT_ID = ?", arrayOf(clientId))
+    }
+
     @Synchronized
     fun reconcileCreatedMemo(localClientId: String, remoteMemo: Memo) {
         val database = writableDatabase

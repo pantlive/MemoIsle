@@ -163,6 +163,9 @@ class Database:
                 "ALTER TABLE memo ADD COLUMN link_metadata_fingerprint VARCHAR(64)"
             ),
             "word_phonetic": "ALTER TABLE memo ADD COLUMN word_phonetic VARCHAR(120)",
+            "normalized_lemma": (
+                "ALTER TABLE memo ADD COLUMN normalized_lemma VARCHAR(200)"
+            ),
             "word_meaning": "ALTER TABLE memo ADD COLUMN word_meaning TEXT",
             "word_example": "ALTER TABLE memo ADD COLUMN word_example TEXT",
             "familiarity": (
@@ -245,6 +248,13 @@ class Database:
                     "UPDATE memo SET link_next_check_at = CURRENT_TIMESTAMP "
                     "WHERE type = 'resource' AND source_url IS NOT NULL "
                     "AND link_next_check_at IS NULL"
+                )
+            )
+            # 旧单词补齐规范化词形，供重复检测使用。
+            connection.execute(
+                text(
+                    "UPDATE memo SET normalized_lemma = lower(trim(title)) "
+                    "WHERE type = 'word' AND normalized_lemma IS NULL"
                 )
             )
             # 服务重启时将未完成的网页处理恢复为可重试状态。

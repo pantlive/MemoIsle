@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -22,6 +23,7 @@ from app.schemas import (
     ResourceProcessStatus,
     ResourceReadingStatus,
     ReviewFeedback,
+    WordMergeRequest,
     WordReviewRequest,
 )
 from app.url_normalization import canonicalize_resource_url
@@ -43,6 +45,14 @@ class MemoTypeError(ValueError):
     """请求的操作与条目类型不匹配。"""
 
 
+class WordDuplicateError(RuntimeError):
+    """规范化词形已经存在。"""
+
+    def __init__(self, current: Memo) -> None:
+        super().__init__("已收藏相同词形")
+        self.current = current
+
+
 class AudioValidationError(ValueError):
     """录音内容或类型不符合上传约束。"""
 
@@ -55,6 +65,27 @@ ALLOWED_AUDIO_TYPES = {
     "audio/webm",
     "audio/x-m4a",
 }
+
+
+def normalize_lemma(value: str) -> str:
+    """把英语词形规范为可比较的小写形式。"""
+
+    folded = unicodedata.normalize("NFKC", value).casefold().strip()
+    return " ".join(folded.split())
+
+
+def append_unique_text(existing: str | None, incoming: str | None) -> str | None:
+    """把新文本追加到已有内容，重复片段不重复保存。"""
+
+    addition = (incoming or "").strip()
+    if not addition:
+        return existing
+    current = (existing or "").strip()
+    if not current:
+        return addition
+    if addition.casefold() in current.casefold():
+        return current
+    return f"{current}\n{addition}"
 
 
 def escape_like_pattern(value: str) -> str:
@@ -126,6 +157,19 @@ def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
                     # 历史异常网址不影响当前收藏。
                     continue
 
+    if payload.type == MemoType.WORD:
+        lemma = normalize_lemma(payload.title or "")
+        existing_word = session.scalar(
+            select(Memo).where(
+                Memo.user_id == user_id,
+                Memo.type == MemoType.WORD,
+                Memo.status != MemoStatus.TRASHED,
+                Memo.normalized_lemma == lemma,
+            )
+        )
+        if existing_word is not None and not payload.allow_duplicate:
+            raise WordDuplicateError(existing_word)
+
     now = datetime.now(UTC)
     memo = Memo(
         id=str(uuid4()),
@@ -167,6 +211,11 @@ def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
         word_phonetic=payload.word_phonetic,
         word_meaning=payload.word_meaning,
         word_example=payload.word_example,
+        normalized_lemma=(
+            normalize_lemma(payload.title or "")
+            if payload.type == MemoType.WORD
+            else None
+        ),
         familiarity=0,
         review_count=0,
         next_review_at=now if payload.type == MemoType.WORD else None,
@@ -174,7 +223,11 @@ def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
         tags=payload.tags,
         collections=payload.collections,
         starred=payload.starred,
-        status=MemoStatus.ACTIVE,
+        status=(
+            MemoStatus.INBOX
+            if payload.type == MemoType.IDEA
+            else MemoStatus.ACTIVE
+        ),
         version=1,
     )
     session.add(memo)
@@ -435,6 +488,8 @@ def update_memo(
         setattr(memo, field_name, value)
     if "body" in changes and "title" not in changes:
         memo.title = build_title(None, memo.body)
+    if memo.type == MemoType.WORD and "title" in changes:
+        memo.normalized_lemma = normalize_lemma(memo.title)
     if memo.type == MemoType.RESOURCE and "title" in changes:
         memo.resource_title_user_defined = True
     if (
@@ -467,26 +522,174 @@ def update_memo(
     return memo
 
 
+def _start_of_utc_day(now: datetime) -> datetime:
+    """按服务端 UTC 约定计算当天零点，用于排除已经跳过或复习过的条目。"""
+
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _not_reviewed_today(now: datetime):
+    """今天已经跳过、复习或处理过的条目不再进入今日回顾。"""
+
+    return or_(
+        Memo.last_review_at.is_(None),
+        Memo.last_review_at < _start_of_utc_day(now),
+    )
+
+
+def _count_review_items(session: Session, *filters: object) -> int:
+    """统计满足回顾条件的条目数量。"""
+
+    return int(session.scalar(select(func.count(Memo.id)).where(*filters)) or 0)
+
+
+def _load_review_items(
+    session: Session,
+    *filters: object,
+    order_by: tuple[object, ...],
+    limit: int,
+) -> list[Memo]:
+    """读取一类回顾候选，条数不超过本次回顾上限。"""
+
+    query = select(Memo).where(*filters).order_by(*order_by).limit(limit)
+    return list(session.scalars(query).all())
+
+
+def _interleave_review_items(*groups: list[Memo], limit: int) -> list[Memo]:
+    """按单词、资料、灵感轮询混合，保证一次回顾不超过 5 至 10 条。"""
+
+    items: list[Memo] = []
+    index = 0
+    while len(items) < limit:
+        added = False
+        for group in groups:
+            if index < len(group):
+                items.append(group[index])
+                added = True
+                if len(items) >= limit:
+                    break
+        if not added:
+            break
+        index += 1
+    return items
+
+
 def list_review_queue(
     session: Session,
     user_id: str,
     limit: int = 10,
-) -> list[Memo]:
-    """读取已经到期或尚未复习的英语单词。"""
+    memo_type: MemoType | None = None,
+) -> tuple[list[Memo], dict[str, int]]:
+    """读取今日回顾：到期单词、未读资料和待整理灵感。"""
 
     now = datetime.now(UTC)
-    query = (
-        select(Memo)
-        .where(
-            Memo.user_id == user_id,
-            Memo.type == MemoType.WORD,
-            Memo.status != MemoStatus.TRASHED,
-            or_(Memo.next_review_at.is_(None), Memo.next_review_at <= now),
-        )
-        .order_by(Memo.next_review_at.asc(), Memo.created_at.asc())
-        .limit(limit)
+    not_reviewed_today = _not_reviewed_today(now)
+    word_filters = (
+        Memo.user_id == user_id,
+        Memo.type == MemoType.WORD,
+        Memo.status != MemoStatus.TRASHED,
+        or_(Memo.next_review_at.is_(None), Memo.next_review_at <= now),
+        not_reviewed_today,
     )
-    return list(session.scalars(query).all())
+    resource_filters = (
+        Memo.user_id == user_id,
+        Memo.type == MemoType.RESOURCE,
+        Memo.status != MemoStatus.TRASHED,
+        Memo.resource_reading_status == ResourceReadingStatus.UNREAD,
+        not_reviewed_today,
+    )
+    idea_filters = (
+        Memo.user_id == user_id,
+        Memo.type == MemoType.IDEA,
+        Memo.status == MemoStatus.INBOX,
+        not_reviewed_today,
+    )
+    counts = {
+        "word_count": _count_review_items(session, *word_filters),
+        "resource_count": _count_review_items(session, *resource_filters),
+        "idea_count": _count_review_items(session, *idea_filters),
+    }
+    words = _load_review_items(
+        session,
+        *word_filters,
+        order_by=(Memo.next_review_at.asc(), Memo.created_at.asc()),
+        limit=limit,
+    )
+    resources = _load_review_items(
+        session,
+        *resource_filters,
+        order_by=(Memo.created_at.asc(), Memo.id.asc()),
+        limit=limit,
+    )
+    ideas = _load_review_items(
+        session,
+        *idea_filters,
+        order_by=(Memo.created_at.asc(), Memo.id.asc()),
+        limit=limit,
+    )
+    if memo_type == MemoType.WORD:
+        items = words[:limit]
+    elif memo_type == MemoType.RESOURCE:
+        items = resources[:limit]
+    elif memo_type == MemoType.IDEA:
+        items = ideas[:limit]
+    else:
+        items = _interleave_review_items(words, resources, ideas, limit=limit)
+    return items, counts
+
+
+def skip_review_item(
+    session: Session,
+    user_id: str,
+    memo_id: str,
+    expected_version: int,
+) -> Memo:
+    """把当前条目移出今日回顾，不改变熟悉度或阅读进度。"""
+
+    memo = get_memo(session, user_id, memo_id)
+    if memo.version != expected_version:
+        raise MemoVersionConflictError(memo)
+    if memo.status == MemoStatus.TRASHED:
+        raise MemoTypeError("回收站中的内容不能进入回顾")
+
+    now = datetime.now(UTC)
+    memo.last_review_at = now
+    memo.version += 1
+    memo.updated_at = now
+    session.commit()
+    session.refresh(memo)
+    return memo
+
+
+def merge_word(
+    session: Session,
+    user_id: str,
+    memo_id: str,
+    payload: WordMergeRequest,
+) -> Memo:
+    """把新的释义、例句或来源合并进已有单词。"""
+
+    memo = get_memo(session, user_id, memo_id)
+    if memo.type != MemoType.WORD:
+        raise MemoTypeError("只有英语单词可以合并语境")
+    if memo.version != payload.expected_version:
+        raise MemoVersionConflictError(memo)
+
+    if payload.word_phonetic and not (memo.word_phonetic or "").strip():
+        memo.word_phonetic = payload.word_phonetic
+    memo.word_meaning = append_unique_text(memo.word_meaning, payload.word_meaning)
+    memo.word_example = append_unique_text(memo.word_example, payload.word_example)
+    if payload.word_meaning:
+        memo.body = memo.word_meaning or memo.body
+    if payload.source_url and not memo.source_url:
+        memo.source_url = payload.source_url
+    if payload.source_title and not memo.source_title:
+        memo.source_title = payload.source_title
+    memo.version += 1
+    memo.updated_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(memo)
+    return memo
 
 
 def review_word(

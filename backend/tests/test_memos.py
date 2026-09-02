@@ -430,7 +430,11 @@ def test_create_word_and_submit_review(client: TestClient) -> None:
 
     queue_response = client.get("/api/v1/review-queue")
     assert queue_response.status_code == 200
-    assert [item["id"] for item in queue_response.json()["items"]] == [created["id"]]
+    queue = queue_response.json()
+    assert [item["id"] for item in queue["items"]] == [created["id"]]
+    assert queue["word_count"] == 1
+    assert queue["resource_count"] == 0
+    assert queue["idea_count"] == 0
 
     review_response = client.post(
         f"/api/v1/words/{created['id']}/reviews",
@@ -445,6 +449,147 @@ def test_create_word_and_submit_review(client: TestClient) -> None:
 
     empty_queue = client.get("/api/v1/review-queue")
     assert empty_queue.json()["items"] == []
+    assert empty_queue.json()["word_count"] == 0
+
+
+def test_duplicate_word_lemma_can_merge_or_force_create(client: TestClient) -> None:
+    """相同词形默认视为重复，可合并例句或仍然分别保存。"""
+
+    first = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "Serendipity",
+            "body": "机缘巧合",
+            "word_meaning": "机缘巧合",
+            "word_example": "We found the book by serendipity.",
+        },
+    )
+    assert first.status_code == 201
+    created = first.json()
+
+    duplicate = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "serendipity",
+            "body": "意外发现",
+            "word_meaning": "意外发现珍奇事物的本领",
+            "word_example": "A fortunate accident.",
+        },
+    )
+    assert duplicate.status_code == 409
+    detail = duplicate.json()["detail"]
+    assert detail["code"] == "duplicate_lemma"
+    assert detail["current"]["id"] == created["id"]
+
+    merged = client.post(
+        f"/api/v1/words/{created['id']}/merge",
+        json={
+            "expected_version": created["version"],
+            "word_meaning": "意外发现珍奇事物的本领",
+            "word_example": "A fortunate accident.",
+        },
+    )
+    assert merged.status_code == 200
+    merged_word = merged.json()
+    assert "机缘巧合" in merged_word["word_meaning"]
+    assert "A fortunate accident." in merged_word["word_example"]
+
+    forced = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "serendipity",
+            "body": "另一个语境",
+            "allow_duplicate": True,
+        },
+    )
+    assert forced.status_code == 201
+    assert forced.json()["id"] != created["id"]
+
+    unique = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "ephemeral",
+            "body": "短暂的",
+        },
+    )
+    assert unique.status_code == 201
+    trashed = client.patch(
+        f"/api/v1/memos/{unique.json()['id']}",
+        json={"expected_version": unique.json()["version"], "status": "trashed"},
+    )
+    assert trashed.status_code == 200
+    after_trash = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "EPHEMERAL",
+            "body": "回收站后可再收藏",
+        },
+    )
+    assert after_trash.status_code == 201
+
+
+def test_today_review_mixes_types_and_allows_skip(client: TestClient) -> None:
+    """今日回顾混合到期单词、未读资料和待整理灵感，跳过后当天不再出现。"""
+
+    word_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "ephemeral",
+            "body": "短暂的",
+        },
+    )
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "body": "待读资料",
+            "source_url": "https://example.com/review-item",
+        },
+    )
+    idea = create_idea(client)
+    assert word_response.status_code == 201
+    assert resource_response.status_code == 201
+    assert idea["status"] == "inbox"
+
+    queue = client.get("/api/v1/review-queue").json()
+    assert queue["word_count"] == 1
+    assert queue["resource_count"] == 1
+    assert queue["idea_count"] == 1
+    assert [item["type"] for item in queue["items"]] == ["word", "resource", "idea"]
+
+    first = queue["items"][0]
+    skip_response = client.post(
+        f"/api/v1/review-queue/{first['id']}/skip",
+        json={"expected_version": first["version"]},
+    )
+    assert skip_response.status_code == 200
+    remaining = client.get("/api/v1/review-queue").json()
+    assert first["id"] not in [item["id"] for item in remaining["items"]]
+    assert remaining["word_count"] == 0
+
+    idea_queue = client.get("/api/v1/review-queue", params={"type": "idea"}).json()
+    assert [item["id"] for item in idea_queue["items"]] == [idea["id"]]
+    organized = client.patch(
+        f"/api/v1/memos/{idea['id']}",
+        json={"expected_version": idea["version"], "status": "active"},
+    )
+    assert organized.status_code == 200
+    after_organize = client.get("/api/v1/review-queue", params={"type": "idea"}).json()
+    assert after_organize["items"] == []
+    assert after_organize["idea_count"] == 0
 
 
 def test_memo_counts_include_current_resource_total(client: TestClient) -> None:

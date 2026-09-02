@@ -1,6 +1,7 @@
 package com.memoisle.app.data
 
 import java.time.Instant
+import java.time.ZoneOffset
 import java.net.URI
 import java.util.UUID
 
@@ -86,6 +87,86 @@ fun Memo.matchesQuery(query: String): Boolean {
 
 fun Memo.isVisibleInLibrary(): Boolean = status != "trashed"
 
+fun normalizeLemma(value: String): String =
+    value.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+
+fun List<Memo>.findDuplicateWord(lemma: String, exceptClientId: String? = null): Memo? {
+    val normalized = normalizeLemma(lemma)
+    if (normalized.isEmpty()) {
+        return null
+    }
+    return firstOrNull { memo ->
+        memo.type == TYPE_WORD &&
+            memo.isVisibleInLibrary() &&
+            memo.clientId != exceptClientId &&
+            normalizeLemma(memo.title) == normalized
+    }
+}
+
+fun Memo.reviewedToday(now: Instant = Instant.now()): Boolean {
+    val lastReview = lastReviewAt ?: return false
+    return runCatching {
+        val lastInstant = Instant.parse(lastReview)
+        lastInstant.atZone(ZoneOffset.UTC).toLocalDate() ==
+            now.atZone(ZoneOffset.UTC).toLocalDate()
+    }.getOrDefault(false)
+}
+
+fun Memo.isDueWord(now: Instant = Instant.now()): Boolean {
+    if (type != TYPE_WORD || status == "trashed" || reviewedToday(now)) {
+        return false
+    }
+    val dueAt = nextReviewAt
+    return dueAt.isNullOrBlank() || runCatching { Instant.parse(dueAt) <= now }.getOrDefault(true)
+}
+
+fun Memo.isUnreadResource(now: Instant = Instant.now()): Boolean {
+    if (type != TYPE_RESOURCE || status == "trashed" || reviewedToday(now)) {
+        return false
+    }
+    return resourceReadingStatus.isNullOrBlank() || resourceReadingStatus == "unread"
+}
+
+fun Memo.isInboxIdea(now: Instant = Instant.now()): Boolean {
+    return type == TYPE_IDEA && status == "inbox" && !reviewedToday(now)
+}
+
+data class ReviewCounts(
+    val wordCount: Int,
+    val resourceCount: Int,
+    val ideaCount: Int,
+) {
+    val totalCount: Int get() = wordCount + resourceCount + ideaCount
+}
+
+fun List<Memo>.todayReviewCounts(): ReviewCounts = ReviewCounts(
+    wordCount = count { it.isDueWord() },
+    resourceCount = count { it.isUnreadResource() },
+    ideaCount = count { it.isInboxIdea() },
+)
+
+fun List<Memo>.todayReviewItems(limit: Int = 10): List<Memo> {
+    val words = filter { it.isDueWord() }
+    val resources = filter { it.isUnreadResource() }
+    val ideas = filter { it.isInboxIdea() }
+    val items = mutableListOf<Memo>()
+    var index = 0
+    while (items.size < limit) {
+        var added = false
+        listOf(words, resources, ideas).forEach { group ->
+            if (index < group.size && items.size < limit) {
+                items.add(group[index])
+                added = true
+            }
+        }
+        if (!added) {
+            break
+        }
+        index += 1
+    }
+    return items
+}
+
 fun newLocalIdea(body: String): Memo {
     val now = Instant.now().toString()
     return Memo(
@@ -110,7 +191,7 @@ fun newLocalIdea(body: String): Memo {
         transcriptStatus = "none",
         localAudioPath = null,
         tags = emptyList(),
-        status = "active",
+        status = "inbox",
         version = 1,
         createdAt = now,
         updatedAt = now,
@@ -205,6 +286,80 @@ fun newLocalVoiceIdea(body: String, audioPath: String, durationMs: Int): Memo {
         localAudioPath = audioPath,
     )
 }
+
+data class ClipboardWordDraft(
+    val lemma: String,
+    val phonetic: String? = null,
+    val meaning: String? = null,
+    val example: String? = null,
+)
+
+fun parseClipboardWord(raw: String): ClipboardWordDraft? {
+    val text = raw.replace('\u00a0', ' ').replace("\r\n", "\n").trim()
+    if (text.isEmpty() || isClipboardUrl(text) || isClipboardUrl(text.substringBefore(' '))) {
+        return null
+    }
+    val lines = text.split('\n').map(String::trim).filter(String::isNotEmpty)
+    if (lines.isEmpty()) {
+        return null
+    }
+    var firstLine = lines.first()
+    var phonetic: String? = null
+    val phoneticMatch = Regex("""([/\[])([^/\[\]]{1,80})\1""").find(firstLine)
+    if (phoneticMatch != null) {
+        phonetic = "/${phoneticMatch.groupValues[2]}/".take(120)
+        firstLine = (
+            firstLine.substring(0, phoneticMatch.range.first) + " " +
+                firstLine.substring(phoneticMatch.range.last + 1)
+            ).replace(Regex("\\s+"), " ").trim()
+    }
+    var lemma = firstLine
+    var meaning = lines.drop(1).joinToString("\n").trim().ifEmpty { null }
+    val mixed = Regex(
+        """^([A-Za-z][A-Za-z0-9'’.\-]*(?:[\s-][A-Za-z][A-Za-z0-9'’.\-]*){0,7})\s+([^\s].+)$""",
+    ).find(firstLine)
+    if (mixed != null && hasCjk(mixed.groupValues[2]) && !hasCjk(mixed.groupValues[1])) {
+        lemma = mixed.groupValues[1].trim()
+        meaning = listOfNotNull(mixed.groupValues[2].trim(), meaning)
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+            .ifEmpty { null }
+    }
+    lemma = lemma.replace(Regex("\\s+"), " ").trim()
+    if (!isPlausibleClipboardLemma(lemma)) {
+        return null
+    }
+    return ClipboardWordDraft(
+        lemma = lemma.take(200).trim(),
+        phonetic = phonetic,
+        meaning = meaning?.take(5_000),
+    )
+}
+
+private fun isClipboardUrl(value: String): Boolean {
+    val cleaned = value.trim()
+    return cleaned.startsWith("http://", ignoreCase = true) ||
+        cleaned.startsWith("https://", ignoreCase = true) ||
+        cleaned.startsWith("www.", ignoreCase = true) ||
+        Regex("""^[a-z0-9.-]+\.[a-z]{2,}([/:?#].*)?$""", RegexOption.IGNORE_CASE)
+            .matches(cleaned)
+}
+
+private fun isPlausibleClipboardLemma(lemma: String): Boolean {
+    if (lemma.isEmpty() || lemma.length > 80 || isClipboardUrl(lemma)) {
+        return false
+    }
+    if (lemma.last() in charArrayOf('.', '!', '?', '。', '！', '？')) {
+        return false
+    }
+    if (!lemma.any { it in 'A'..'Z' || it in 'a'..'z' }) {
+        return false
+    }
+    return lemma.split(Regex("\\s+")).count { it.isNotEmpty() } <= 8
+}
+
+private fun hasCjk(value: String): Boolean =
+    value.any { it.code in 0x3400..0x9FFF }
 
 fun defaultMemoTitle(body: String): String {
     val firstLine = body.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()

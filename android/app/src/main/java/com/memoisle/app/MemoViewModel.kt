@@ -10,12 +10,15 @@ import com.memoisle.app.data.Memo
 import com.memoisle.app.data.MemoRepository
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.network.ApiException
+import com.memoisle.app.network.DuplicateLemmaException
 import kotlinx.coroutines.launch
 
 data class MemoUiState(
     val isRefreshing: Boolean = false,
     val isSaving: Boolean = false,
     val message: String? = null,
+    val undoMemo: Memo? = null,
+    val duplicateWord: Memo? = null,
 )
 
 class MemoViewModel(
@@ -100,24 +103,97 @@ class MemoViewModel(
         phonetic: String,
         meaning: String,
         example: String,
+        sourceUrl: String? = null,
+        allowDuplicate: Boolean = false,
+        onDuplicate: (Memo) -> Unit = {},
         onSuccess: () -> Unit,
     ) {
         if (lemma.isBlank() || uiState.isSaving) {
             return
         }
         viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null, duplicateWord = null)
+            runCatching {
+                repository.createWord(
+                    lemma,
+                    phonetic,
+                    meaning,
+                    example,
+                    sourceUrl,
+                    allowDuplicate,
+                )
+            }
+                .onSuccess { created ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "英语单词已收藏",
+                        undoMemo = created,
+                    )
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    if (error is DuplicateLemmaException) {
+                        uiState = uiState.copy(
+                            isSaving = false,
+                            message = "已收藏相同词形，可以查看、合并例句或仍然保存。",
+                            duplicateWord = error.existing,
+                        )
+                        onDuplicate(error.existing)
+                    } else {
+                        uiState = uiState.copy(
+                            isSaving = false,
+                            message = "已保存在本机，联网后可重试同步：${error.readableMessage()}",
+                        )
+                        onSuccess()
+                    }
+                }
+        }
+    }
+
+    fun mergeWord(existing: Memo, incoming: Memo, onSuccess: () -> Unit) {
+        if (uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
             uiState = uiState.copy(isSaving = true, message = null)
-            runCatching { repository.createWord(lemma, phonetic, meaning, example) }
+            runCatching { repository.mergeWord(existing, incoming) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "英语单词已收藏")
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "已把新语境合并进已有单词",
+                        duplicateWord = null,
+                    )
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已保存在本机，联网后可重试同步：${error.readableMessage()}",
+                        message = "合并失败：${error.readableMessage()}",
                     )
-                    onSuccess()
+                }
+        }
+    }
+
+    fun undoLastSave() {
+        val memo = uiState.undoMemo ?: return
+        if (uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null)
+            runCatching { repository.trashMemo(memo) }
+                .onSuccess {
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "已撤销刚才的保存",
+                        undoMemo = null,
+                    )
+                }
+                .onFailure { error ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "撤销失败：${error.readableMessage()}",
+                    )
                 }
         }
     }
@@ -195,6 +271,10 @@ class MemoViewModel(
         uiState = uiState.copy(message = null)
     }
 
+    fun clearDuplicate() {
+        uiState = uiState.copy(duplicateWord = null)
+    }
+
     fun reviewWord(memo: Memo, feedback: String, onSuccess: () -> Unit) {
         if (memo.id == null || uiState.isSaving) {
             return
@@ -211,6 +291,108 @@ class MemoViewModel(
                         isSaving = false,
                         message = "复习结果提交失败：${error.readableMessage()}",
                     )
+                }
+        }
+    }
+
+    fun skipReview(memo: Memo, onSuccess: () -> Unit = {}) {
+        if (uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null)
+            runCatching { repository.skipReview(memo) }
+                .onSuccess {
+                    uiState = uiState.copy(isSaving = false, message = "已跳过，明天之前不会再出现")
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "跳过失败：${error.readableMessage()}",
+                    )
+                }
+        }
+    }
+
+    fun markResourceOpened(memo: Memo, onSuccess: () -> Unit = {}) {
+        if (uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null)
+            runCatching { repository.markResourceOpened(memo) }
+                .onSuccess {
+                    uiState = uiState.copy(isSaving = false, message = "已打开原网页")
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "阅读状态同步失败：${error.readableMessage()}",
+                    )
+                    onSuccess()
+                }
+        }
+    }
+
+    fun toggleStar(memo: Memo) {
+        if (uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null)
+            runCatching { repository.toggleStar(memo) }
+                .onSuccess {
+                    uiState = uiState.copy(isSaving = false)
+                }
+                .onFailure { error ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "星标同步失败：${error.readableMessage()}",
+                    )
+                }
+        }
+    }
+
+    fun organizeIdea(memo: Memo, title: String, body: String, onSuccess: () -> Unit) {
+        if (body.isBlank() || uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null)
+            runCatching { repository.organizeIdea(memo, title, body) }
+                .onSuccess {
+                    uiState = uiState.copy(isSaving = false, message = "灵感已整理")
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "整理已保存在本机：${error.readableMessage()}",
+                    )
+                    onSuccess()
+                }
+        }
+    }
+
+    fun archiveIdea(memo: Memo, onSuccess: () -> Unit) {
+        if (uiState.isSaving) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isSaving = true, message = null)
+            runCatching { repository.archiveIdea(memo) }
+                .onSuccess {
+                    uiState = uiState.copy(isSaving = false, message = "灵感已归档")
+                    onSuccess()
+                }
+                .onFailure { error ->
+                    uiState = uiState.copy(
+                        isSaving = false,
+                        message = "归档已保存在本机：${error.readableMessage()}",
+                    )
+                    onSuccess()
                 }
         }
     }

@@ -101,4 +101,40 @@ class MemoTest {
         assertEquals(true, active.isVisibleInLibrary())
         assertEquals(false, trashed.isVisibleInLibrary())
     }
+
+    @Test
+    fun normalizeLemmaTreatsCaseAndSpacingAsSameWord() {
+        assertEquals("serendipity", normalizeLemma("  Serendipity "))
+        val existing = newLocalWord("Serendipity", "", "机缘巧合", "")
+        val duplicate = listOf(existing).findDuplicateWord("serendipity")
+        assertEquals(existing.clientId, duplicate?.clientId)
+    }
+
+    @Test
+    fun clipboardWordUsesLemmaPhoneticAndChineseMeaning() {
+        val draft = parseClipboardWord("serendipity /ˌserənˈdɪpəti/ 机缘巧合")
+        assertEquals("serendipity", draft?.lemma)
+        assertEquals("/ˌserənˈdɪpəti/", draft?.phonetic)
+        assertEquals("机缘巧合", draft?.meaning)
+    }
+
+    @Test
+    fun clipboardWordIgnoresUrlsAndSentences() {
+        assertEquals(null, parseClipboardWord("https://example.com/word"))
+        assertEquals(null, parseClipboardWord("We found the book by serendipity."))
+        assertEquals("ephemeral", parseClipboardWord("ephemeral")?.lemma)
+    }
+
+    @Test
+    fun todayReviewMixesDueWordsUnreadResourcesAndInboxIdeas() {
+        val word = newLocalWord("ephemeral", "", "短暂的", "")
+        val resource = newLocalResource("https://example.com/review", "待读", "")
+        val idea = newLocalIdea("待整理灵感")
+        val skippedWord = word.copy(clientId = "skipped-word", lastReviewAt = word.createdAt)
+        val items = listOf(word, resource, idea, skippedWord).todayReviewItems()
+
+        assertEquals(listOf(TYPE_WORD, TYPE_RESOURCE, TYPE_IDEA), items.map(Memo::type))
+        assertEquals("inbox", idea.status)
+        assertEquals(1, listOf(word, resource, idea, skippedWord).todayReviewCounts().wordCount)
+    }
 }

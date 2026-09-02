@@ -140,6 +140,7 @@ class MemoCreate(BaseModel):
     word_phonetic: str | None = Field(default=None, max_length=120)
     word_meaning: str | None = Field(default=None, max_length=5_000)
     word_example: str | None = Field(default=None, max_length=5_000)
+    allow_duplicate: bool = False
     tags: list[str] = Field(default_factory=list, max_length=20)
     collections: list[str] = Field(default_factory=list, max_length=20)
     resource_kind: ResourceKind | None = None
@@ -498,10 +499,44 @@ class WordReviewRequest(BaseModel):
     feedback: ReviewFeedback
 
 
+class WordMergeRequest(BaseModel):
+    """把新语境合并进已有单词。"""
+
+    expected_version: int = Field(ge=1)
+    word_phonetic: str | None = Field(default=None, max_length=120)
+    word_meaning: str | None = Field(default=None, max_length=5_000)
+    word_example: str | None = Field(default=None, max_length=5_000)
+    source_url: str | None = Field(default=None, max_length=2_048)
+    source_title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("word_phonetic", "word_meaning", "word_example", "source_title")
+    @classmethod
+    def normalize_merge_text(cls, value: str | None) -> str | None:
+        """清理合并进已有单词的可选文本。"""
+
+        return normalize_optional_text(value)
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_merge_source_url(cls, value: str | None) -> str | None:
+        """合并来源链接时只接受 HTTP(S)。"""
+
+        return normalize_source_url(value)
+
+
+class ReviewSkipRequest(BaseModel):
+    """跳过今日回顾中的一条内容。"""
+
+    expected_version: int = Field(ge=1)
+
+
 class ReviewQueueResponse(BaseModel):
-    """到期单词复习队列。"""
+    """今日回顾队列，混合到期单词、未读资料和待整理灵感。"""
 
     items: list[MemoRead]
+    word_count: int = 0
+    resource_count: int = 0
+    idea_count: int = 0
 
 
 class BookmarkInput(BaseModel):

@@ -113,6 +113,13 @@ export interface MemoCounts {
   idea_count: number;
 }
 
+export interface ReviewQueueResponse {
+  items: Memo[];
+  word_count: number;
+  resource_count: number;
+  idea_count: number;
+}
+
 export interface ResourceCategoryOption {
   id: string | null;
   code: ResourceCategory;
@@ -178,6 +185,7 @@ export interface MemoCreateRequest {
   word_phonetic?: string;
   word_meaning?: string;
   word_example?: string;
+  allow_duplicate?: boolean;
   tags: string[];
   collections?: string[];
   resource_kind?: ResourceKind;

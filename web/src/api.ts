@@ -27,17 +27,22 @@ import type {
   ResourceKind,
   ResourceReadingStatus,
   ReviewFeedback,
+  ReviewQueueResponse,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code?: string;
+  readonly current?: Memo;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string, current?: Memo) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
+    this.current = current;
   }
 }
 
@@ -52,14 +57,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as {
-      detail?: string | { message?: string };
+      detail?: string | {
+        message?: string;
+        code?: string;
+        current?: Memo;
+      };
     } | null;
     const detail = payload?.detail;
     const message =
       typeof detail === "string"
         ? detail
         : detail?.message ?? `请求失败（${response.status}）`;
-    throw new ApiError(message, response.status);
+    const code = typeof detail === "object" ? detail?.code : undefined;
+    const current = typeof detail === "object" ? detail?.current : undefined;
+    throw new ApiError(message, response.status, code, current);
   }
   return (await response.json()) as T;
 }
@@ -313,6 +324,30 @@ export async function updateMemo(
   });
 }
 
+export async function mergeWord(
+  memoId: string,
+  payload: {
+    expectedVersion: number;
+    wordPhonetic?: string;
+    wordMeaning?: string;
+    wordExample?: string;
+    sourceUrl?: string;
+    sourceTitle?: string;
+  },
+): Promise<Memo> {
+  return request<Memo>(`/words/${memoId}/merge`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_version: payload.expectedVersion,
+      word_phonetic: payload.wordPhonetic,
+      word_meaning: payload.wordMeaning,
+      word_example: payload.wordExample,
+      source_url: payload.sourceUrl,
+      source_title: payload.sourceTitle,
+    }),
+  });
+}
+
 export async function reviewWord(
   memoId: string,
   expectedVersion: number,
@@ -324,6 +359,33 @@ export async function reviewWord(
       expected_version: expectedVersion,
       feedback,
     }),
+  });
+}
+
+export async function getReviewQueue(options: {
+  type?: MemoType;
+  limit?: number;
+} = {}): Promise<ReviewQueueResponse> {
+  const searchParams = new URLSearchParams();
+  if (options.type) {
+    searchParams.set("type", options.type);
+  }
+  if (options.limit) {
+    searchParams.set("limit", String(options.limit));
+  }
+  const suffix = searchParams.toString();
+  return request<ReviewQueueResponse>(
+    `/review-queue${suffix ? `?${suffix}` : ""}`,
+  );
+}
+
+export async function skipReview(
+  memoId: string,
+  expectedVersion: number,
+): Promise<Memo> {
+  return request<Memo>(`/review-queue/${memoId}/skip`, {
+    method: "POST",
+    body: JSON.stringify({ expected_version: expectedVersion }),
   });
 }
 

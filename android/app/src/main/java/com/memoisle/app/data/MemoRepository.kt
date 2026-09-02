@@ -1,5 +1,7 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.network.ApiException
+import com.memoisle.app.network.DuplicateLemmaException
 import com.memoisle.app.network.MemoApiClient
 import java.nio.file.Paths
 import java.time.Instant
@@ -70,23 +72,67 @@ class MemoRepository(
         phonetic: String,
         meaning: String,
         example: String,
-    ) {
-        withContext(Dispatchers.IO) {
+        sourceUrl: String? = null,
+        allowDuplicate: Boolean = false,
+    ): Memo {
+        return withContext(Dispatchers.IO) {
             val localMemo = newLocalWord(lemma, phonetic, meaning, example)
+                .copy(sourceUrl = sourceUrl)
+            val duplicate = memos.value.findDuplicateWord(lemma, localMemo.clientId)
+            if (duplicate != null && !allowDuplicate) {
+                throw DuplicateLemmaException(duplicate)
+            }
             database.upsert(localMemo)
             publishLocalSnapshot()
             try {
-                database.reconcileCreatedMemo(
-                    localMemo.clientId,
-                    api.createMemo(localMemo),
-                )
+                val created = api.createMemo(localMemo, allowDuplicate = allowDuplicate)
+                database.reconcileCreatedMemo(localMemo.clientId, created)
                 publishLocalSnapshot()
+                created
+            } catch (error: ApiException) {
+                if (error.statusCode == 409 && error.code == "duplicate_lemma" && error.current != null) {
+                    database.deleteByClientId(localMemo.clientId)
+                    database.upsert(error.current)
+                    publishLocalSnapshot()
+                    throw DuplicateLemmaException(error.current)
+                }
+                database.updateSyncState(localMemo.clientId, SyncState.FAILED)
+                publishLocalSnapshot()
+                throw error
             } catch (error: Exception) {
                 database.updateSyncState(localMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
                 throw error
             }
         }
+    }
+
+    suspend fun mergeWord(existing: Memo, incoming: Memo): Memo {
+        return withContext(Dispatchers.IO) {
+            val merged = if (existing.id != null) {
+                api.mergeWord(existing, incoming)
+            } else {
+                existing.copy(
+                    wordPhonetic = existing.wordPhonetic ?: incoming.wordPhonetic,
+                    wordMeaning = listOfNotNull(existing.wordMeaning, incoming.wordMeaning)
+                        .distinct()
+                        .joinToString("\n"),
+                    wordExample = listOfNotNull(existing.wordExample, incoming.wordExample)
+                        .distinct()
+                        .joinToString("\n"),
+                    sourceUrl = existing.sourceUrl ?: incoming.sourceUrl,
+                    updatedAt = Instant.now().toString(),
+                    syncState = SyncState.PENDING,
+                )
+            }
+            database.upsert(merged)
+            publishLocalSnapshot()
+            merged
+        }
+    }
+
+    suspend fun trashMemo(memo: Memo) {
+        updateMemo(memo.copy(status = "trashed"), memo.title, memo.body.ifBlank { memo.title })
     }
 
     suspend fun createVoiceIdea(body: String, audioPath: String, durationMs: Int) {
@@ -146,6 +192,75 @@ class MemoRepository(
         withContext(Dispatchers.IO) {
             database.upsert(api.reviewWord(memo, feedback))
             publishLocalSnapshot()
+        }
+    }
+
+    suspend fun skipReview(memo: Memo) {
+        withContext(Dispatchers.IO) {
+            if (memo.id != null) {
+                database.upsert(api.skipReview(memo))
+            } else {
+                database.upsert(
+                    memo.copy(
+                        lastReviewAt = Instant.now().toString(),
+                        updatedAt = Instant.now().toString(),
+                    ),
+                )
+            }
+            publishLocalSnapshot()
+        }
+    }
+
+    suspend fun markResourceOpened(memo: Memo) {
+        withContext(Dispatchers.IO) {
+            val pendingMemo = memo.copy(
+                resourceReadingStatus = "reading",
+                lastReviewAt = Instant.now().toString(),
+                updatedAt = Instant.now().toString(),
+                syncState = SyncState.PENDING,
+            )
+            database.upsert(pendingMemo)
+            publishLocalSnapshot()
+            try {
+                database.upsert(api.updateMemo(pendingMemo))
+                publishLocalSnapshot()
+            } catch (error: Exception) {
+                database.updateSyncState(pendingMemo.clientId, SyncState.FAILED)
+                publishLocalSnapshot()
+                throw error
+            }
+        }
+    }
+
+    suspend fun organizeIdea(memo: Memo, title: String, body: String) {
+        updateMemo(
+            memo.copy(status = "active", lastReviewAt = Instant.now().toString()),
+            title,
+            body,
+        )
+    }
+
+    suspend fun archiveIdea(memo: Memo) {
+        updateMemo(memo.copy(status = "archived"), memo.title, memo.body)
+    }
+
+    suspend fun toggleStar(memo: Memo) {
+        withContext(Dispatchers.IO) {
+            val pendingMemo = memo.copy(
+                starred = !memo.starred,
+                updatedAt = Instant.now().toString(),
+                syncState = SyncState.PENDING,
+            )
+            database.upsert(pendingMemo)
+            publishLocalSnapshot()
+            try {
+                database.upsert(api.updateMemo(pendingMemo))
+                publishLocalSnapshot()
+            } catch (error: Exception) {
+                database.updateSyncState(pendingMemo.clientId, SyncState.FAILED)
+                publishLocalSnapshot()
+                throw error
+            }
         }
     }
 

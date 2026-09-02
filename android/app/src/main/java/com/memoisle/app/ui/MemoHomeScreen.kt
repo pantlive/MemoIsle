@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.speech.tts.TextToSpeech
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -76,14 +78,22 @@ import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_IDEA
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
+import com.memoisle.app.data.isDueWord
+import com.memoisle.app.data.isInboxIdea
+import com.memoisle.app.data.isUnreadResource
 import com.memoisle.app.data.isVisibleInLibrary
 import com.memoisle.app.data.matchesQuery
+import com.memoisle.app.data.newLocalWord
 import com.memoisle.app.data.normalizeResourceUrl
+import com.memoisle.app.data.parseClipboardWord
 import com.memoisle.app.data.resourceCategoryLabel
 import com.memoisle.app.data.resourceHost
+import com.memoisle.app.data.todayReviewCounts
+import com.memoisle.app.data.todayReviewItems
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -108,6 +118,8 @@ fun MemoHomeScreen(
     var sharedResourcePending by rememberSaveable { mutableStateOf(false) }
     var activeType by rememberSaveable { mutableStateOf(TYPE_IDEA) }
     var showAllMemos by rememberSaveable { mutableStateOf(false) }
+    var showReview by rememberSaveable { mutableStateOf(false) }
+    var showReviewAnswer by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var resourceUrl by rememberSaveable { mutableStateOf("") }
     var resourceTitle by rememberSaveable { mutableStateOf("") }
@@ -117,6 +129,8 @@ fun MemoHomeScreen(
     var wordPhonetic by rememberSaveable { mutableStateOf("") }
     var wordMeaning by rememberSaveable { mutableStateOf("") }
     var wordExample by rememberSaveable { mutableStateOf("") }
+    var wordSourceUrl by rememberSaveable { mutableStateOf("") }
+    var reviewFilter by rememberSaveable { mutableStateOf("all") }
     var showVoiceDialog by rememberSaveable { mutableStateOf(false) }
     var isVoiceRecording by rememberSaveable { mutableStateOf(false) }
     var voiceRecording by remember { mutableStateOf<VoiceRecording?>(null) }
@@ -133,6 +147,43 @@ fun MemoHomeScreen(
         memo.isVisibleInLibrary() && typeMatches && categoryMatches &&
             memo.matchesQuery(normalizedSearchQuery)
     }
+    val libraryMemos = memos.filter { it.isVisibleInLibrary() }
+    val reviewCounts = libraryMemos.todayReviewCounts()
+    val reviewItems = libraryMemos.todayReviewItems()
+    val filteredReviewItems = when (reviewFilter) {
+        TYPE_WORD -> libraryMemos.filter { it.isDueWord() }.take(10)
+        TYPE_RESOURCE -> libraryMemos.filter { it.isUnreadResource() }.take(10)
+        TYPE_IDEA -> libraryMemos.filter { it.isInboxIdea() }.take(10)
+        else -> reviewItems
+    }
+    val currentReview = filteredReviewItems.firstOrNull()
+    fun fillWordFromClipboard(overwrite: Boolean = false): Boolean {
+        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
+        val text = clipboard.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(context)
+            ?.toString()
+            .orEmpty()
+        val draft = parseClipboardWord(text) ?: return false
+        if (overwrite || wordLemma.isBlank()) {
+            wordLemma = draft.lemma
+        }
+        if (!draft.phonetic.isNullOrBlank() && (overwrite || wordPhonetic.isBlank())) {
+            wordPhonetic = draft.phonetic
+        }
+        if (!draft.meaning.isNullOrBlank() && (overwrite || wordMeaning.isBlank())) {
+            wordMeaning = draft.meaning
+        }
+        if (!draft.example.isNullOrBlank() && (overwrite || wordExample.isBlank())) {
+            wordExample = draft.example
+        }
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar("已从剪贴板填入「${draft.lemma}」")
+        }
+        return true
+    }
+
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -162,8 +213,19 @@ fun MemoHomeScreen(
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let { message ->
-            snackbarHostState.showSnackbar(message)
-            viewModel.clearMessage()
+            val result = snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = if (uiState.undoMemo != null && message.contains("已收藏")) {
+                    "撤销"
+                } else {
+                    null
+                },
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                viewModel.undoLastSave()
+            } else {
+                viewModel.clearMessage()
+            }
         }
     }
 
@@ -190,11 +252,22 @@ fun MemoHomeScreen(
         bottomBar = {
             MemoBottomNavigation(
                 showAllMemos = showAllMemos,
+                showReview = showReview,
                 onShowHome = {
                     showAllMemos = false
+                    showReview = false
                     searchQuery = ""
                 },
-                onShowLibrary = { showAllMemos = true },
+                onShowLibrary = {
+                    showAllMemos = true
+                    showReview = false
+                },
+                onShowReview = {
+                    showReview = true
+                    showAllMemos = false
+                    searchQuery = ""
+                    showReviewAnswer = false
+                },
             )
         },
         floatingActionButton = {
@@ -202,6 +275,9 @@ fun MemoHomeScreen(
                 onClick = {
                     if (activeType == TYPE_RESOURCE) {
                         activeType = TYPE_IDEA
+                    }
+                    if (activeType == TYPE_WORD) {
+                        fillWordFromClipboard(overwrite = wordLemma.isBlank())
                     }
                     sharedResourcePending = false
                     showCreateDialog = true
@@ -245,12 +321,69 @@ fun MemoHomeScreen(
                     onClear = { searchQuery = "" },
                 )
             }
-            if (!showAllMemos && normalizedSearchQuery.isEmpty()) {
-                item { ReviewCard() }
+            if (showReview) {
+                item {
+                    ReviewSession(
+                        current = currentReview,
+                        wordCount = reviewCounts.wordCount,
+                        resourceCount = reviewCounts.resourceCount,
+                        ideaCount = reviewCounts.ideaCount,
+                        remainingCount = filteredReviewItems.size,
+                        filter = reviewFilter,
+                        onFilterChange = { reviewFilter = it },
+                        showAnswer = showReviewAnswer,
+                        isSaving = uiState.isSaving,
+                        onShowAnswer = { showReviewAnswer = true },
+                        onSkip = {
+                            currentReview?.let { memo ->
+                                viewModel.skipReview(memo) { showReviewAnswer = false }
+                            }
+                        },
+                        onReviewWord = { feedback ->
+                            currentReview?.let { memo ->
+                                viewModel.reviewWord(memo, feedback) { showReviewAnswer = false }
+                            }
+                        },
+                        onOpenResource = {
+                            currentReview?.sourceUrl?.let(uriHandler::openUri)
+                            currentReview?.let { memo ->
+                                viewModel.markResourceOpened(memo) { showReviewAnswer = false }
+                            }
+                        },
+                        onStarResource = {
+                            currentReview?.let(viewModel::toggleStar)
+                        },
+                        onOrganizeIdea = {
+                            currentReview?.let { memo ->
+                                viewModel.organizeIdea(memo, memo.title, memo.body) {
+                                    showReviewAnswer = false
+                                }
+                            }
+                        },
+                        onArchiveIdea = {
+                            currentReview?.let { memo ->
+                                viewModel.archiveIdea(memo) { showReviewAnswer = false }
+                            }
+                        },
+                    )
+                }
+            } else if (!showAllMemos && normalizedSearchQuery.isEmpty()) {
+                item {
+                    ReviewCard(
+                        wordCount = reviewCounts.wordCount,
+                        resourceCount = reviewCounts.resourceCount,
+                        ideaCount = reviewCounts.ideaCount,
+                        onStart = {
+                            showReview = true
+                            showReviewAnswer = false
+                        },
+                    )
+                }
                 item {
                     QuickActions(
                         activeType = activeType,
                         onSelectWord = {
+                            fillWordFromClipboard(overwrite = wordLemma.isBlank())
                             activeType = TYPE_WORD
                             showAllMemos = false
                             showCreateDialog = true
@@ -293,17 +426,22 @@ fun MemoHomeScreen(
                             onPhoneticChange = { wordPhonetic = it },
                             onMeaningChange = { wordMeaning = it },
                             onExampleChange = { wordExample = it },
+                            sourceUrl = wordSourceUrl,
+                            onSourceUrlChange = { wordSourceUrl = it },
+                            onFillClipboard = { fillWordFromClipboard(overwrite = true) },
                             onSave = {
                                 viewModel.createWord(
                                     wordLemma,
                                     wordPhonetic,
                                     wordMeaning,
                                     wordExample,
+                                    wordSourceUrl.trim().ifEmpty { null },
                                 ) {
                                     wordLemma = ""
                                     wordPhonetic = ""
                                     wordMeaning = ""
                                     wordExample = ""
+                                    wordSourceUrl = ""
                                 }
                             },
                         )
@@ -318,7 +456,7 @@ fun MemoHomeScreen(
                     }
                 }
             }
-            item {
+            if (!showReview) item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -347,6 +485,7 @@ fun MemoHomeScreen(
                     )
                 }
             }
+            if (!showReview) {
             if (visibleMemos.isEmpty()) {
                 item {
                     EmptyMemos(
@@ -359,6 +498,7 @@ fun MemoHomeScreen(
                 items(items = visibleMemos, key = Memo::clientId) { memo ->
                     MemoRow(memo = memo, onClick = { selectedMemo = memo })
                 }
+            }
             }
         }
     }
@@ -461,14 +601,81 @@ fun MemoHomeScreen(
             onPhoneticChange = { wordPhonetic = it },
             onMeaningChange = { wordMeaning = it },
             onExampleChange = { wordExample = it },
+            sourceUrl = wordSourceUrl,
+            onSourceUrlChange = { wordSourceUrl = it },
+            onFillClipboard = { fillWordFromClipboard(overwrite = true) },
             onDismiss = { showCreateDialog = false },
             onSave = {
-                viewModel.createWord(wordLemma, wordPhonetic, wordMeaning, wordExample) {
+                viewModel.createWord(
+                    wordLemma,
+                    wordPhonetic,
+                    wordMeaning,
+                    wordExample,
+                    wordSourceUrl.trim().ifEmpty { null },
+                ) {
                     wordLemma = ""
                     wordPhonetic = ""
                     wordMeaning = ""
                     wordExample = ""
+                    wordSourceUrl = ""
                     showCreateDialog = false
+                }
+            },
+        )
+    }
+    uiState.duplicateWord?.let { existing ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearDuplicate() },
+            title = { Text("已收藏相同词形") },
+            text = {
+                Text("“${existing.title}”已经在资料库中。可以把新例句合并进去，或仍然另外保存。")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.mergeWord(
+                            existing,
+                            newLocalWord(wordLemma, wordPhonetic, wordMeaning, wordExample)
+                                .copy(sourceUrl = wordSourceUrl.trim().ifEmpty { null }),
+                        ) {
+                            wordLemma = ""
+                            wordPhonetic = ""
+                            wordMeaning = ""
+                            wordExample = ""
+                            wordSourceUrl = ""
+                            showCreateDialog = false
+                        }
+                    },
+                ) { Text("合并例句") }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            selectedMemo = existing
+                            viewModel.clearDuplicate()
+                            showCreateDialog = false
+                        },
+                    ) { Text("查看") }
+                    TextButton(
+                        onClick = {
+                            viewModel.createWord(
+                                wordLemma,
+                                wordPhonetic,
+                                wordMeaning,
+                                wordExample,
+                                wordSourceUrl.trim().ifEmpty { null },
+                                allowDuplicate = true,
+                            ) {
+                                wordLemma = ""
+                                wordPhonetic = ""
+                                wordMeaning = ""
+                                wordExample = ""
+                                wordSourceUrl = ""
+                                showCreateDialog = false
+                            }
+                        },
+                    ) { Text("仍然保存") }
                 }
             },
         )
@@ -597,7 +804,13 @@ private fun MemoSearchField(
 }
 
 @Composable
-private fun ReviewCard() {
+private fun ReviewCard(
+    wordCount: Int,
+    resourceCount: Int,
+    ideaCount: Int,
+    onStart: () -> Unit,
+) {
+    val totalCount = wordCount + resourceCount + ideaCount
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -612,7 +825,11 @@ private fun ReviewCard() {
                 Column {
                     Text("今日回顾", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                     Text(
-                        "5 个单词、2 篇待读、1 条待整理",
+                        if (totalCount == 0) {
+                            "今天没有需要回顾的内容"
+                        } else {
+                            "$wordCount 个单词、$resourceCount 篇待读、$ideaCount 条待整理"
+                        },
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -628,12 +845,188 @@ private fun ReviewCard() {
                 }
             }
             Button(
-                onClick = {},
+                onClick = onStart,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = false,
+                enabled = totalCount > 0,
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text("回顾功能将在下一里程碑开放")
+                Text(if (totalCount == 0) "今天已完成" else "开始回顾")
             }
+        }
+    }
+}
+
+@Composable
+private fun ReviewSession(
+    current: Memo?,
+    wordCount: Int,
+    resourceCount: Int,
+    ideaCount: Int,
+    remainingCount: Int,
+    filter: String,
+    onFilterChange: (String) -> Unit,
+    showAnswer: Boolean,
+    isSaving: Boolean,
+    onShowAnswer: () -> Unit,
+    onSkip: () -> Unit,
+    onReviewWord: (String) -> Unit,
+    onOpenResource: () -> Unit,
+    onStarResource: () -> Unit,
+    onOrganizeIdea: () -> Unit,
+    onArchiveIdea: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("今日回顾", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                "all" to "混合",
+                TYPE_WORD to "单词",
+                TYPE_RESOURCE to "待读",
+                TYPE_IDEA to "待整理",
+            ).forEach { (value, label) ->
+                val selected = filter == value
+                OutlinedButton(
+                    onClick = { onFilterChange(value) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (selected) TealSoft else SurfaceWhite,
+                    ),
+                ) {
+                    Text(label, color = if (selected) DeepTeal else TextMuted)
+                }
+            }
+        }
+        Text(
+            "$wordCount 个单词 · $resourceCount 篇待读 · $ideaCount 条待整理",
+            color = TextMuted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (current == null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                border = CardDefaults.outlinedCardBorder(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("◷", color = DeepTeal, fontSize = 28.sp)
+                    Text("今天的回顾已经完成", fontWeight = FontWeight.SemiBold)
+                    Text("到期单词、待读资料和待整理灵感会显示在这里。", color = TextMuted)
+                }
+            }
+        } else {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+            border = CardDefaults.outlinedCardBorder(),
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    when (current.type) {
+                        TYPE_WORD -> "单词复习 · 还剩 $remainingCount 条"
+                        TYPE_RESOURCE -> "待阅读 · 还剩 $remainingCount 条"
+                        else -> "待整理灵感 · 还剩 $remainingCount 条"
+                    },
+                    color = TextMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(current.title, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+                when (current.type) {
+                    TYPE_WORD -> {
+                        WordPronunciationRow(lemma = current.title)
+                        current.wordPhonetic?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, color = TextMuted)
+                        }
+                        current.wordExample?.takeIf { it.isNotBlank() }?.let {
+                            Text("“$it”", color = TextMuted)
+                        }
+                        Text(
+                            "上次 ${current.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · 下次 ${current.nextReviewAt?.let(::formatTime) ?: "待安排"}",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        if (!showAnswer) {
+                            OutlinedButton(
+                                onClick = onShowAnswer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("显示答案")
+                            }
+                        } else {
+                            Text(current.wordMeaning ?: current.body)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { onReviewWord("forgot") },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !isSaving,
+                                ) { Text("忘记") }
+                                OutlinedButton(
+                                    onClick = { onReviewWord("fuzzy") },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !isSaving,
+                                ) { Text("模糊") }
+                                Button(
+                                    onClick = { onReviewWord("remembered") },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !isSaving,
+                                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                                ) { Text("记得") }
+                            }
+                        }
+                    }
+                    TYPE_RESOURCE -> {
+                        Text(
+                            listOfNotNull(
+                                current.sourceUrl?.let(::resourceHost),
+                                resourceCategoryLabel(
+                                    current.resourceCategory,
+                                    current.resourceCategoryLabel,
+                                ),
+                            ).joinToString(" · "),
+                            color = TextMuted,
+                        )
+                        current.resourceDescription?.takeIf { it.isNotBlank() }?.let {
+                            Text(it)
+                        }
+                        Button(
+                            onClick = onOpenResource,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isSaving && !current.sourceUrl.isNullOrBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                        ) { Text("打开原网页") }
+                        OutlinedButton(
+                            onClick = onStarResource,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isSaving,
+                        ) { Text(if (current.starred) "取消星标" else "星标") }
+                    }
+                    else -> {
+                        Text(current.body)
+                        Button(
+                            onClick = onOrganizeIdea,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isSaving,
+                            colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                        ) { Text("整理完成") }
+                        OutlinedButton(
+                            onClick = onArchiveIdea,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isSaving,
+                        ) { Text("归档") }
+                    }
+                }
+                TextButton(onClick = onSkip, enabled = !isSaving) {
+                    Text("跳过")
+                }
+            }
+        }
         }
     }
 }
@@ -701,6 +1094,9 @@ private fun WordComposer(
     onPhoneticChange: (String) -> Unit,
     onMeaningChange: (String) -> Unit,
     onExampleChange: (String) -> Unit,
+    sourceUrl: String,
+    onSourceUrlChange: (String) -> Unit,
+    onFillClipboard: () -> Unit,
     onSave: () -> Unit,
 ) {
     Card(
@@ -714,12 +1110,16 @@ private fun WordComposer(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("收藏英语单词", fontWeight = FontWeight.SemiBold)
+            WordPronunciationRow(lemma = lemma)
+            TextButton(onClick = onFillClipboard, enabled = !isSaving) {
+                Text("从剪贴板填入")
+            }
             OutlinedTextField(
                 value = lemma,
                 onValueChange = onLemmaChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("单词或短语") },
-                placeholder = { Text("serendipity") },
+                placeholder = { Text("点击时可从剪贴板填入") },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp),
             )
@@ -747,6 +1147,14 @@ private fun WordComposer(
                 label = { Text("例句或上下文（可选）") },
                 minLines = 2,
                 maxLines = 5,
+                shape = RoundedCornerShape(10.dp),
+            )
+            OutlinedTextField(
+                value = sourceUrl,
+                onValueChange = onSourceUrlChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("出处链接（可选）") },
+                singleLine = true,
                 shape = RoundedCornerShape(10.dp),
             )
             Button(
@@ -936,7 +1344,7 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
                     Spacer(Modifier.width(8.dp))
                     if (isWord) {
                         Text(
-                            "熟悉度 ${memo.familiarity}/5",
+                            "熟悉度 ${memo.familiarity}/5 · 下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
                             color = TextMuted,
                             fontSize = 11.sp,
                         )
@@ -1178,6 +1586,17 @@ private fun EditMemoDialog(
                     shape = RoundedCornerShape(10.dp),
                 )
                 if (isWord) {
+                    WordPronunciationRow(lemma = title)
+                    Text(
+                        "上次 ${memo.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · 下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    memo.sourceUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                        Text("出处 ${resourceHost(url)}", color = TextMuted, fontSize = 12.sp)
+                    }
+                }
+                if (isWord) {
                     OutlinedTextField(
                         value = wordPhonetic,
                         onValueChange = { wordPhonetic = it },
@@ -1417,6 +1836,9 @@ private fun CreateWordDialog(
     onPhoneticChange: (String) -> Unit,
     onMeaningChange: (String) -> Unit,
     onExampleChange: (String) -> Unit,
+    sourceUrl: String,
+    onSourceUrlChange: (String) -> Unit,
+    onFillClipboard: () -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -1425,12 +1847,16 @@ private fun CreateWordDialog(
         title = { Text("收藏英语单词", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                WordPronunciationRow(lemma = lemma)
+                TextButton(onClick = onFillClipboard, enabled = !isSaving) {
+                    Text("从剪贴板填入")
+                }
                 OutlinedTextField(
                     value = lemma,
                     onValueChange = onLemmaChange,
                     label = { Text("单词或短语") },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("serendipity") },
+                    placeholder = { Text("点击时可从剪贴板填入") },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                 )
@@ -1458,6 +1884,14 @@ private fun CreateWordDialog(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 5,
+                    shape = RoundedCornerShape(10.dp),
+                )
+                OutlinedTextField(
+                    value = sourceUrl,
+                    onValueChange = onSourceUrlChange,
+                    label = { Text("出处链接（可选）") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                 )
             }
@@ -1592,34 +2026,41 @@ private fun VoiceCaptureDialog(
 @Composable
 private fun MemoBottomNavigation(
     showAllMemos: Boolean,
+    showReview: Boolean,
     onShowHome: () -> Unit,
     onShowLibrary: () -> Unit,
+    onShowReview: () -> Unit,
 ) {
     NavigationBar(containerColor = SurfaceWhite) {
         NavigationBarItem(
-            selected = !showAllMemos,
+            selected = !showAllMemos && !showReview,
             onClick = onShowHome,
             icon = { Text("⌂", fontSize = 17.sp) },
             label = { Text("首页", fontSize = 11.sp) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
-            selected = showAllMemos,
+            selected = showAllMemos && !showReview,
             onClick = onShowLibrary,
             icon = { Text("□", fontSize = 17.sp) },
             label = { Text("资料库", fontSize = 11.sp) },
             colors = memoNavigationColors(),
         )
-        listOf("◷" to "回顾", "○" to "我的").forEach { (icon, label) ->
-            NavigationBarItem(
-                selected = false,
-                onClick = {},
-                enabled = false,
-                icon = { Text(icon, fontSize = 17.sp) },
-                label = { Text(label, fontSize = 11.sp) },
-                colors = memoNavigationColors(),
-            )
-        }
+        NavigationBarItem(
+            selected = showReview,
+            onClick = onShowReview,
+            icon = { Text("◷", fontSize = 17.sp) },
+            label = { Text("回顾", fontSize = 11.sp) },
+            colors = memoNavigationColors(),
+        )
+        NavigationBarItem(
+            selected = false,
+            onClick = {},
+            enabled = false,
+            icon = { Text("○", fontSize = 17.sp) },
+            label = { Text("我的", fontSize = 11.sp) },
+            colors = memoNavigationColors(),
+        )
     }
 }
 
@@ -1631,6 +2072,51 @@ private fun memoNavigationColors() = NavigationBarItemDefaults.colors(
     disabledIconColor = TextMuted.copy(alpha = 0.42f),
     disabledTextColor = TextMuted.copy(alpha = 0.42f),
 )
+
+@Composable
+private fun WordPronunciationRow(lemma: String) {
+    val context = LocalContext.current
+    var usReady by remember { mutableStateOf(false) }
+    var ukReady by remember { mutableStateOf(false) }
+    val ttsState = remember { mutableStateOf<TextToSpeech?>(null) }
+    DisposableEffect(context) {
+        lateinit var engine: TextToSpeech
+        engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                usReady = engine.isLanguageAvailable(Locale.US) >= TextToSpeech.LANG_AVAILABLE
+                ukReady = engine.isLanguageAvailable(Locale.UK) >= TextToSpeech.LANG_AVAILABLE
+                ttsState.value = engine
+            }
+        }
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            ttsState.value = null
+        }
+    }
+    fun speak(locale: Locale, ready: Boolean) {
+        val engine = ttsState.value
+        if (!ready || lemma.isBlank() || engine == null) {
+            return
+        }
+        engine.language = locale
+        engine.speak(lemma, TextToSpeech.QUEUE_FLUSH, null, locale.toLanguageTag())
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = { speak(Locale.US, usReady) },
+            enabled = lemma.isNotBlank() && usReady,
+        ) {
+            Text(if (usReady) "美式" else "美式不可用")
+        }
+        OutlinedButton(
+            onClick = { speak(Locale.UK, ukReady) },
+            enabled = lemma.isNotBlank() && ukReady,
+        ) {
+            Text(if (ukReady) "英式" else "英式不可用")
+        }
+    }
+}
 
 private fun formatTime(value: String): String {
     return runCatching {

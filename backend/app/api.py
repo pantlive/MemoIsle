@@ -108,7 +108,9 @@ from app.schemas import (
     ResourceKind,
     ResourceReadingStatus,
     ReviewQueueResponse,
+    ReviewSkipRequest,
     SyncResponse,
+    WordMergeRequest,
     WordReviewRequest,
 )
 from app.service import (
@@ -116,6 +118,7 @@ from app.service import (
     MemoNotFoundError,
     MemoTypeError,
     MemoVersionConflictError,
+    WordDuplicateError,
     attach_audio,
     count_memos,
     count_memos_by_type,
@@ -124,7 +127,9 @@ from app.service import (
     get_memo,
     list_memos,
     list_review_queue,
+    merge_word,
     review_word,
+    skip_review_item,
     update_memo,
 )
 
@@ -339,7 +344,18 @@ def create_memo_route(
 ) -> MemoRead:
     """创建或返回同一客户端标识对应的条目。"""
 
-    memo = create_memo(session, user_id, payload)
+    try:
+        memo = create_memo(session, user_id, payload)
+    except WordDuplicateError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(error),
+                "code": "duplicate_lemma",
+                "current": current.model_dump(mode="json"),
+            },
+        ) from error
     if (
         memo.type == MemoType.RESOURCE
         and settings.resource_enrichment_enabled
@@ -992,13 +1008,83 @@ def review_queue_route(
     session: SessionDependency,
     user_id: UserDependency,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    memo_type: Annotated[MemoType | None, Query(alias="type")] = None,
 ) -> ReviewQueueResponse:
-    """返回已经到期的英语单词。"""
+    """返回今日回顾：到期单词、未读资料和待整理灵感。"""
 
-    items = list_review_queue(session, user_id, limit=limit)
+    items, counts = list_review_queue(
+        session,
+        user_id,
+        limit=limit,
+        memo_type=memo_type,
+    )
     return ReviewQueueResponse(
         items=[MemoRead.model_validate(item) for item in items],
+        word_count=counts["word_count"],
+        resource_count=counts["resource_count"],
+        idea_count=counts["idea_count"],
     )
+
+
+@router.post(
+    "/review-queue/{memo_id}/skip",
+    response_model=MemoRead,
+    tags=["review"],
+)
+def skip_review_route(
+    memo_id: UUID,
+    payload: ReviewSkipRequest,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> MemoRead:
+    """跳过当前回顾条目，明天之前不再出现。"""
+
+    try:
+        memo = skip_review_item(
+            session,
+            user_id,
+            str(memo_id),
+            payload.expected_version,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="内容不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except MemoVersionConflictError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error), "current": current.model_dump(mode="json")},
+        ) from error
+    return MemoRead.model_validate(memo)
+
+
+@router.post(
+    "/words/{memo_id}/merge",
+    response_model=MemoRead,
+    tags=["words"],
+)
+def merge_word_route(
+    memo_id: UUID,
+    payload: WordMergeRequest,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> MemoRead:
+    """把新语境合并进已有单词，不新建重复词形。"""
+
+    try:
+        memo = merge_word(session, user_id, str(memo_id), payload)
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="单词不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except MemoVersionConflictError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error), "current": current.model_dump(mode="json")},
+        ) from error
+    return MemoRead.model_validate(memo)
 
 
 @router.post(
