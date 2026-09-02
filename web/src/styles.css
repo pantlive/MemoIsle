@@ -731,6 +731,19 @@ button.type-pill {
   padding: 0;
 }
 
+.resource-filter-result-count {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.resource-filter-result-count strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
 .section-actions select {
   min-width: 0;
   height: 38px;

@@ -108,6 +108,7 @@ export interface Memo {
 
 export interface MemoListResponse {
   items: Memo[];
+  total_count: number;
 }
 
 export interface MemoCounts {

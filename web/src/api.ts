@@ -72,9 +72,12 @@ export interface MemoListFilters {
   createdFrom?: string;
   createdTo?: string;
   sort?: MemoSort;
+  limit?: number;
 }
 
-export async function listMemos(filters: MemoListFilters = {}): Promise<Memo[]> {
+export async function listMemos(
+  filters: MemoListFilters = {},
+): Promise<MemoListResponse> {
   const searchParams = new URLSearchParams();
   if (filters.type) {
     searchParams.set("type", filters.type);
@@ -115,11 +118,14 @@ export async function listMemos(filters: MemoListFilters = {}): Promise<Memo[]> 
   if (filters.sort) {
     searchParams.set("sort", filters.sort);
   }
+  if (filters.limit) {
+    searchParams.set("limit", String(filters.limit));
+  }
   const queryString = searchParams.toString();
   const response = await request<MemoListResponse>(
     `/memos${queryString ? `?${queryString}` : ""}`,
   );
-  return response.items;
+  return response;
 }
 
 export async function getMemoCounts(): Promise<MemoCounts> {

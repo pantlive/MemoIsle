@@ -322,6 +322,7 @@ class MemoListResponse(BaseModel):
     """条目列表响应。"""
 
     items: list[MemoRead]
+    total_count: int
 
 
 class MemoCountsResponse(BaseModel):

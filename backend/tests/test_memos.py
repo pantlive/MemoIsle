@@ -477,6 +477,32 @@ def test_memo_counts_include_current_resource_total(client: TestClient) -> None:
     }
 
 
+def test_memo_list_returns_total_for_filters(client: TestClient) -> None:
+    """列表接口返回筛选条件匹配的真实总数，而不是分页数量。"""
+
+    for index in range(3):
+        response = client.post(
+            "/api/v1/memos",
+            json={
+                "client_id": str(uuid4()),
+                "type": "resource",
+                "body": f"资料 {index}",
+                "source_url": f"https://example.com/resource-{index}",
+                "tags": [],
+                "starred": index == 0,
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        "/api/v1/memos",
+        params={"type": "resource", "starred": "true", "limit": 1},
+    )
+    assert response.status_code == 200
+    assert response.json()["total_count"] == 1
+    assert len(response.json()["items"]) == 1
+
+
 def test_word_requires_lemma_and_non_word_cannot_be_reviewed(
     client: TestClient,
 ) -> None:

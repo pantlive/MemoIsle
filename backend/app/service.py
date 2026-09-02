@@ -346,6 +346,46 @@ def list_memos(
     return list(session.scalars(query).all())
 
 
+def count_memos(
+    session: Session,
+    user_id: str,
+    memo_type: MemoType | None = None,
+    updated_after: datetime | None = None,
+    query_text: str | None = None,
+    resource_category: ResourceCategory | None = None,
+    resource_kind: ResourceKind | None = None,
+    resource_reading_status: ResourceReadingStatus | None = None,
+    link_health_status: str | None = None,
+    tag: str | None = None,
+    collection: str | None = None,
+    starred: bool | None = None,
+    memo_status: MemoStatus | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    include_trashed: bool = False,
+) -> int:
+    """统计与当前筛选条件匹配的条目总数。"""
+
+    query = memo_query(
+        user_id=user_id,
+        memo_type=memo_type,
+        updated_after=updated_after,
+        query_text=query_text,
+        resource_category=resource_category,
+        resource_kind=resource_kind,
+        resource_reading_status=resource_reading_status,
+        link_health_status=link_health_status,
+        tag=tag,
+        collection=collection,
+        starred=starred,
+        memo_status=memo_status,
+        created_from=created_from,
+        created_to=created_to,
+        include_trashed=include_trashed,
+    ).order_by(None)
+    return int(session.scalar(select(func.count()).select_from(query.subquery())) or 0)
+
+
 def count_memos_by_type(session: Session, user_id: str) -> dict[MemoType, int]:
     """统计当前用户未删除的各内容类型数量。"""
 

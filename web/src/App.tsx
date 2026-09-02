@@ -155,6 +155,7 @@ function sourceHost(sourceUrl: string | null): string {
 export default function App() {
   const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
+  const [currentResultCount, setCurrentResultCount] = useState(0);
   const [memoCounts, setMemoCounts] = useState<MemoCounts | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState("");
@@ -345,7 +346,7 @@ export default function App() {
     }
     try {
       const resourceView = activeType === "resource";
-      const items = await listMemos({
+      const response = await listMemos({
         type: activeType === "all" ? undefined : activeType,
         query: debouncedQuery,
         category: resourceView ? resourceCategoryFilter || undefined : undefined,
@@ -355,7 +356,8 @@ export default function App() {
       if (requestId !== loadRequestRef.current) {
         return;
       }
-      setMemos(items);
+      setMemos(response.items);
+      setCurrentResultCount(response.total_count);
       setLoadState("ready");
     } catch (error) {
       if (requestId !== loadRequestRef.current) {
@@ -1163,6 +1165,9 @@ export default function App() {
                     />
                     只看星标
                   </label>
+                </div>
+                <div className="resource-filter-result-count" role="status">
+                  筛选结果 <strong>{currentResultCount}</strong> 条资料
                 </div>
               </div>
             )}

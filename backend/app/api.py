@@ -90,6 +90,7 @@ from app.service import (
     MemoTypeError,
     MemoVersionConflictError,
     attach_audio,
+    count_memos,
     count_memos_by_type,
     create_memo,
     get_audio_path,
@@ -569,6 +570,19 @@ def list_memos_route(
 ) -> MemoListResponse:
     """按类型及关键词读取当前用户条目。"""
 
+    normalized_health_status = (
+        link_health_status.value if link_health_status is not None else None
+    )
+    normalized_created_from = (
+        datetime.combine(created_from, time.min, tzinfo=UTC)
+        if created_from is not None
+        else None
+    )
+    normalized_created_to = (
+        datetime.combine(created_to, time.min, tzinfo=UTC) + timedelta(days=1)
+        if created_to is not None
+        else None
+    )
     items = list_memos(
         session,
         user_id,
@@ -577,27 +591,36 @@ def list_memos_route(
         resource_category=resource_category,
         resource_kind=resource_kind,
         resource_reading_status=resource_reading_status,
-        link_health_status=(
-            link_health_status.value if link_health_status is not None else None
-        ),
+        link_health_status=normalized_health_status,
         tag=tag,
         collection=collection,
         starred=starred,
         memo_status=memo_status,
-        created_from=(
-            datetime.combine(created_from, time.min, tzinfo=UTC)
-            if created_from is not None
-            else None
-        ),
-        created_to=(
-            datetime.combine(created_to, time.min, tzinfo=UTC) + timedelta(days=1)
-            if created_to is not None
-            else None
-        ),
+        created_from=normalized_created_from,
+        created_to=normalized_created_to,
         sort=sort,
         limit=limit,
     )
-    return MemoListResponse(items=[MemoRead.model_validate(item) for item in items])
+    total_count = count_memos(
+        session,
+        user_id,
+        memo_type=memo_type,
+        query_text=query_text,
+        resource_category=resource_category,
+        resource_kind=resource_kind,
+        resource_reading_status=resource_reading_status,
+        link_health_status=normalized_health_status,
+        tag=tag,
+        collection=collection,
+        starred=starred,
+        memo_status=memo_status,
+        created_from=normalized_created_from,
+        created_to=normalized_created_to,
+    )
+    return MemoListResponse(
+        items=[MemoRead.model_validate(item) for item in items],
+        total_count=total_count,
+    )
 
 
 @router.get("/memos/counts", response_model=MemoCountsResponse, tags=["memos"])
