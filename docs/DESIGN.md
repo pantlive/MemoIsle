@@ -86,14 +86,14 @@ Always pair unfamiliar icons with labels or accessible names.
 - Typing `@` in Web capture opens a command menu; `@网页` lists the currently open HTTP(S) pages from the connected Chrome browser and renders the selected page as an attachment card rather than plain text.
 - The `@网页` menu opens below the composer, scrolls within a bounded height, and truncates long titles and source metadata without widening the page.
 - Browser-tab snapshots and pending resource metadata refresh silently after their first load, preserving the rendered menu and memo list instead of repeatedly switching the interface back to a loading state.
-- Resource titles and source hosts in Recent Content are direct links that open the original page in a new tab; clicking the remaining row surface still selects the memo for editing.
+- Resource titles and source hosts in Recent Content open the original page in a new tab; each resource row exposes an inline category select and star button and never opens the right editor panel.
 - The desktop top bar and disconnected `@网页` state expose a clear browser-extension download action with concise unzip-and-load guidance.
 
 ### Memo Row
 
 - Left: type icon.
 - Center: title, one or two excerpt lines, and source; resource rows add one category and optional star.
-- Right: updated time and one contextual action.
+- Right: updated time and one contextual action; resource rows show category and star controls together.
 - Hover actions appear on Web; primary actions remain discoverable without hover on Android.
 
 ### Review Card
@@ -134,7 +134,7 @@ Create a production app workspace, not a landing page. Include a left navigation
 
 ### W-02 Web Quick Capture Drawer
 
-Show the W-01 workspace dimmed behind a 480 px right drawer. The drawer has segmented types 单词 / 资料 / 灵感, a large content field, URL or source preview when relevant, microphone action, and a fixed footer with Cancel and Save. The selected Resource state exposes only one category and a star toggle beyond its title, URL, and note.
+Show the W-01 workspace dimmed behind a 480 px right drawer for Word or Idea editing. Resource rows do not open this drawer: their category select and star button remain inline in Recent Content, while title and source links open the original page.
 
 ### A-01 Android Home
 

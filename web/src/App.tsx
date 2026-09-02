@@ -13,7 +13,6 @@ import {
   ApiError,
   browserExtensionDownloadUrl,
   createMemo,
-  enrichResource,
   exchangeBrowserCapture,
   getLinkHealthCenter,
   listOpenBrowserTabs,
@@ -77,23 +76,6 @@ const resourceCategories: Array<{
   { value: "product", label: "商品与好物" },
   { value: "other", label: "其他" },
 ];
-
-function categoryLabel(category: ResourceCategory | null): string {
-  return resourceCategories.find((item) => item.value === category)?.label ?? "分类中";
-}
-
-function metadataStatusLabel(memo: Memo): string {
-  if (memo.resource_metadata_status === "processing") {
-    return "正在读取网页信息";
-  }
-  if (memo.resource_metadata_status === "pending") {
-    return "等待读取网页信息";
-  }
-  if (memo.resource_metadata_status === "failed") {
-    return "网页信息读取失败";
-  }
-  return "网页信息已更新";
-}
 
 const viewCopy = {
   all: {
@@ -198,15 +180,12 @@ export default function App() {
   const [webAttachmentHelp, setWebAttachmentHelp] = useState(false);
   const [webCommandOpen, setWebCommandOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [updatingResourceId, setUpdatingResourceId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editorTitle, setEditorTitle] = useState("");
   const [editorBody, setEditorBody] = useState("");
-  const [editorUrl, setEditorUrl] = useState("");
   const [editorPhonetic, setEditorPhonetic] = useState("");
   const [editorExample, setEditorExample] = useState("");
-  const [editorCategory, setEditorCategory] = useState<ResourceCategory | "">("");
-  const [editorStarred, setEditorStarred] = useState(false);
-  const [enrichingResource, setEnrichingResource] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [showWordAnswer, setShowWordAnswer] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -499,14 +478,14 @@ export default function App() {
   };
 
   const selectMemo = (memo: Memo) => {
+    if (memo.type === "resource") {
+      return;
+    }
     setSelectedId(memo.id);
     setEditorTitle(memo.title);
-    setEditorBody(memo.body === memo.source_url ? "" : memo.body);
-    setEditorUrl(memo.source_url ?? "");
+    setEditorBody(memo.body);
     setEditorPhonetic(memo.word_phonetic ?? "");
     setEditorExample(memo.word_example ?? "");
-    setEditorCategory(memo.resource_category ?? "");
-    setEditorStarred(memo.starred);
     if (memo.type === "word") {
       setEditorBody(memo.word_meaning ?? memo.body);
     }
@@ -571,7 +550,7 @@ export default function App() {
       selectMemo(created);
       setMessage(
         deduplicatedResource
-          ? "该网址已经收藏，已打开资料库中的原有条目。"
+          ? "该网址已经收藏，已定位到资料库中的原有条目。"
           : `${copy.itemLabel}已保存，并可在 Android 端同步。`,
       );
     } catch (error) {
@@ -583,13 +562,11 @@ export default function App() {
 
   const handleUpdate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedMemo || !editorTitle.trim()) {
-      return;
-    }
-    const sourceUrl =
-      selectedMemo.type === "resource" ? normalizeWebUrl(editorUrl) : null;
-    if (selectedMemo.type === "resource" && !sourceUrl) {
-      setMessage("网页资料必须保留有效的原始链接。");
+    if (
+      !selectedMemo ||
+      selectedMemo.type === "resource" ||
+      !editorTitle.trim()
+    ) {
       return;
     }
     if (selectedMemo.type === "idea" && !editorBody.trim()) {
@@ -601,22 +578,13 @@ export default function App() {
       const updated = await updateMemo(selectedMemo.id, {
         expected_version: selectedMemo.version,
         title: editorTitle.trim(),
-        body: editorBody.trim() || sourceUrl || selectedMemo.body,
-        source_url: sourceUrl ?? undefined,
-        source_title:
-          selectedMemo.type === "resource" ? editorTitle.trim() : undefined,
+        body: editorBody.trim() || selectedMemo.body,
         word_phonetic:
           selectedMemo.type === "word" ? editorPhonetic.trim() || undefined : undefined,
         word_meaning:
           selectedMemo.type === "word" ? editorBody.trim() || undefined : undefined,
         word_example:
           selectedMemo.type === "word" ? editorExample.trim() || undefined : undefined,
-        resource_category:
-          selectedMemo.type === "resource" && editorCategory
-            ? editorCategory
-            : undefined,
-        starred:
-          selectedMemo.type === "resource" ? editorStarred : undefined,
       });
       setMemos((current) =>
         current.map((memo) => (memo.id === updated.id ? updated : memo)),
@@ -632,23 +600,40 @@ export default function App() {
     }
   };
 
-  const handleEnrichResource = async () => {
-    if (!selectedMemo || selectedMemo.type !== "resource" || enrichingResource) {
+  const updateResourceOrganization = async (
+    memo: Memo,
+    changes: {
+      resource_category?: ResourceCategory;
+      starred?: boolean;
+    },
+  ) => {
+    if (memo.type !== "resource" || updatingResourceId === memo.id) {
       return;
     }
-    setEnrichingResource(true);
+    setUpdatingResourceId(memo.id);
     setMessage("");
     try {
-      const enriched = await enrichResource(selectedMemo.id);
+      const updated = await updateMemo(memo.id, {
+        expected_version: memo.version,
+        ...changes,
+      });
+      const remainsVisible =
+        activeType !== "resource" ||
+        ((!resourceCategoryFilter ||
+          updated.resource_category === resourceCategoryFilter) &&
+          (!resourceStarredOnly || updated.starred));
       setMemos((current) =>
-        current.map((memo) => (memo.id === enriched.id ? enriched : memo)),
+        remainsVisible
+          ? current.map((item) => (item.id === updated.id ? updated : item))
+          : current.filter((item) => item.id !== updated.id),
       );
-      selectMemo(enriched);
-      setMessage("网页信息与自动分类已更新。");
     } catch (error) {
       setMessage(describeError(error));
+      if (error instanceof ApiError && error.status === 409) {
+        await loadCurrentMemos(false);
+      }
     } finally {
-      setEnrichingResource(false);
+      setUpdatingResourceId(null);
     }
   };
 
@@ -1188,11 +1173,21 @@ export default function App() {
               >
                 {memos.map((memo) => (
                   <article
-                    className={memo.id === selectedId ? "memo-row selected" : "memo-row"}
+                    className={
+                      `memo-row${memo.type === "resource" ? " resource-row" : ""}` +
+                      (memo.id === selectedId ? " selected" : "")
+                    }
                     key={memo.id}
-                    onClick={() => selectMemo(memo)}
+                    onClick={() => {
+                      if (memo.type !== "resource") {
+                        selectMemo(memo);
+                      }
+                    }}
                     onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) {
+                      if (
+                        memo.type === "resource" ||
+                        event.target !== event.currentTarget
+                      ) {
                         return;
                       }
                       if (event.key === "Enter" || event.key === " ") {
@@ -1200,7 +1195,7 @@ export default function App() {
                         selectMemo(memo);
                       }
                     }}
-                    tabIndex={0}
+                    tabIndex={memo.type === "resource" ? undefined : 0}
                   >
                     <span className={`memo-type-icon ${memo.type}`}>
                       {memo.audio_mime_type ? "●" : viewCopy[memo.type].icon}
@@ -1214,7 +1209,7 @@ export default function App() {
                           rel="noreferrer"
                           onClick={(event) => event.stopPropagation()}
                         >
-                          {memo.starred ? "★ " : ""}{memo.title}
+                          {memo.title}
                         </a>
                       ) : (
                         <strong>{memo.starred ? "★ " : ""}{memo.title}</strong>
@@ -1244,7 +1239,6 @@ export default function App() {
                                   {sourceHost(memo.source_url)} ↗
                                 </a>
                               ) : sourceHost(memo.source_url)}
-                              {` · ${categoryLabel(memo.resource_category)}`}
                             </>
                           )
                           : memo.type === "word"
@@ -1253,9 +1247,51 @@ export default function App() {
                         {memo.type !== "resource" && ` · 版本 ${memo.version}`}
                       </small>
                     </span>
-                    <time dateTime={memo.updated_at}>
-                      {timeFormatter.format(new Date(memo.updated_at))}
-                    </time>
+                    <span className="memo-row-side">
+                      <time dateTime={memo.updated_at}>
+                        {timeFormatter.format(new Date(memo.updated_at))}
+                      </time>
+                      {memo.type === "resource" && (
+                        <span
+                          className="resource-inline-actions"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <select
+                            aria-label={`修改“${memo.title}”的分类`}
+                            value={memo.resource_category ?? ""}
+                            disabled={updatingResourceId === memo.id}
+                            onChange={(event) =>
+                              void updateResourceOrganization(memo, {
+                                resource_category:
+                                  event.target.value as ResourceCategory,
+                              })
+                            }
+                          >
+                            <option value="" disabled>分类中</option>
+                            {resourceCategories.map((category) => (
+                              <option key={category.value} value={category.value}>
+                                {category.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className={memo.starred ? "starred" : ""}
+                            aria-label={memo.starred ? "取消星标" : "添加星标"}
+                            aria-pressed={memo.starred}
+                            title={memo.starred ? "取消星标" : "添加星标"}
+                            disabled={updatingResourceId === memo.id}
+                            onClick={() =>
+                              void updateResourceOrganization(memo, {
+                                starred: !memo.starred,
+                              })
+                            }
+                          >
+                            {memo.starred ? "★" : "☆"}
+                          </button>
+                        </span>
+                      )}
+                    </span>
                   </article>
                 ))}
               </div>
@@ -1264,7 +1300,7 @@ export default function App() {
         </main>
       </div>
 
-      {selectedMemo && (
+      {selectedMemo && selectedMemo.type !== "resource" && (
         <aside className="editor-panel" aria-label={`编辑${selectedCopy.itemLabel}`}>
           <div className="editor-header">
             <div>
@@ -1272,9 +1308,7 @@ export default function App() {
                 {selectedCopy.icon} {selectedCopy.itemLabel}
               </span>
               <h2>
-                {selectedMemo.type === "resource"
-                  ? "整理资料"
-                  : selectedMemo.type === "word" ? "学习单词" : "继续整理"}
+                {selectedMemo.type === "word" ? "学习单词" : "继续整理"}
               </h2>
             </div>
             <button className="icon-button" aria-label="关闭编辑" onClick={() => setSelectedId(null)}>×</button>
@@ -1292,86 +1326,10 @@ export default function App() {
               <audio controls preload="metadata" src={memoAudioUrl(selectedMemo.id)} />
             </div>
           )}
-          {selectedMemo.type === "resource" && (
-            <div className="resource-insight-card">
-              {selectedMemo.resource_image_url && (
-                <img
-                  className="resource-cover"
-                  src={selectedMemo.resource_image_url}
-                  alt="网页封面"
-                  onError={(event) => {
-                    event.currentTarget.style.display = "none";
-                  }}
-                />
-              )}
-              <div>
-                <span className="category-badge">
-                  {categoryLabel(selectedMemo.resource_category)}
-                </span>
-                <span className={`process-status ${selectedMemo.resource_metadata_status}`}>
-                  {metadataStatusLabel(selectedMemo)}
-                </span>
-              </div>
-              {selectedMemo.resource_description && (
-                <p>{selectedMemo.resource_description}</p>
-              )}
-              <div className="resource-insight-meta">
-                <span>{selectedMemo.resource_site_name || sourceHost(selectedMemo.source_url)}</span>
-              </div>
-              <button
-                type="button"
-                disabled={enrichingResource}
-                onClick={() => void handleEnrichResource()}
-              >
-                {enrichingResource ? "正在更新网页信息…" : "重新读取并自动分类"}
-              </button>
-            </div>
-          )}
           <form onSubmit={handleUpdate}>
             <label>{selectedMemo.type === "word" ? "单词或短语" : "标题"}
               <input value={editorTitle} onChange={(event) => setEditorTitle(event.target.value)} maxLength={200} />
             </label>
-            {selectedMemo.type === "resource" && (
-              <>
-                <label>原始链接
-                  <input
-                    value={editorUrl}
-                    onChange={(event) => setEditorUrl(event.target.value)}
-                    inputMode="url"
-                    autoCapitalize="none"
-                    maxLength={2_048}
-                  />
-                  {selectedMemo.source_url && (
-                    <a className="source-link" href={selectedMemo.source_url} target="_blank" rel="noreferrer">
-                      在新窗口打开原网页 ↗
-                    </a>
-                  )}
-                </label>
-                <label>收藏分类
-                  <select
-                    value={editorCategory}
-                    onChange={(event) =>
-                      setEditorCategory(event.target.value as ResourceCategory)
-                    }
-                  >
-                    <option value="" disabled>等待自动分类</option>
-                    {resourceCategories.map((category) => (
-                      <option key={category.value} value={category.value}>
-                        {category.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="editor-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={editorStarred}
-                    onChange={(event) => setEditorStarred(event.target.checked)}
-                  />
-                  星标这条资料
-                </label>
-              </>
-            )}
             {selectedMemo.type === "word" && (
               <label>音标
                 <input
@@ -1393,15 +1351,12 @@ export default function App() {
             ) : (
               <>
             <label>
-              {selectedMemo.type === "resource"
-                ? "个人备注"
-                : selectedMemo.type === "word" ? "释义" : "内容"}
+              {selectedMemo.type === "word" ? "释义" : "内容"}
               <textarea
                 value={editorBody}
                 onChange={(event) => setEditorBody(event.target.value)}
-                rows={selectedMemo.type === "resource" ? 7 : 12}
+                rows={12}
                 maxLength={50_000}
-                placeholder={selectedMemo.type === "resource" ? "添加阅读重点或保存原因（可选）" : undefined}
               />
             </label>
                 {selectedMemo.type === "word" && (
@@ -1445,7 +1400,7 @@ export default function App() {
                   saveState === "saving" || !editorTitle.trim() ||
                   (selectedMemo.type === "idea"
                     ? !editorBody.trim()
-                    : selectedMemo.type === "resource" ? !editorUrl.trim() : false)
+                    : false)
                 }
               >保存修改</button>
             </div>

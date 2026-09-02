@@ -129,8 +129,8 @@ export interface MemoCreateRequest {
 
 export interface MemoUpdateRequest {
   expected_version: number;
-  title: string;
-  body: string;
+  title?: string;
+  body?: string;
   source_url?: string;
   source_title?: string;
   word_phonetic?: string;

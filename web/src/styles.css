@@ -866,8 +866,12 @@ button.type-pill {
   min-height: 176px;
 }
 
-.card-view .memo-row time {
+.card-view .memo-row-side {
   grid-column: 2;
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .memo-row {
@@ -882,6 +886,10 @@ button.type-pill {
   padding: 16px;
   cursor: pointer;
   text-align: left;
+}
+
+.memo-row.resource-row {
+  cursor: default;
 }
 
 .memo-row:hover,
@@ -964,14 +972,55 @@ button.type-pill {
   color: inherit;
 }
 
-.category-badge {
-  border-radius: 999px;
-  background: var(--primary-soft);
-  padding: 3px 7px;
-  color: var(--primary-hover);
-  font-size: 10px;
-  font-weight: 650;
-  white-space: nowrap;
+.memo-row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.resource-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.resource-inline-actions select {
+  min-width: 0;
+  width: 128px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 0 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.resource-inline-actions button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.resource-inline-actions button.starred {
+  border-color: #e1b766;
+  background: #fff8e8;
+  color: #a66b00;
+}
+
+.resource-inline-actions select:disabled,
+.resource-inline-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .memo-row time {
@@ -1077,74 +1126,8 @@ button.type-pill {
   line-height: 1.6;
 }
 
-.resource-insight-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 24px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--primary-soft) 45%, var(--surface));
-  padding: 14px;
-}
-
-.resource-insight-card > div:first-child,
-.resource-insight-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.resource-cover {
-  width: 100%;
-  max-height: 180px;
-  border-radius: 9px;
-  object-fit: cover;
-}
-
-.resource-insight-card p {
-  margin: 0;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.resource-insight-meta,
-.process-status {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.process-status.failed {
-  color: var(--danger);
-}
-
-.resource-insight-card > button {
-  align-self: flex-start;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
-  padding: 7px 10px;
-  color: var(--primary);
-  cursor: pointer;
-  font-size: 12px;
-}
-
 .editor-panel textarea {
   resize: vertical;
-}
-
-.source-link {
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.source-link:hover {
-  text-decoration: underline;
 }
 
 .audio-player-card {
@@ -2011,6 +1994,21 @@ button.type-pill {
 
   .memo-row {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .memo-row-side {
+    grid-column: 2;
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .resource-inline-actions,
+  .resource-inline-actions select {
+    width: 100%;
+  }
+
+  .resource-inline-actions select {
+    flex: 1;
   }
 
   .memo-row time {
