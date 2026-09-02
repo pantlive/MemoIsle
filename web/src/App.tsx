@@ -295,16 +295,22 @@ export default function App() {
     }
   }, []);
 
-  const refreshOpenBrowserTabs = useCallback(async () => {
-    setOpenBrowserTabsLoading(true);
+  const refreshOpenBrowserTabs = useCallback(async (showLoading = true) => {
+    if (showLoading) {
+      setOpenBrowserTabsLoading(true);
+    }
     try {
       const tabs = await listOpenBrowserTabs();
       setOpenBrowserTabs(tabs);
     } catch {
       // 当前浏览器标签页读取失败时仍保留粘贴网址和一次性捕获入口。
-      setOpenBrowserTabs([]);
+      if (showLoading) {
+        setOpenBrowserTabs([]);
+      }
     } finally {
-      setOpenBrowserTabsLoading(false);
+      if (showLoading) {
+        setOpenBrowserTabsLoading(false);
+      }
     }
   }, []);
 
@@ -344,7 +350,7 @@ export default function App() {
     }
     void refreshOpenBrowserTabs();
     const timer = window.setInterval(
-      () => void refreshOpenBrowserTabs(),
+      () => void refreshOpenBrowserTabs(false),
       5_000,
     );
     return () => window.clearInterval(timer);
@@ -390,9 +396,11 @@ export default function App() {
       });
   }, [refreshOpenBrowserTabs]);
 
-  const loadCurrentMemos = useCallback(async () => {
+  const loadCurrentMemos = useCallback(async (showLoading = true) => {
     const requestId = ++loadRequestRef.current;
-    setLoadState("loading");
+    if (showLoading) {
+      setLoadState("loading");
+    }
     try {
       const resourceView = activeType === "resource";
       const items = await listMemos({
@@ -423,8 +431,11 @@ export default function App() {
       if (requestId !== loadRequestRef.current) {
         return;
       }
-      setMessage(describeError(error));
-      setLoadState("error");
+      // 静默轮询失败时保留现有内容，避免网络波动导致页面闪烁。
+      if (showLoading) {
+        setMessage(describeError(error));
+        setLoadState("error");
+      }
     }
   }, [
     activeType,
@@ -457,7 +468,10 @@ export default function App() {
     if (!hasPendingResource) {
       return;
     }
-    const timer = window.setTimeout(() => void loadCurrentMemos(), 1_500);
+    const timer = window.setTimeout(
+      () => void loadCurrentMemos(false),
+      5_000,
+    );
     return () => window.clearTimeout(timer);
   }, [loadCurrentMemos, memos]);
 

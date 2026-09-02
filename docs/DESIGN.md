@@ -85,6 +85,7 @@ Always pair unfamiliar icons with labels or accessible names.
 - Advanced metadata stays collapsed until requested.
 - Typing `@` in Web capture opens a command menu; `@网页` lists the currently open HTTP(S) pages from the connected Chrome browser and renders the selected page as an attachment card rather than plain text.
 - The `@网页` menu opens below the composer, scrolls within a bounded height, and truncates long titles and source metadata without widening the page.
+- Browser-tab snapshots and pending resource metadata refresh silently after their first load, preserving the rendered menu and memo list instead of repeatedly switching the interface back to a loading state.
 - The desktop top bar and disconnected `@网页` state expose a clear browser-extension download action with concise unzip-and-load guidance.
 
 ### Memo Row
