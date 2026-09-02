@@ -65,6 +65,14 @@ class ResourceCategory(StrEnum):
     OTHER = "other"
 
 
+class ResourceCategoryRuleMatchType(StrEnum):
+    """用户分类规则的匹配范围。"""
+
+    DOMAIN = "domain"
+    URL = "url"
+    TEXT = "text"
+
+
 class ResourceKind(StrEnum):
     """网页资料的内容形态。"""
 
@@ -191,7 +199,7 @@ class MemoUpdate(BaseModel):
     word_phonetic: str | None = Field(default=None, max_length=120)
     word_meaning: str | None = Field(default=None, max_length=5_000)
     word_example: str | None = Field(default=None, max_length=5_000)
-    resource_category: ResourceCategory | None = None
+    resource_category: str | None = Field(default=None, max_length=50)
     resource_kind: ResourceKind | None = None
     resource_reading_status: ResourceReadingStatus | None = None
     tags: list[str] | None = Field(default=None, max_length=20)
@@ -227,6 +235,13 @@ class MemoUpdate(BaseModel):
 
         return normalize_source_url(value)
 
+    @field_validator("resource_category")
+    @classmethod
+    def normalize_resource_category(cls, value: str | None) -> str | None:
+        """清理系统或用户自定义的分类编码。"""
+
+        return normalize_optional_text(value)
+
     @field_validator("source_title")
     @classmethod
     def normalize_source_title(cls, value: str | None) -> str | None:
@@ -261,7 +276,8 @@ class MemoRead(BaseModel):
     resource_image_url: str | None
     resource_metadata_status: ResourceProcessStatus
     resource_metadata_error: str | None
-    resource_category: ResourceCategory | None
+    resource_category: str | None
+    resource_category_label: str | None
     resource_category_status: ResourceProcessStatus
     resource_category_confidence: float | None
     resource_category_source: str | None
@@ -332,6 +348,110 @@ class MemoCountsResponse(BaseModel):
     word_count: int
     resource_count: int
     idea_count: int
+
+
+class ResourceCategoryRead(BaseModel):
+    """Web 可使用的系统或用户分类。"""
+
+    id: UUID | None
+    code: str
+    name: str
+    description: str | None
+    is_system: bool
+    is_active: bool
+    version: int
+
+
+class ResourceCategoryCreate(BaseModel):
+    """创建用户网页资料分类。"""
+
+    name: str = Field(min_length=1, max_length=50)
+    description: str | None = Field(default=None, max_length=300)
+
+    @field_validator("name", "description")
+    @classmethod
+    def normalize_text(cls, value: str | None) -> str | None:
+        """清理分类名称和说明。"""
+
+        return normalize_optional_text(value)
+
+
+class ResourceCategoryUpdate(BaseModel):
+    """更新用户网页资料分类。"""
+
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, max_length=50)
+    description: str | None = Field(default=None, max_length=300)
+    is_active: bool | None = None
+
+    @field_validator("name", "description")
+    @classmethod
+    def normalize_text(cls, value: str | None) -> str | None:
+        """清理分类名称和说明。"""
+
+        return normalize_optional_text(value)
+
+
+class ResourceCategoryRuleCreate(BaseModel):
+    """创建用户网页资料分类规则。"""
+
+    name: str | None = Field(default=None, max_length=100)
+    category_code: str = Field(min_length=1, max_length=50)
+    match_type: ResourceCategoryRuleMatchType
+    pattern: str = Field(min_length=1, max_length=500)
+    priority: int = Field(default=100, ge=0, le=10_000)
+    enabled: bool = True
+
+    @field_validator("name", "category_code", "pattern")
+    @classmethod
+    def normalize_rule_text(cls, value: str | None) -> str | None:
+        """清理规则名称、分类编码和匹配内容。"""
+
+        return normalize_optional_text(value)
+
+
+class ResourceCategoryRuleUpdate(BaseModel):
+    """更新用户网页资料分类规则。"""
+
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, max_length=100)
+    category_code: str | None = Field(default=None, max_length=50)
+    match_type: ResourceCategoryRuleMatchType | None = None
+    pattern: str | None = Field(default=None, max_length=500)
+    priority: int | None = Field(default=None, ge=0, le=10_000)
+    enabled: bool | None = None
+
+    @field_validator("name", "category_code", "pattern")
+    @classmethod
+    def normalize_rule_text(cls, value: str | None) -> str | None:
+        """清理规则名称、分类编码和匹配内容。"""
+
+        return normalize_optional_text(value)
+
+
+class ResourceCategoryRuleRead(BaseModel):
+    """返回给 Web 的用户分类规则。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    category_code: str
+    category_label: str
+    match_type: ResourceCategoryRuleMatchType
+    pattern: str
+    priority: int
+    enabled: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_utc_datetime(self, value: datetime) -> str:
+        """统一输出分类规则时间。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 class LinkHealthListResponse(BaseModel):

@@ -17,6 +17,12 @@ import type {
   MemoStatus,
   MemoType,
   MemoUpdateRequest,
+  ResourceCategoryCreateRequest,
+  ResourceCategoryOption,
+  ResourceCategoryRule,
+  ResourceCategoryRuleCreateRequest,
+  ResourceCategoryRuleUpdateRequest,
+  ResourceCategoryUpdateRequest,
   ResourceCategory,
   ResourceKind,
   ResourceReadingStatus,
@@ -134,6 +140,60 @@ export async function listMemos(
 
 export async function getMemoCounts(): Promise<MemoCounts> {
   return request<MemoCounts>("/memos/counts");
+}
+
+export async function getResourceCategories(): Promise<ResourceCategoryOption[]> {
+  return request<ResourceCategoryOption[]>("/resource-categories");
+}
+
+export async function createResourceCategory(
+  payload: ResourceCategoryCreateRequest,
+): Promise<ResourceCategoryOption> {
+  return request<ResourceCategoryOption>("/resource-categories", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateResourceCategory(
+  categoryId: string,
+  payload: ResourceCategoryUpdateRequest,
+): Promise<ResourceCategoryOption> {
+  return request<ResourceCategoryOption>(`/resource-categories/${categoryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getResourceCategoryRules(): Promise<ResourceCategoryRule[]> {
+  return request<ResourceCategoryRule[]>("/resource-category-rules");
+}
+
+export async function createResourceCategoryRule(
+  payload: ResourceCategoryRuleCreateRequest,
+): Promise<ResourceCategoryRule> {
+  return request<ResourceCategoryRule>("/resource-category-rules", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateResourceCategoryRule(
+  ruleId: string,
+  payload: ResourceCategoryRuleUpdateRequest,
+): Promise<ResourceCategoryRule> {
+  return request<ResourceCategoryRule>(`/resource-category-rules/${ruleId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteResourceCategoryRule(
+  ruleId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/resource-category-rules/${ruleId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function enrichResource(memoId: string): Promise<Memo> {

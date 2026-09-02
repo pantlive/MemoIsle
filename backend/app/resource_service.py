@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.category_service import classification_categories, classification_rules
 from app.config import Settings
 from app.database import Database
 from app.models import Memo
@@ -20,6 +21,7 @@ from app.resource_processing import (
     ResourceMetadata,
     UnsafeResourceUrlError,
     classify_resource,
+    classify_resource_by_user_rules,
     fetch_resource_metadata,
 )
 from app.schemas import MemoType, ResourceProcessStatus
@@ -87,6 +89,7 @@ def apply_category(memo: Memo, decision: CategoryDecision) -> None:
     if memo.resource_category_source == "manual":
         return
     memo.resource_category = decision.category
+    memo.resource_category_label = decision.category_label
     memo.resource_category_status = ResourceProcessStatus.READY
     memo.resource_category_confidence = decision.confidence
     memo.resource_category_source = decision.source
@@ -140,6 +143,8 @@ def enrich_resource(
             llm_base_url=settings.llm_base_url,
             llm_api_key=settings.llm_api_key,
             llm_model=settings.llm_model,
+            user_rules=classification_rules(session, user_id),
+            category_options=classification_categories(session, user_id),
         )
     else:
         decision = classifier(metadata)
@@ -273,3 +278,129 @@ def run_pending_resource_enrichments(
     finally:
         database.dispose()
     return processed_count
+
+
+def apply_user_category_rules(
+    session: Session,
+    user_id: str,
+) -> int:
+    """把当前启用的用户规则应用到已有网页资料，不访问原网页。"""
+
+    user_rules = classification_rules(session, user_id)
+    if not user_rules:
+        return 0
+    resources = session.scalars(
+        select(Memo).where(
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != "trashed",
+        )
+    )
+    changed_count = 0
+    for memo in resources:
+        if memo.resource_category_source == "manual":
+            continue
+        decision = classify_resource_by_user_rules(
+            fallback_metadata(memo),
+            user_rules,
+        )
+        if decision is None:
+            continue
+        previous_values = (
+            memo.resource_category,
+            memo.resource_category_label,
+            memo.resource_category_source,
+            memo.resource_auto_tags,
+        )
+        apply_category(memo, decision)
+        current_values = (
+            memo.resource_category,
+            memo.resource_category_label,
+            memo.resource_category_source,
+            memo.resource_auto_tags,
+        )
+        if previous_values != current_values:
+            memo.updated_at = datetime.now(UTC)
+            memo.version += 1
+            changed_count += 1
+    session.commit()
+    return changed_count
+
+
+def apply_user_category_rules_in_background(
+    database_url: str,
+    user_id: str,
+) -> None:
+    """在独立会话中批量应用用户分类规则。"""
+
+    database = Database(database_url)
+    try:
+        with database.session_factory() as session:
+            apply_user_category_rules(session, user_id)
+    finally:
+        database.dispose()
+
+
+def reclassify_user_rule_resources(
+    session: Session,
+    user_id: str,
+    settings: Settings,
+) -> int:
+    """规则发生变化后重新判断曾由用户规则分类的资料。"""
+
+    user_rules = classification_rules(session, user_id)
+    categories = classification_categories(session, user_id)
+    resources = session.scalars(
+        select(Memo).where(
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != "trashed",
+            Memo.resource_category_source == "user_rule",
+        )
+    )
+    changed_count = 0
+    for memo in resources:
+        if memo.resource_category_source == "manual":
+            continue
+        decision = classify_resource(
+            fallback_metadata(memo),
+            llm_base_url=settings.llm_base_url,
+            llm_api_key=settings.llm_api_key,
+            llm_model=settings.llm_model,
+            user_rules=user_rules,
+            category_options=categories,
+        )
+        previous_values = (
+            memo.resource_category,
+            memo.resource_category_label,
+            memo.resource_category_source,
+            memo.resource_auto_tags,
+        )
+        apply_category(memo, decision)
+        current_values = (
+            memo.resource_category,
+            memo.resource_category_label,
+            memo.resource_category_source,
+            memo.resource_auto_tags,
+        )
+        if previous_values != current_values:
+            memo.updated_at = datetime.now(UTC)
+            memo.version += 1
+            changed_count += 1
+    session.commit()
+    return changed_count
+
+
+def reclassify_user_rule_resources_in_background(
+    database_url: str,
+    user_id: str,
+    settings: Settings,
+) -> None:
+    """在独立会话中重新处理用户规则产生的资料。"""
+
+    database = Database(database_url)
+    try:
+        with database.session_factory() as session:
+            reclassify_user_rule_resources(session, user_id, settings)
+    finally:
+        database.dispose()

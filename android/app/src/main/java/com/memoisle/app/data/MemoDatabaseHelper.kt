@@ -25,6 +25,7 @@ class MemoDatabaseHelper(context: Context) :
                 resource_site_name TEXT,
                 resource_image_url TEXT,
                 resource_category TEXT,
+                resource_category_label TEXT,
                 resource_kind TEXT,
                 resource_reading_status TEXT,
                 resource_category_status TEXT NOT NULL DEFAULT 'none',
@@ -137,6 +138,10 @@ class MemoDatabaseHelper(context: Context) :
                 "ALTER TABLE memo ADD COLUMN starred INTEGER NOT NULL DEFAULT 0",
             )
         }
+        if (oldVersion < 8) {
+            // 自定义分类需要同步显示名称，旧资料保持系统分类兼容显示。
+            database.execSQL("ALTER TABLE memo ADD COLUMN resource_category_label TEXT")
+        }
     }
 
     @Synchronized
@@ -186,6 +191,7 @@ class MemoDatabaseHelper(context: Context) :
             put(COLUMN_RESOURCE_SITE_NAME, memo.resourceSiteName)
             put(COLUMN_RESOURCE_IMAGE_URL, memo.resourceImageUrl)
             put(COLUMN_RESOURCE_CATEGORY, memo.resourceCategory)
+            put(COLUMN_RESOURCE_CATEGORY_LABEL, memo.resourceCategoryLabel)
             put(COLUMN_RESOURCE_KIND, memo.resourceKind)
             put(COLUMN_RESOURCE_READING_STATUS, memo.resourceReadingStatus)
             put(COLUMN_RESOURCE_CATEGORY_STATUS, memo.resourceCategoryStatus)
@@ -275,6 +281,7 @@ class MemoDatabaseHelper(context: Context) :
         val resourceSiteNameIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_SITE_NAME)
         val resourceImageUrlIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_IMAGE_URL)
         val resourceCategoryIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_CATEGORY)
+        val resourceCategoryLabelIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_CATEGORY_LABEL)
         val resourceKindIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_KIND)
         val resourceReadingStatusIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_READING_STATUS)
         val resourceImportFolderIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_IMPORT_FOLDER)
@@ -338,6 +345,11 @@ class MemoDatabaseHelper(context: Context) :
                 null
             } else {
                 getString(resourceCategoryIndex)
+            },
+            resourceCategoryLabel = if (isNull(resourceCategoryLabelIndex)) {
+                null
+            } else {
+                getString(resourceCategoryLabelIndex)
             },
             resourceKind = if (isNull(resourceKindIndex)) null else getString(resourceKindIndex),
             resourceReadingStatus = if (isNull(resourceReadingStatusIndex)) {
@@ -411,7 +423,7 @@ class MemoDatabaseHelper(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "memoisle.db"
-        const val DATABASE_VERSION = 7
+        const val DATABASE_VERSION = 8
         const val TABLE_MEMO = "memo"
         const val COLUMN_CLIENT_ID = "client_id"
         const val COLUMN_REMOTE_ID = "remote_id"
@@ -424,6 +436,7 @@ class MemoDatabaseHelper(context: Context) :
         const val COLUMN_RESOURCE_SITE_NAME = "resource_site_name"
         const val COLUMN_RESOURCE_IMAGE_URL = "resource_image_url"
         const val COLUMN_RESOURCE_CATEGORY = "resource_category"
+        const val COLUMN_RESOURCE_CATEGORY_LABEL = "resource_category_label"
         const val COLUMN_RESOURCE_KIND = "resource_kind"
         const val COLUMN_RESOURCE_READING_STATUS = "resource_reading_status"
         const val COLUMN_RESOURCE_CATEGORY_STATUS = "resource_category_status"
@@ -468,6 +481,7 @@ class MemoDatabaseHelper(context: Context) :
             COLUMN_RESOURCE_SITE_NAME,
             COLUMN_RESOURCE_IMAGE_URL,
             COLUMN_RESOURCE_CATEGORY,
+            COLUMN_RESOURCE_CATEGORY_LABEL,
             COLUMN_RESOURCE_KIND,
             COLUMN_RESOURCE_READING_STATUS,
             COLUMN_RESOURCE_CATEGORY_STATUS,

@@ -12,14 +12,20 @@ import LinkHealthDialog from "./LinkHealthDialog";
 import {
   ApiError,
   browserExtensionDownloadUrl,
+  createResourceCategory,
+  createResourceCategoryRule,
   createMemo,
+  deleteResourceCategoryRule,
   exchangeBrowserCapture,
+  getResourceCategories,
+  getResourceCategoryRules,
   getMemoCounts,
   getLinkHealthCenter,
   listOpenBrowserTabs,
   listMemos,
   memoAudioUrl,
   reviewWord,
+  updateResourceCategory,
   updateMemo,
   uploadMemoAudio,
 } from "./api";
@@ -31,6 +37,9 @@ import type {
   MemoSort,
   MemoType,
   ResourceCategory,
+  ResourceCategoryOption,
+  ResourceCategoryRule,
+  ResourceCategoryRuleMatchType,
   ReviewFeedback,
 } from "./types";
 
@@ -68,18 +77,77 @@ const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
 });
 
-const resourceCategories: Array<{
-  value: ResourceCategory;
-  label: string;
-}> = [
-  { value: "learning", label: "学习资料" },
-  { value: "article", label: "文章阅读" },
-  { value: "media", label: "视频与音频" },
-  { value: "tool", label: "工具与服务" },
-  { value: "book_paper", label: "书籍与论文" },
-  { value: "product", label: "商品与好物" },
-  { value: "other", label: "其他" },
+const defaultResourceCategories: ResourceCategoryOption[] = [
+  {
+    id: null,
+    code: "learning",
+    name: "学习资料",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
+  {
+    id: null,
+    code: "article",
+    name: "文章阅读",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
+  {
+    id: null,
+    code: "media",
+    name: "视频与音频",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
+  {
+    id: null,
+    code: "tool",
+    name: "工具与服务",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
+  {
+    id: null,
+    code: "book_paper",
+    name: "书籍与论文",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
+  {
+    id: null,
+    code: "product",
+    name: "商品与好物",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
+  {
+    id: null,
+    code: "other",
+    name: "其他",
+    description: null,
+    is_system: true,
+    is_active: true,
+    version: 1,
+  },
 ];
+
+const resourceRuleMatchLabels: Record<ResourceCategoryRuleMatchType, string> = {
+  domain: "网站域名",
+  url: "网址包含",
+  text: "标题或描述包含",
+};
 
 const viewCopy = {
   all: {
@@ -171,6 +239,21 @@ export default function App() {
   const [memoSort, setMemoSort] = useState<MemoSort>("updated_desc");
   const [resourceViewMode, setResourceViewMode] =
     useState<ResourceViewMode>("list");
+  const [resourceCategories, setResourceCategories] = useState(
+    defaultResourceCategories,
+  );
+  const [categoryRules, setCategoryRules] = useState<ResourceCategoryRule[]>([]);
+  const [categorySettingsOpen, setCategorySettingsOpen] = useState(false);
+  const [categorySettingsLoading, setCategorySettingsLoading] = useState(false);
+  const [categorySubmitting, setCategorySubmitting] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryDescription, setNewCategoryDescription] = useState("");
+  const [newRuleName, setNewRuleName] = useState("");
+  const [newRuleCategory, setNewRuleCategory] = useState("");
+  const [newRuleMatchType, setNewRuleMatchType] =
+    useState<ResourceCategoryRuleMatchType>("domain");
+  const [newRulePattern, setNewRulePattern] = useState("");
+  const [newRulePriority, setNewRulePriority] = useState("100");
   const [bookmarkImportOpen, setBookmarkImportOpen] = useState(false);
   const [healthCenterOpen, setHealthCenterOpen] = useState(false);
   const [healthIssueCount, setHealthIssueCount] = useState(0);
@@ -241,6 +324,125 @@ export default function App() {
     }
   }, []);
 
+  const refreshCategorySettings = useCallback(async () => {
+    setCategorySettingsLoading(true);
+    try {
+      const [categories, rules] = await Promise.all([
+        getResourceCategories(),
+        getResourceCategoryRules(),
+      ]);
+      setResourceCategories(categories);
+      setCategoryRules(rules);
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setCategorySettingsLoading(false);
+    }
+  }, []);
+
+  const handleCreateCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newCategoryName.trim();
+    if (!name || categorySubmitting) {
+      return;
+    }
+    setCategorySubmitting(true);
+    try {
+      const category = await createResourceCategory({
+        name,
+        description: newCategoryDescription.trim() || undefined,
+      });
+      setResourceCategories((current) => [...current, category]);
+      setNewCategoryName("");
+      setNewCategoryDescription("");
+      setNewRuleCategory(category.code);
+      setMessage(`已创建“${category.name}”，现在可以为它添加规则。`);
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setCategorySubmitting(false);
+    }
+  };
+
+  const handleToggleCategory = async (category: ResourceCategoryOption) => {
+    if (!category.id || categorySubmitting) {
+      return;
+    }
+    setCategorySubmitting(true);
+    try {
+      const updated = await updateResourceCategory(category.id, {
+        expected_version: category.version,
+        is_active: !category.is_active,
+      });
+      setResourceCategories((current) =>
+        current.map((item) => (item.code === updated.code ? updated : item)),
+      );
+      setMessage(
+        updated.is_active
+          ? `已启用“${updated.name}”。`
+          : `已停用“${updated.name}”，已有资料会重新判断。`,
+      );
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setCategorySubmitting(false);
+    }
+  };
+
+  const handleCreateCategoryRule = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    const pattern = newRulePattern.trim();
+    const priority = Number.parseInt(newRulePriority, 10);
+    if (
+      !newRuleCategory ||
+      !pattern ||
+      !Number.isInteger(priority) ||
+      priority < 0 ||
+      categorySubmitting
+    ) {
+      setMessage("请选择分类并填写有效的规则内容和优先级。");
+      return;
+    }
+    setCategorySubmitting(true);
+    try {
+      const rule = await createResourceCategoryRule({
+        name: newRuleName.trim() || undefined,
+        category_code: newRuleCategory,
+        match_type: newRuleMatchType,
+        pattern,
+        priority,
+      });
+      setCategoryRules((current) => [...current, rule]);
+      setNewRuleName("");
+      setNewRulePattern("");
+      setMessage("分类规则已保存，已有网页资料正在按新规则整理。");
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setCategorySubmitting(false);
+    }
+  };
+
+  const handleDeleteCategoryRule = async (rule: ResourceCategoryRule) => {
+    if (categorySubmitting) {
+      return;
+    }
+    setCategorySubmitting(true);
+    try {
+      await deleteResourceCategoryRule(rule.id);
+      setCategoryRules((current) =>
+        current.filter((item) => item.id !== rule.id),
+      );
+      setMessage("分类规则已删除，相关资料会重新判断。");
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setCategorySubmitting(false);
+    }
+  };
+
   const refreshOpenBrowserTabs = useCallback(async (showLoading = true) => {
     if (showLoading) {
       setOpenBrowserTabsLoading(true);
@@ -293,6 +495,12 @@ export default function App() {
   useEffect(() => {
     void refreshMemoCounts();
   }, [refreshMemoCounts]);
+
+  useEffect(() => {
+    if (activeType === "resource") {
+      void refreshCategorySettings();
+    }
+  }, [activeType, refreshCategorySettings]);
 
   useEffect(() => {
     if (!webCommandOpen) {
@@ -1109,8 +1317,176 @@ export default function App() {
                 <button type="button" onClick={() => setBookmarkImportOpen(true)}>
                   ⇧ 导入浏览器书签
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setCategorySettingsOpen((open) => !open)}
+                >
+                  ⚙ 分类模板
+                </button>
               </span>
             </div>
+          )}
+
+          {activeType === "resource" && categorySettingsOpen && (
+            <section
+              className="category-settings-panel"
+              aria-label="自定义分类模板和规则"
+            >
+              <div className="category-settings-heading">
+                <div>
+                  <strong>我的分类模板</strong>
+                  <span>先按你的规则分类，无法判断时再交给大模型。</span>
+                </div>
+                {categorySettingsLoading && <small>正在读取……</small>}
+              </div>
+              <div className="category-settings-grid">
+                <div className="category-template-column">
+                  <h3>自定义分类</h3>
+                  <form
+                    className="category-create-form"
+                    onSubmit={handleCreateCategory}
+                  >
+                    <input
+                      value={newCategoryName}
+                      onChange={(event) => setNewCategoryName(event.target.value)}
+                      placeholder="例如：待研究项目"
+                      maxLength={50}
+                    />
+                    <input
+                      value={newCategoryDescription}
+                      onChange={(event) =>
+                        setNewCategoryDescription(event.target.value)
+                      }
+                      placeholder="给大模型的分类说明（可选）"
+                      maxLength={300}
+                    />
+                    <button type="submit" disabled={categorySubmitting}>
+                      添加分类
+                    </button>
+                  </form>
+                  <div className="custom-category-list">
+                    {resourceCategories
+                      .filter((category) => !category.is_system)
+                      .map((category) => (
+                        <div className="custom-category-row" key={category.code}>
+                          <span>
+                            <strong>{category.name}</strong>
+                            {category.description && <small>{category.description}</small>}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={categorySubmitting}
+                            onClick={() => void handleToggleCategory(category)}
+                          >
+                            {category.is_active ? "停用" : "启用"}
+                          </button>
+                        </div>
+                      ))}
+                    {resourceCategories.every((category) => category.is_system) && (
+                      <p className="category-settings-empty">
+                        还没有自定义分类，先创建一个属于你的分类模板。
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="category-rule-column">
+                  <h3>自动分类规则</h3>
+                  <form
+                    className="category-rule-form"
+                    onSubmit={handleCreateCategoryRule}
+                  >
+                    <input
+                      value={newRuleName}
+                      onChange={(event) => setNewRuleName(event.target.value)}
+                      placeholder="规则名称（可选）"
+                      maxLength={100}
+                    />
+                    <div className="category-rule-fields">
+                      <select
+                        value={newRuleCategory}
+                        onChange={(event) => setNewRuleCategory(event.target.value)}
+                      >
+                        <option value="">选择分类</option>
+                        {resourceCategories
+                          .filter((category) => category.is_active)
+                          .map((category) => (
+                            <option key={category.code} value={category.code}>
+                              {category.name}
+                            </option>
+                          ))}
+                      </select>
+                      <select
+                        value={newRuleMatchType}
+                        onChange={(event) =>
+                          setNewRuleMatchType(
+                            event.target.value as ResourceCategoryRuleMatchType,
+                          )
+                        }
+                      >
+                        {Object.entries(resourceRuleMatchLabels).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </div>
+                    <div className="category-rule-fields">
+                      <input
+                        value={newRulePattern}
+                        onChange={(event) => setNewRulePattern(event.target.value)}
+                        placeholder={
+                          newRuleMatchType === "domain"
+                            ? "例如：github.com"
+                            : newRuleMatchType === "url"
+                              ? "例如：/research/"
+                              : "例如：深度学习"
+                        }
+                        maxLength={500}
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="10000"
+                        value={newRulePriority}
+                        onChange={(event) => setNewRulePriority(event.target.value)}
+                        aria-label="规则优先级"
+                        title="数字越小优先级越高"
+                      />
+                    </div>
+                    <button type="submit" disabled={categorySubmitting}>
+                      保存规则
+                    </button>
+                  </form>
+                  <div className="category-rule-list">
+                    {categoryRules.map((rule) => (
+                      <div className="category-rule-row" key={rule.id}>
+                        <span>
+                          <strong>{rule.category_label}</strong>
+                          <small>
+                            {resourceRuleMatchLabels[rule.match_type]}：{rule.pattern}
+                            {rule.priority !== 100 ? ` · 优先级 ${rule.priority}` : ""}
+                          </small>
+                        </span>
+                        <button
+                          type="button"
+                          disabled={categorySubmitting}
+                          onClick={() => void handleDeleteCategoryRule(rule)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                    {categoryRules.length === 0 && (
+                      <p className="category-settings-empty">
+                        还没有规则，域名规则最适合先整理常用网站。
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
           )}
 
           {message && <div className="status-message" role="status">{message}</div>}
@@ -1172,18 +1548,20 @@ export default function App() {
                       setResourcePage(1);
                     }}
                   >全部</button>
-                  {resourceCategories.map((category) => (
-                    <button
-                      className={
-                        resourceCategoryFilter === category.value ? "active" : ""
-                      }
-                      key={category.value}
-                      onClick={() => {
-                        setResourceCategoryFilter(category.value);
-                        setResourcePage(1);
-                      }}
-                    >{category.label}</button>
-                  ))}
+                  {resourceCategories
+                    .filter((category) => category.is_active)
+                    .map((category) => (
+                      <button
+                        className={
+                          resourceCategoryFilter === category.code ? "active" : ""
+                        }
+                        key={category.code}
+                        onClick={() => {
+                          setResourceCategoryFilter(category.code);
+                          setResourcePage(1);
+                        }}
+                      >{category.name}</button>
+                    ))}
                   <label className="star-filter-toggle">
                     <input
                       type="checkbox"
@@ -1329,8 +1707,8 @@ export default function App() {
                           >
                             <option value="" disabled>分类中</option>
                             {resourceCategories.map((category) => (
-                              <option key={category.value} value={category.value}>
-                                {category.label}
+                              <option key={category.code} value={category.code}>
+                                {category.name}
                               </option>
                             ))}
                           </select>

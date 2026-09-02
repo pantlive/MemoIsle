@@ -199,6 +199,11 @@ private fun JSONObject.toMemo(): Memo {
         } else {
             getString("resource_category")
         },
+        resourceCategoryLabel = if (isNull("resource_category_label")) {
+            null
+        } else {
+            getString("resource_category_label")
+        },
         resourceKind = if (isNull("resource_kind")) null else getString("resource_kind"),
         resourceReadingStatus = if (isNull("resource_reading_status")) {
             null

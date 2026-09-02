@@ -10,6 +10,8 @@ import pytest
 from app.config import Settings
 from app.database import Database
 from app.resource_processing import (
+    ClassificationCategory,
+    ClassificationRule,
     ResourceMetadata,
     UnsafeResourceUrlError,
     classify_resource,
@@ -107,6 +109,91 @@ def test_rules_and_optional_llm_use_fixed_categories() -> None:
         )
     assert llm_decision.category == ResourceCategory.PRODUCT
     assert llm_decision.source == "llm"
+
+
+def test_user_rule_has_priority_and_can_select_custom_category() -> None:
+    """用户规则优先于系统规则，并可命中自定义分类。"""
+
+    metadata = ResourceMetadata(
+        final_url="https://github.com/example/project",
+        page_title="项目主页",
+        description="工具项目",
+        site_name="GitHub",
+        favicon_url=None,
+        http_status=200,
+    )
+    decision = classify_resource(
+        metadata,
+        user_rules=[
+            ClassificationRule(
+                category_code="custom_research",
+                category_label="我的研究",
+                match_type="domain",
+                pattern="github.com",
+            )
+        ],
+        category_options=[
+            ClassificationCategory(
+                code="custom_research",
+                label="我的研究",
+                description="需要长期研究的项目",
+            )
+        ],
+    )
+    assert decision.category == "custom_research"
+    assert decision.category_label == "我的研究"
+    assert decision.source == "user_rule"
+
+
+def test_user_category_template_and_rule_api(client: TestClient) -> None:
+    """用户可以创建分类模板和规则，并应用到已有资料。"""
+
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "研究项目",
+            "body": "等待整理",
+            "source_url": "https://notes.example.com/project",
+            "tags": [],
+        },
+    )
+    assert resource_response.status_code == 201
+
+    custom_response = client.post(
+        "/api/v1/resource-categories",
+        json={
+            "name": "我的研究",
+            "description": "需要长期跟进的项目",
+        },
+    )
+    assert custom_response.status_code == 201
+    custom_category = custom_response.json()
+    assert custom_category["is_system"] is False
+
+    rule_response = client.post(
+        "/api/v1/resource-category-rules",
+        json={
+            "category_code": custom_category["code"],
+            "match_type": "domain",
+            "pattern": "example.com",
+            "priority": 10,
+        },
+    )
+    assert rule_response.status_code == 201
+    assert rule_response.json()["category_label"] == "我的研究"
+
+    memo_response = client.get(
+        f"/api/v1/memos/{resource_response.json()['id']}"
+    )
+    assert memo_response.status_code == 200
+    assert memo_response.json()["resource_category"] == custom_category["code"]
+    assert memo_response.json()["resource_category_label"] == "我的研究"
+
+    rules_response = client.get("/api/v1/resource-category-rules")
+    assert rules_response.status_code == 200
+    assert len(rules_response.json()) == 1
 
 
 def test_enrichment_updates_metadata_category_and_search(tmp_path: Path) -> None:

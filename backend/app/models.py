@@ -91,6 +91,10 @@ class Memo(Base):
         nullable=True,
         index=True,
     )
+    resource_category_label: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
     resource_category_status: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
@@ -417,4 +421,76 @@ class LinkHealthEvent(Base):
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
+    )
+
+
+class ResourceCategoryTemplate(Base):
+    """用户自定义的网页资料分类模板。"""
+
+    __tablename__ = "resource_category_template"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "code",
+            name="uq_resource_category_template_user_code",
+        ),
+        Index(
+            "ix_resource_category_template_user_active",
+            "user_id",
+            "is_active",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class ResourceCategoryRule(Base):
+    """用户自定义的网页资料分类匹配规则。"""
+
+    __tablename__ = "resource_category_rule"
+    __table_args__ = (
+        Index(
+            "ix_resource_category_rule_user_enabled_priority",
+            "user_id",
+            "enabled",
+            "priority",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    match_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    pattern: Mapped[str] = mapped_column(String(500), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
     )

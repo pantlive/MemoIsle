@@ -42,6 +42,22 @@ from app.browser_capture_service import (
     sync_open_browser_tabs,
 )
 from app.browser_extension_service import build_browser_extension_archive
+from app.category_service import (
+    CategoryCodeNotFoundError,
+    CategoryNameConflictError,
+    CategoryRuleNotFoundError,
+    CategoryTemplateNotFoundError,
+    CategoryVersionConflictError,
+    category_code_exists,
+    category_label,
+    create_category_rule,
+    create_category_template,
+    delete_category_rule,
+    list_category_rules,
+    list_resource_category_options,
+    update_category_rule,
+    update_category_template,
+)
 from app.config import Settings
 from app.dependencies import get_current_user_id, get_session, get_settings
 from app.link_health_service import (
@@ -49,8 +65,14 @@ from app.link_health_service import (
     check_resource_link,
     list_link_health_center,
 )
+from app.models import ResourceCategoryRule
 from app.resource_processing import UnsafeResourceUrlError
-from app.resource_service import enrich_resource, enrich_resource_in_background
+from app.resource_service import (
+    apply_user_category_rules_in_background,
+    enrich_resource,
+    enrich_resource_in_background,
+    reclassify_user_rule_resources_in_background,
+)
 from app.schemas import (
     BookmarkImportBatchRead,
     BookmarkImportPreview,
@@ -77,7 +99,12 @@ from app.schemas import (
     MemoStatus,
     MemoType,
     MemoUpdate,
-    ResourceCategory,
+    ResourceCategoryCreate,
+    ResourceCategoryRead,
+    ResourceCategoryRuleCreate,
+    ResourceCategoryRuleRead,
+    ResourceCategoryRuleUpdate,
+    ResourceCategoryUpdate,
     ResourceKind,
     ResourceReadingStatus,
     ReviewQueueResponse,
@@ -105,6 +132,29 @@ router = APIRouter()
 SessionDependency = Annotated[Session, Depends(get_session)]
 UserDependency = Annotated[str, Depends(get_current_user_id)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
+
+
+def resource_category_rule_read(
+    session: Session,
+    user_id: str,
+    rule: ResourceCategoryRule,
+) -> ResourceCategoryRuleRead:
+    """将数据库规则补充分类名称后返回给客户端。"""
+
+    return ResourceCategoryRuleRead(
+        id=rule.id,
+        name=rule.name,
+        category_code=rule.category_code,
+        category_label=category_label(session, user_id, rule.category_code)
+        or rule.category_code,
+        match_type=rule.match_type,
+        pattern=rule.pattern,
+        priority=rule.priority,
+        enabled=rule.enabled,
+        version=rule.version,
+        created_at=rule.created_at,
+        updated_at=rule.updated_at,
+    )
 
 
 @router.get("/health", tags=["system"])
@@ -544,8 +594,8 @@ def list_memos_route(
     memo_type: Annotated[MemoType | None, Query(alias="type")] = None,
     query_text: Annotated[str | None, Query(alias="q", max_length=200)] = None,
     resource_category: Annotated[
-        ResourceCategory | None,
-        Query(alias="category"),
+        str | None,
+        Query(alias="category", max_length=50),
     ] = None,
     resource_kind: Annotated[
         ResourceKind | None,
@@ -641,6 +691,226 @@ def count_memos_route(
     )
 
 
+@router.get(
+    "/resource-categories",
+    response_model=list[ResourceCategoryRead],
+    tags=["resources"],
+)
+def list_resource_categories_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> list[ResourceCategoryRead]:
+    """返回系统分类和当前用户的自定义分类模板。"""
+
+    return [
+        ResourceCategoryRead.model_validate(option)
+        for option in list_resource_category_options(session, user_id)
+    ]
+
+
+@router.post(
+    "/resource-categories",
+    response_model=ResourceCategoryRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["resources"],
+)
+def create_resource_category_route(
+    payload: ResourceCategoryCreate,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> ResourceCategoryRead:
+    """创建当前用户的自定义网页资料分类。"""
+
+    try:
+        template = create_category_template(
+            session,
+            user_id,
+            payload.name,
+            payload.description,
+        )
+    except CategoryNameConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ResourceCategoryRead(
+        id=template.id,
+        code=template.code,
+        name=template.name,
+        description=template.description,
+        is_system=False,
+        is_active=template.is_active,
+        version=template.version,
+    )
+
+
+@router.patch(
+    "/resource-categories/{category_id}",
+    response_model=ResourceCategoryRead,
+    tags=["resources"],
+)
+def update_resource_category_route(
+    category_id: UUID,
+    payload: ResourceCategoryUpdate,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceCategoryRead:
+    """更新或停用当前用户的自定义网页资料分类。"""
+
+    try:
+        template = update_category_template(
+            session,
+            user_id,
+            str(category_id),
+            payload.expected_version,
+            payload.model_dump(exclude_unset=True, exclude={"expected_version"}),
+        )
+    except CategoryTemplateNotFoundError as error:
+        raise HTTPException(status_code=404, detail="分类模板不存在") from error
+    except CategoryNameConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except CategoryVersionConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error)},
+        ) from error
+    background_tasks.add_task(
+        reclassify_user_rule_resources_in_background,
+        settings.database_url,
+        user_id,
+        settings,
+    )
+    return ResourceCategoryRead(
+        id=template.id,
+        code=template.code,
+        name=template.name,
+        description=template.description,
+        is_system=False,
+        is_active=template.is_active,
+        version=template.version,
+    )
+
+
+@router.get(
+    "/resource-category-rules",
+    response_model=list[ResourceCategoryRuleRead],
+    tags=["resources"],
+)
+def list_resource_category_rules_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> list[ResourceCategoryRuleRead]:
+    """返回当前用户的网页资料分类规则。"""
+
+    return [
+        resource_category_rule_read(session, user_id, rule)
+        for rule in list_category_rules(session, user_id)
+    ]
+
+
+@router.post(
+    "/resource-category-rules",
+    response_model=ResourceCategoryRuleRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["resources"],
+)
+def create_resource_category_rule_route(
+    payload: ResourceCategoryRuleCreate,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceCategoryRuleRead:
+    """创建规则并异步应用到已有网页资料。"""
+
+    try:
+        rule = create_category_rule(
+            session,
+            user_id,
+            payload.name,
+            payload.category_code,
+            payload.match_type,
+            payload.pattern,
+            payload.priority,
+            payload.enabled,
+        )
+    except CategoryCodeNotFoundError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    background_tasks.add_task(
+        apply_user_category_rules_in_background,
+        settings.database_url,
+        user_id,
+    )
+    return resource_category_rule_read(session, user_id, rule)
+
+
+@router.patch(
+    "/resource-category-rules/{rule_id}",
+    response_model=ResourceCategoryRuleRead,
+    tags=["resources"],
+)
+def update_resource_category_rule_route(
+    rule_id: UUID,
+    payload: ResourceCategoryRuleUpdate,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceCategoryRuleRead:
+    """更新规则并重新处理受影响的资料。"""
+
+    try:
+        rule = update_category_rule(
+            session,
+            user_id,
+            str(rule_id),
+            payload.expected_version,
+            payload.model_dump(exclude_unset=True, exclude={"expected_version"}),
+        )
+    except CategoryRuleNotFoundError as error:
+        raise HTTPException(status_code=404, detail="分类规则不存在") from error
+    except CategoryCodeNotFoundError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except CategoryVersionConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error)},
+        ) from error
+    background_tasks.add_task(
+        reclassify_user_rule_resources_in_background,
+        settings.database_url,
+        user_id,
+        settings,
+    )
+    return resource_category_rule_read(session, user_id, rule)
+
+
+@router.delete(
+    "/resource-category-rules/{rule_id}",
+    response_model=dict[str, bool],
+    tags=["resources"],
+)
+def delete_resource_category_rule_route(
+    rule_id: UUID,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> dict[str, bool]:
+    """删除规则并重新处理原先由用户规则分类的资料。"""
+
+    try:
+        delete_category_rule(session, user_id, str(rule_id))
+    except CategoryRuleNotFoundError as error:
+        raise HTTPException(status_code=404, detail="分类规则不存在") from error
+    background_tasks.add_task(
+        reclassify_user_rule_resources_in_background,
+        settings.database_url,
+        user_id,
+        settings,
+    )
+    return {"deleted": True}
+
+
 @router.get("/memos/{memo_id}", response_model=MemoRead, tags=["memos"])
 def get_memo_route(
     memo_id: UUID,
@@ -665,6 +935,12 @@ def update_memo_route(
 ) -> MemoRead:
     """更新条目并检测跨设备版本冲突。"""
 
+    if payload.resource_category is not None and not category_code_exists(
+        session,
+        user_id,
+        payload.resource_category,
+    ):
+        raise HTTPException(status_code=422, detail="分类不存在或已停用")
     try:
         memo = update_memo(session, user_id, str(memo_id), payload)
     except MemoNotFoundError as error:
@@ -675,6 +951,14 @@ def update_memo_route(
             status_code=status.HTTP_409_CONFLICT,
             detail={"message": str(error), "current": current.model_dump(mode="json")},
         ) from error
+    if "resource_category" in payload.model_fields_set:
+        memo.resource_category_label = (
+            category_label(session, user_id, payload.resource_category)
+            if payload.resource_category is not None
+            else None
+        )
+        session.commit()
+        session.refresh(memo)
     return MemoRead.model_validate(memo)
 
 

@@ -22,6 +22,7 @@ data class Memo(
     val resourceSiteName: String? = null,
     val resourceImageUrl: String? = null,
     val resourceCategory: String? = null,
+    val resourceCategoryLabel: String? = null,
     val resourceKind: String? = null,
     val resourceReadingStatus: String? = null,
     val resourceCategoryStatus: String = "none",
@@ -241,15 +242,20 @@ fun resourceHost(url: String): String {
     }.getOrDefault("网页资料").ifEmpty { "网页资料" }
 }
 
-fun resourceCategoryLabel(category: String?): String = when (category) {
-    "learning" -> "学习资料"
-    "article" -> "文章阅读"
-    "media" -> "视频与音频"
-    "tool" -> "工具与服务"
-    "book_paper" -> "书籍与论文"
-    "product" -> "商品与好物"
-    "other" -> "其他"
-    else -> "分类中"
+fun resourceCategoryLabel(category: String?, customLabel: String? = null): String {
+    if (!customLabel.isNullOrBlank()) {
+        return customLabel
+    }
+    return when (category) {
+        "learning" -> "学习资料"
+        "article" -> "文章阅读"
+        "media" -> "视频与音频"
+        "tool" -> "工具与服务"
+        "book_paper" -> "书籍与论文"
+        "product" -> "商品与好物"
+        "other" -> "其他"
+        else -> "分类中"
+    }
 }
 
 fun resourceKindLabel(kind: String?): String = when (kind) {

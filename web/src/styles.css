@@ -701,7 +701,154 @@ button.type-pill {
 .resource-tool-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.category-settings-panel {
+  margin-top: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border));
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 16px;
+}
+
+.category-settings-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.category-settings-heading > div,
+.custom-category-row > span,
+.category-rule-row > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.category-settings-heading span,
+.category-settings-heading small,
+.custom-category-row small,
+.category-rule-row small,
+.category-settings-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.category-settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.category-template-column,
+.category-rule-column {
+  min-width: 0;
+}
+
+.category-settings-grid h3 {
+  margin: 0 0 9px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.category-create-form,
+.category-rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.category-create-form input,
+.category-rule-form input,
+.category-rule-form select {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 0 9px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.category-create-form button,
+.category-rule-form > button,
+.custom-category-row button,
+.category-rule-row button {
+  align-self: flex-start;
+  min-height: 32px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--primary-soft);
+  padding: 0 10px;
+  color: var(--primary-hover);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.category-create-form button:disabled,
+.category-rule-form button:disabled,
+.custom-category-row button:disabled,
+.category-rule-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.category-rule-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.65fr);
+  gap: 8px;
+}
+
+.custom-category-list,
+.category-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.custom-category-row,
+.category-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 9px;
+}
+
+.custom-category-row strong,
+.category-rule-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.custom-category-row button,
+.category-rule-row button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.category-settings-empty {
+  margin: 0;
+  padding: 4px 0;
 }
 
 .category-filter {
@@ -2062,6 +2209,10 @@ button.type-pill {
   .resource-library-tools {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .category-settings-grid {
+    grid-template-columns: 1fr;
   }
 
   .resource-tool-actions {

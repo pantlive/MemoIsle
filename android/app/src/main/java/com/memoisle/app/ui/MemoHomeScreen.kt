@@ -944,7 +944,10 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
                     }
                     if (isResource) {
                         Text(
-                            resourceCategoryLabel(memo.resourceCategory),
+                            resourceCategoryLabel(
+                                memo.resourceCategory,
+                                memo.resourceCategoryLabel,
+                            ),
                             color = DeepTeal,
                             fontSize = 11.sp,
                         )
@@ -1046,7 +1049,10 @@ private fun ResourceDetailDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        resourceCategoryLabel(memo.resourceCategory),
+                        resourceCategoryLabel(
+                            memo.resourceCategory,
+                            memo.resourceCategoryLabel,
+                        ),
                         modifier = Modifier
                             .background(TealSoft, RoundedCornerShape(20.dp))
                             .padding(horizontal = 10.dp, vertical = 5.dp),

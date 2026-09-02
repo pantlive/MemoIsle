@@ -97,6 +97,9 @@ class Database:
             "resource_category": (
                 "ALTER TABLE memo ADD COLUMN resource_category VARCHAR(50)"
             ),
+            "resource_category_label": (
+                "ALTER TABLE memo ADD COLUMN resource_category_label VARCHAR(100)"
+            ),
             "resource_category_status": (
                 "ALTER TABLE memo ADD COLUMN resource_category_status "
                 "VARCHAR(30) NOT NULL DEFAULT 'none'"
@@ -218,6 +221,22 @@ class Database:
                     "UPDATE memo SET resource_reading_status = 'unread' "
                     "WHERE type = 'resource' "
                     "AND resource_reading_status IS NULL"
+                )
+            )
+            # 旧系统分类补齐显示名称，用户自定义分类由分类任务写入名称。
+            connection.execute(
+                text(
+                    "UPDATE memo SET resource_category_label = "
+                    "CASE resource_category "
+                    "WHEN 'learning' THEN '学习资料' "
+                    "WHEN 'article' THEN '文章阅读' "
+                    "WHEN 'media' THEN '视频与音频' "
+                    "WHEN 'tool' THEN '工具与服务' "
+                    "WHEN 'book_paper' THEN '书籍与论文' "
+                    "WHEN 'product' THEN '商品与好物' "
+                    "WHEN 'other' THEN '其他' END "
+                    "WHERE type = 'resource' "
+                    "AND resource_category_label IS NULL"
                 )
             )
             # 旧资料新增巡检字段后，从下一轮调度开始逐步检查来源链接。

@@ -8,14 +8,8 @@ export type MemoSort =
   | "title_asc"
   | "title_desc";
 export type ReviewFeedback = "forgot" | "fuzzy" | "remembered";
-export type ResourceCategory =
-  | "learning"
-  | "article"
-  | "media"
-  | "tool"
-  | "book_paper"
-  | "product"
-  | "other";
+export type ResourceCategory = string;
+export type ResourceCategoryRuleMatchType = "domain" | "url" | "text";
 export type ResourceKind =
   | "article"
   | "video"
@@ -68,6 +62,7 @@ export interface Memo {
   resource_metadata_status: ResourceProcessStatus;
   resource_metadata_error: string | null;
   resource_category: ResourceCategory | null;
+  resource_category_label: string | null;
   resource_category_status: ResourceProcessStatus;
   resource_category_confidence: number | null;
   resource_category_source: string | null;
@@ -116,6 +111,61 @@ export interface MemoCounts {
   word_count: number;
   resource_count: number;
   idea_count: number;
+}
+
+export interface ResourceCategoryOption {
+  id: string | null;
+  code: ResourceCategory;
+  name: string;
+  description: string | null;
+  is_system: boolean;
+  is_active: boolean;
+  version: number;
+}
+
+export interface ResourceCategoryRule {
+  id: string;
+  name: string;
+  category_code: ResourceCategory;
+  category_label: string;
+  match_type: ResourceCategoryRuleMatchType;
+  pattern: string;
+  priority: number;
+  enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResourceCategoryCreateRequest {
+  name: string;
+  description?: string;
+}
+
+export interface ResourceCategoryUpdateRequest {
+  expected_version: number;
+  name?: string;
+  description?: string | null;
+  is_active?: boolean;
+}
+
+export interface ResourceCategoryRuleCreateRequest {
+  name?: string;
+  category_code: ResourceCategory;
+  match_type: ResourceCategoryRuleMatchType;
+  pattern: string;
+  priority?: number;
+  enabled?: boolean;
+}
+
+export interface ResourceCategoryRuleUpdateRequest {
+  expected_version: number;
+  name?: string;
+  category_code?: ResourceCategory;
+  match_type?: ResourceCategoryRuleMatchType;
+  pattern?: string;
+  priority?: number;
+  enabled?: boolean;
 }
 
 export interface MemoCreateRequest {
