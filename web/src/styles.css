@@ -762,8 +762,37 @@ button.type-pill {
   font-size: 12px;
 }
 
-.resource-filter-grid .clear-filter-button {
-  align-self: end;
+.resource-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.resource-filter-actions .checkbox-filter {
+  display: flex;
+  min-height: 38px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.resource-filter-actions .checkbox-filter input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+
+.resource-filter-actions .clear-filter-button {
+  width: 290px;
+  max-width: 100%;
   height: 38px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -1973,6 +2002,15 @@ button.type-pill {
 
   .resource-filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .resource-filter-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resource-filter-actions .clear-filter-button {
+    width: 100%;
   }
 
   .section-heading {

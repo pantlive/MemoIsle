@@ -1266,6 +1266,8 @@ export default function App() {
                     onChange={(event) => setResourceCreatedTo(event.target.value)}
                   />
                 </label>
+              </div>
+              <div className="resource-filter-actions">
                 <label className="checkbox-filter">
                   <input
                     type="checkbox"
