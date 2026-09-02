@@ -728,29 +728,9 @@ button.type-pill {
   margin-top: 0;
   border: 0;
   background: transparent;
-  padding: 0 0 12px;
+  padding: 0;
 }
 
-.resource-filter-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.resource-filter-grid label {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.resource-filter-grid input,
-.resource-filter-grid select,
 .section-actions select {
   min-width: 0;
   height: 38px;
@@ -762,45 +742,24 @@ button.type-pill {
   font-size: 12px;
 }
 
-.resource-filter-actions {
-  display: flex;
+.star-filter-toggle {
+  display: inline-flex;
+  min-height: 30px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-
-.resource-filter-actions .checkbox-filter {
-  display: flex;
-  min-height: 38px;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.resource-filter-actions .checkbox-filter input {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--primary);
-}
-
-.resource-filter-actions .clear-filter-button {
-  width: 290px;
-  max-width: 100%;
-  height: 38px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--primary);
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
   cursor: pointer;
   font-size: 12px;
   font-weight: 650;
+}
+
+.star-filter-toggle input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--primary);
 }
 
 .category-filter > span {
@@ -1005,13 +964,6 @@ button.type-pill {
   color: inherit;
 }
 
-.auto-tag-list {
-  display: flex !important;
-  gap: 5px;
-  overflow: hidden;
-}
-
-.auto-tag-list span,
 .category-badge {
   border-radius: 999px;
   background: var(--primary-soft);
@@ -2000,17 +1952,9 @@ button.type-pill {
     grid-template-columns: 1fr;
   }
 
-  .resource-filter-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .resource-filter-actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .resource-filter-actions .clear-filter-button {
+  .star-filter-toggle {
     width: 100%;
+    margin-left: 0;
   }
 
   .section-heading {

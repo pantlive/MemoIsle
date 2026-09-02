@@ -76,14 +76,11 @@ import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_IDEA
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
-import com.memoisle.app.data.linkHealthLabel
 import com.memoisle.app.data.isVisibleInLibrary
 import com.memoisle.app.data.matchesQuery
 import com.memoisle.app.data.normalizeResourceUrl
 import com.memoisle.app.data.resourceCategoryLabel
 import com.memoisle.app.data.resourceHost
-import com.memoisle.app.data.resourceKindLabel
-import com.memoisle.app.data.resourceReadingStatusLabel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -906,7 +903,7 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = memo.title,
+                    text = if (isResource && memo.starred) "★ ${memo.title}" else memo.title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.SemiBold,
@@ -949,22 +946,6 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
                         Text(
                             resourceCategoryLabel(memo.resourceCategory),
                             color = DeepTeal,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            resourceReadingStatusLabel(memo.resourceReadingStatus),
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            linkHealthLabel(memo.linkHealthStatus),
-                            color = if (memo.linkHealthStatus == "failed") {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                TextMuted
-                            },
                             fontSize = 11.sp,
                         )
                         Spacer(Modifier.width(8.dp))
@@ -1055,7 +1036,10 @@ private fun ResourceDetailDialog(
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("网页资料", color = DeepTeal, fontSize = 12.sp)
-                Text(memo.title, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (memo.starred) "★ ${memo.title}" else memo.title,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         },
         text = {
@@ -1069,31 +1053,16 @@ private fun ResourceDetailDialog(
                         color = DeepTeal,
                         fontSize = 11.sp,
                     )
-                    Text(
-                        linkHealthLabel(memo.linkHealthStatus),
-                        modifier = Modifier
-                            .background(SurfaceSubtle, RoundedCornerShape(20.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = if (memo.linkHealthStatus == "failed") {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            TextMuted
-                        },
-                        fontSize = 11.sp,
-                    )
-                }
-                Text(
-                    "类型：${resourceKindLabel(memo.resourceKind)}" +
-                        " · 进度：${resourceReadingStatusLabel(memo.resourceReadingStatus)}",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                if (memo.collections.isNotEmpty()) {
-                    Text(
-                        "收藏夹：${memo.collections.joinToString(" · ")}",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
+                    if (memo.starred) {
+                        Text(
+                            "★ 星标",
+                            modifier = Modifier
+                                .background(SurfaceSubtle, RoundedCornerShape(20.dp))
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
                 }
                 memo.resourceDescription?.let { description ->
                     Text(description, style = MaterialTheme.typography.bodyMedium)
@@ -1116,36 +1085,8 @@ private fun ResourceDetailDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (memo.resourceAutoTags.isNotEmpty()) {
-                    Text(
-                        memo.resourceAutoTags.joinToString(" · "),
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                memo.resourceImportFolder?.let { folder ->
-                    Text(
-                        "导入来源：$folder",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                HorizontalDivider(color = Border)
                 Text(
-                    "最近成功：${memo.linkLastSuccessAt?.let(::formatTime) ?: "暂无"} · " +
-                        "最近检查：${memo.linkLastCheckedAt?.let(::formatTime) ?: "暂无"}",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                if (memo.linkHealthError != null) {
-                    Text(
-                        "巡检原因：${memo.linkHealthError}",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                Text(
-                    "Android 端只读展示；标题、网址、备注和分类请在 Web 端整理。",
+                    "Android 端只读展示；标题、网址、备注、分类和星标请在 Web 端整理。",
                     color = TextMuted,
                     style = MaterialTheme.typography.labelSmall,
                 )

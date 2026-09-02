@@ -28,11 +28,8 @@ import type {
   BrowserOpenTab,
   Memo,
   MemoSort,
-  MemoStatus,
   MemoType,
   ResourceCategory,
-  ResourceKind,
-  ResourceReadingStatus,
   ReviewFeedback,
 } from "./types";
 
@@ -81,35 +78,8 @@ const resourceCategories: Array<{
   { value: "other", label: "其他" },
 ];
 
-const resourceKinds: Array<{ value: ResourceKind; label: string }> = [
-  { value: "article", label: "文章" },
-  { value: "video", label: "视频" },
-  { value: "course", label: "课程" },
-  { value: "tool", label: "工具" },
-  { value: "book", label: "书籍" },
-  { value: "other", label: "其他" },
-];
-
-const resourceReadingStatuses: Array<{
-  value: ResourceReadingStatus;
-  label: string;
-}> = [
-  { value: "unread", label: "未读" },
-  { value: "reading", label: "阅读中" },
-  { value: "completed", label: "已完成" },
-  { value: "archived", label: "已归档" },
-];
-
 function categoryLabel(category: ResourceCategory | null): string {
   return resourceCategories.find((item) => item.value === category)?.label ?? "分类中";
-}
-
-function resourceKindLabel(kind: ResourceKind | null): string {
-  return resourceKinds.find((item) => item.value === kind)?.label ?? "其他";
-}
-
-function readingStatusLabel(status: ResourceReadingStatus | null): string {
-  return resourceReadingStatuses.find((item) => item.value === status)?.label ?? "未读";
 }
 
 function metadataStatusLabel(memo: Memo): string {
@@ -208,15 +178,7 @@ export default function App() {
   const [resourceCategoryFilter, setResourceCategoryFilter] = useState<
     ResourceCategory | ""
   >("");
-  const [resourceTagFilter, setResourceTagFilter] = useState("");
-  const [resourceCollectionFilter, setResourceCollectionFilter] = useState("");
-  const [resourceKindFilter, setResourceKindFilter] = useState<ResourceKind | "">("");
   const [resourceStarredOnly, setResourceStarredOnly] = useState(false);
-  const [resourceStatusFilter, setResourceStatusFilter] = useState<
-    MemoStatus | ""
-  >("");
-  const [resourceCreatedFrom, setResourceCreatedFrom] = useState("");
-  const [resourceCreatedTo, setResourceCreatedTo] = useState("");
   const [memoSort, setMemoSort] = useState<MemoSort>("updated_desc");
   const [resourceViewMode, setResourceViewMode] =
     useState<ResourceViewMode>("list");
@@ -243,14 +205,7 @@ export default function App() {
   const [editorPhonetic, setEditorPhonetic] = useState("");
   const [editorExample, setEditorExample] = useState("");
   const [editorCategory, setEditorCategory] = useState<ResourceCategory | "">("");
-  const [editorResourceKind, setEditorResourceKind] =
-    useState<ResourceKind>("other");
-  const [editorReadingStatus, setEditorReadingStatus] =
-    useState<ResourceReadingStatus>("unread");
-  const [editorTags, setEditorTags] = useState("");
-  const [editorCollections, setEditorCollections] = useState("");
   const [editorStarred, setEditorStarred] = useState(false);
-  const [editorStatus, setEditorStatus] = useState<MemoStatus>("active");
   const [enrichingResource, setEnrichingResource] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [showWordAnswer, setShowWordAnswer] = useState(false);
@@ -400,15 +355,7 @@ export default function App() {
         type: activeType === "all" ? undefined : activeType,
         query: debouncedQuery,
         category: resourceView ? resourceCategoryFilter || undefined : undefined,
-        resourceKind: resourceView ? resourceKindFilter || undefined : undefined,
-        tag: resourceView ? resourceTagFilter || undefined : undefined,
-        collection: resourceView
-          ? resourceCollectionFilter || undefined
-          : undefined,
         starred: resourceView && resourceStarredOnly ? true : undefined,
-        status: resourceView ? resourceStatusFilter || undefined : undefined,
-        createdFrom: resourceView ? resourceCreatedFrom || undefined : undefined,
-        createdTo: resourceView ? resourceCreatedTo || undefined : undefined,
         sort: memoSort,
       });
       if (requestId !== loadRequestRef.current) {
@@ -431,13 +378,7 @@ export default function App() {
     debouncedQuery,
     memoSort,
     resourceCategoryFilter,
-    resourceCollectionFilter,
-    resourceCreatedFrom,
-    resourceCreatedTo,
-    resourceKindFilter,
     resourceStarredOnly,
-    resourceStatusFilter,
-    resourceTagFilter,
   ]);
 
   useEffect(() => {
@@ -504,13 +445,7 @@ export default function App() {
     setSaveState("idle");
     if (type !== "resource") {
       setResourceCategoryFilter("");
-      setResourceTagFilter("");
-      setResourceCollectionFilter("");
-      setResourceKindFilter("");
       setResourceStarredOnly(false);
-      setResourceStatusFilter("");
-      setResourceCreatedFrom("");
-      setResourceCreatedTo("");
     }
   };
 
@@ -519,13 +454,7 @@ export default function App() {
     if (value.trim() && activeType !== "all") {
       setActiveType("all");
       setResourceCategoryFilter("");
-      setResourceTagFilter("");
-      setResourceCollectionFilter("");
-      setResourceKindFilter("");
       setResourceStarredOnly(false);
-      setResourceStatusFilter("");
-      setResourceCreatedFrom("");
-      setResourceCreatedTo("");
       setSelectedId(null);
     }
   };
@@ -577,12 +506,7 @@ export default function App() {
     setEditorPhonetic(memo.word_phonetic ?? "");
     setEditorExample(memo.word_example ?? "");
     setEditorCategory(memo.resource_category ?? "");
-    setEditorResourceKind(memo.resource_kind ?? "other");
-    setEditorReadingStatus(memo.resource_reading_status ?? "unread");
-    setEditorTags(memo.tags.join("，"));
-    setEditorCollections(memo.collections.join("，"));
     setEditorStarred(memo.starred);
-    setEditorStatus(memo.status);
     if (memo.type === "word") {
       setEditorBody(memo.word_meaning ?? memo.body);
     }
@@ -671,14 +595,6 @@ export default function App() {
     if (selectedMemo.type === "idea" && !editorBody.trim()) {
       return;
     }
-    if (
-      editorStatus === "trashed" &&
-      selectedMemo.status !== "trashed" &&
-      !window.confirm("这条内容会移入回收站，确定继续吗？")
-    ) {
-      return;
-    }
-
     setSaveState("saving");
     setMessage("");
     try {
@@ -699,20 +615,8 @@ export default function App() {
           selectedMemo.type === "resource" && editorCategory
             ? editorCategory
             : undefined,
-        resource_kind:
-          selectedMemo.type === "resource" ? editorResourceKind : undefined,
-        resource_reading_status:
-          selectedMemo.type === "resource" ? editorReadingStatus : undefined,
-        tags: editorTags
-          .split(/[,，]/)
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-        collections: editorCollections
-          .split(/[,，]/)
-          .map((collection) => collection.trim())
-          .filter(Boolean),
-        starred: editorStarred,
-        status: editorStatus,
+        starred:
+          selectedMemo.type === "resource" ? editorStarred : undefined,
       });
       setMemos((current) =>
         current.map((memo) => (memo.id === updated.id ? updated : memo)),
@@ -1183,7 +1087,7 @@ export default function App() {
           {activeType === "resource" && (
             <section className="resource-filter-panel" aria-label="资料组合筛选">
               <div className="category-filter">
-                <span>自动分类</span>
+                <span>分类</span>
                 <button
                   className={!resourceCategoryFilter ? "active" : ""}
                   onClick={() => setResourceCategoryFilter("")}
@@ -1197,100 +1101,14 @@ export default function App() {
                     onClick={() => setResourceCategoryFilter(category.value)}
                   >{category.label}</button>
                 ))}
-              </div>
-              <div className="resource-filter-grid">
-                <label>
-                  标签
-                  <input
-                    value={resourceTagFilter}
-                    onChange={(event) => setResourceTagFilter(event.target.value)}
-                    placeholder="用户或自动标签"
-                    maxLength={100}
-                  />
-                </label>
-                <label>
-                  收藏夹
-                  <input
-                    value={resourceCollectionFilter}
-                    onChange={(event) =>
-                      setResourceCollectionFilter(event.target.value)
-                    }
-                    placeholder="收藏夹名称"
-                    maxLength={100}
-                  />
-                </label>
-                <label>
-                  资源类型
-                  <select
-                    value={resourceKindFilter}
-                    onChange={(event) =>
-                      setResourceKindFilter(event.target.value as ResourceKind | "")
-                    }
-                  >
-                    <option value="">全部类型</option>
-                    {resourceKinds.map((kind) => (
-                      <option key={kind.value} value={kind.value}>{kind.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  资料状态
-                  <select
-                    value={resourceStatusFilter}
-                    onChange={(event) =>
-                      setResourceStatusFilter(event.target.value as MemoStatus | "")
-                    }
-                  >
-                    <option value="">未删除资料</option>
-                    <option value="inbox">收件箱</option>
-                    <option value="active">使用中</option>
-                    <option value="archived">已归档</option>
-                    <option value="trashed">回收站</option>
-                  </select>
-                </label>
-                <label>
-                  收藏起始日期
-                  <input
-                    type="date"
-                    value={resourceCreatedFrom}
-                    max={resourceCreatedTo || undefined}
-                    onChange={(event) => setResourceCreatedFrom(event.target.value)}
-                  />
-                </label>
-                <label>
-                  收藏结束日期
-                  <input
-                    type="date"
-                    value={resourceCreatedTo}
-                    min={resourceCreatedFrom || undefined}
-                    onChange={(event) => setResourceCreatedTo(event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="resource-filter-actions">
-                <label className="checkbox-filter">
+                <label className="star-filter-toggle">
                   <input
                     type="checkbox"
                     checked={resourceStarredOnly}
                     onChange={(event) => setResourceStarredOnly(event.target.checked)}
                   />
-                  只看星标资料
+                  只看星标
                 </label>
-                <button
-                  type="button"
-                  className="clear-filter-button"
-                  onClick={() => {
-                    setResourceCategoryFilter("");
-                    setResourceTagFilter("");
-                    setResourceCollectionFilter("");
-                    setResourceKindFilter("");
-                    setResourceStarredOnly(false);
-                    setResourceStatusFilter("");
-                    setResourceCreatedFrom("");
-                    setResourceCreatedTo("");
-                    setMemoSort("updated_desc");
-                  }}
-                >清除筛选</button>
               </div>
             </section>
           )}
@@ -1426,21 +1244,14 @@ export default function App() {
                                   {sourceHost(memo.source_url)} ↗
                                 </a>
                               ) : sourceHost(memo.source_url)}
-                              {` · ${categoryLabel(memo.resource_category)} · ${resourceKindLabel(memo.resource_kind)} · ${readingStatusLabel(memo.resource_reading_status)}`}
+                              {` · ${categoryLabel(memo.resource_category)}`}
                             </>
                           )
                           : memo.type === "word"
                             ? `熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.review_count} 次`
                             : memo.audio_mime_type ? "语音灵感" : "灵感"}
-                        {` · 版本 ${memo.version}`}
+                        {memo.type !== "resource" && ` · 版本 ${memo.version}`}
                       </small>
-                      {memo.type === "resource" && memo.resource_auto_tags.length > 0 && (
-                        <span className="auto-tag-list">
-                          {memo.resource_auto_tags.slice(0, 3).map((tag) => (
-                            <span key={tag}>{tag}</span>
-                          ))}
-                        </span>
-                      )}
                     </span>
                     <time dateTime={memo.updated_at}>
                       {timeFormatter.format(new Date(memo.updated_at))}
@@ -1506,16 +1317,6 @@ export default function App() {
               )}
               <div className="resource-insight-meta">
                 <span>{selectedMemo.resource_site_name || sourceHost(selectedMemo.source_url)}</span>
-                {selectedMemo.resource_category_source && (
-                  <span>
-                    分类来源：
-                    {selectedMemo.resource_category_source === "manual"
-                      ? "人工修正"
-                      : selectedMemo.resource_category_source === "llm"
-                        ? "大模型"
-                        : "自动规则"}
-                  </span>
-                )}
               </div>
               <button
                 type="button"
@@ -1561,50 +1362,6 @@ export default function App() {
                     ))}
                   </select>
                 </label>
-                <label>资源类型
-                  <select
-                    value={editorResourceKind}
-                    onChange={(event) =>
-                      setEditorResourceKind(event.target.value as ResourceKind)
-                    }
-                  >
-                    {resourceKinds.map((kind) => (
-                      <option key={kind.value} value={kind.value}>{kind.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>阅读状态
-                  <select
-                    value={editorReadingStatus}
-                    onChange={(event) =>
-                      setEditorReadingStatus(
-                        event.target.value as ResourceReadingStatus,
-                      )
-                    }
-                  >
-                    {resourceReadingStatuses.map((readingStatus) => (
-                      <option key={readingStatus.value} value={readingStatus.value}>
-                        {readingStatus.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>标签
-                  <input
-                    value={editorTags}
-                    onChange={(event) => setEditorTags(event.target.value)}
-                    maxLength={500}
-                    placeholder="多个标签使用逗号分隔"
-                  />
-                </label>
-                <label>收藏夹
-                  <input
-                    value={editorCollections}
-                    onChange={(event) => setEditorCollections(event.target.value)}
-                    maxLength={500}
-                    placeholder="多个收藏夹使用逗号分隔"
-                  />
-                </label>
                 <label className="editor-checkbox">
                   <input
                     type="checkbox"
@@ -1612,19 +1369,6 @@ export default function App() {
                     onChange={(event) => setEditorStarred(event.target.checked)}
                   />
                   星标这条资料
-                </label>
-                <label>资料状态
-                  <select
-                    value={editorStatus}
-                    onChange={(event) =>
-                      setEditorStatus(event.target.value as MemoStatus)
-                    }
-                  >
-                    <option value="inbox">收件箱</option>
-                    <option value="active">使用中</option>
-                    <option value="archived">已归档</option>
-                    <option value="trashed">移入回收站</option>
-                  </select>
                 </label>
               </>
             )}

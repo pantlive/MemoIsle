@@ -76,7 +76,7 @@ Always pair unfamiliar icons with labels or accessible names.
 
 - Large enough to be a primary tool but not a hero banner.
 - Shows shortcut hint on Web and filter entry on Android.
-- Results include type, title, matched excerpt, tags, and source/time metadata.
+- Results include type, title, matched excerpt, and source/time metadata; resources expose only one category and starred state as organization attributes.
 
 ### Quick Capture
 
@@ -92,7 +92,7 @@ Always pair unfamiliar icons with labels or accessible names.
 ### Memo Row
 
 - Left: type icon.
-- Center: title, one or two excerpt lines, compact tags and source.
+- Center: title, one or two excerpt lines, and source; resource rows add one category and optional star.
 - Right: updated time and one contextual action.
 - Hover actions appear on Web; primary actions remain discoverable without hover on Android.
 
@@ -134,7 +134,7 @@ Create a production app workspace, not a landing page. Include a left navigation
 
 ### W-02 Web Quick Capture Drawer
 
-Show the W-01 workspace dimmed behind a 480 px right drawer. The drawer has segmented types 单词 / 资料 / 灵感, a large content field, URL or source preview when relevant, microphone action, collapsed “补充信息”, tags, and a fixed footer with Cancel and Save. Use a realistic pasted learning-resource URL. Show the selected Resource state.
+Show the W-01 workspace dimmed behind a 480 px right drawer. The drawer has segmented types 单词 / 资料 / 灵感, a large content field, URL or source preview when relevant, microphone action, and a fixed footer with Cancel and Save. The selected Resource state exposes only one category and a star toggle beyond its title, URL, and note.
 
 ### A-01 Android Home
 
@@ -157,7 +157,7 @@ Every major screen family must define:
 - Offline or waiting-to-sync state.
 - Recoverable error with Retry.
 - Disabled and permission-denied states.
-- Long title, long URL, multiple tags, and large-font behavior.
+- Long title, long URL, category labels, and large-font behavior.
 
 ## 10. Accessibility
 
