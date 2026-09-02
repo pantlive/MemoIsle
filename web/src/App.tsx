@@ -26,7 +26,6 @@ import {
 import type {
   BrowserCaptureContext,
   BrowserOpenTab,
-  LinkHealthStatus,
   Memo,
   MemoSort,
   MemoStatus,
@@ -212,13 +211,7 @@ export default function App() {
   const [resourceTagFilter, setResourceTagFilter] = useState("");
   const [resourceCollectionFilter, setResourceCollectionFilter] = useState("");
   const [resourceKindFilter, setResourceKindFilter] = useState<ResourceKind | "">("");
-  const [resourceReadingFilter, setResourceReadingFilter] = useState<
-    ResourceReadingStatus | ""
-  >("");
   const [resourceStarredOnly, setResourceStarredOnly] = useState(false);
-  const [resourceHealthFilter, setResourceHealthFilter] = useState<
-    LinkHealthStatus | ""
-  >("");
   const [resourceStatusFilter, setResourceStatusFilter] = useState<
     MemoStatus | ""
   >("");
@@ -408,10 +401,6 @@ export default function App() {
         query: debouncedQuery,
         category: resourceView ? resourceCategoryFilter || undefined : undefined,
         resourceKind: resourceView ? resourceKindFilter || undefined : undefined,
-        readingStatus: resourceView
-          ? resourceReadingFilter || undefined
-          : undefined,
-        health: resourceView ? resourceHealthFilter || undefined : undefined,
         tag: resourceView ? resourceTagFilter || undefined : undefined,
         collection: resourceView
           ? resourceCollectionFilter || undefined
@@ -445,9 +434,7 @@ export default function App() {
     resourceCollectionFilter,
     resourceCreatedFrom,
     resourceCreatedTo,
-    resourceHealthFilter,
     resourceKindFilter,
-    resourceReadingFilter,
     resourceStarredOnly,
     resourceStatusFilter,
     resourceTagFilter,
@@ -520,9 +507,7 @@ export default function App() {
       setResourceTagFilter("");
       setResourceCollectionFilter("");
       setResourceKindFilter("");
-      setResourceReadingFilter("");
       setResourceStarredOnly(false);
-      setResourceHealthFilter("");
       setResourceStatusFilter("");
       setResourceCreatedFrom("");
       setResourceCreatedTo("");
@@ -537,9 +522,7 @@ export default function App() {
       setResourceTagFilter("");
       setResourceCollectionFilter("");
       setResourceKindFilter("");
-      setResourceReadingFilter("");
       setResourceStarredOnly(false);
-      setResourceHealthFilter("");
       setResourceStatusFilter("");
       setResourceCreatedFrom("");
       setResourceCreatedTo("");
@@ -1251,45 +1234,6 @@ export default function App() {
                   </select>
                 </label>
                 <label>
-                  阅读状态
-                  <select
-                    value={resourceReadingFilter}
-                    onChange={(event) =>
-                      setResourceReadingFilter(
-                        event.target.value as ResourceReadingStatus | "",
-                      )
-                    }
-                  >
-                    <option value="">全部进度</option>
-                    {resourceReadingStatuses.map((readingStatus) => (
-                      <option key={readingStatus.value} value={readingStatus.value}>
-                        {readingStatus.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  巡检状态
-                  <select
-                    value={resourceHealthFilter}
-                    onChange={(event) =>
-                      setResourceHealthFilter(
-                        event.target.value as LinkHealthStatus | "",
-                      )
-                    }
-                  >
-                    <option value="">全部状态</option>
-                    <option value="healthy">正常</option>
-                    <option value="unchecked">等待检查</option>
-                    <option value="redirected">网址跳转</option>
-                    <option value="changed">信息变化</option>
-                    <option value="auth_required">需要登录</option>
-                    <option value="temporary_failure">暂时失败</option>
-                    <option value="failed">确认失效</option>
-                    <option value="ignored">已忽略</option>
-                  </select>
-                </label>
-                <label>
                   资料状态
                   <select
                     value={resourceStatusFilter}
@@ -1338,9 +1282,7 @@ export default function App() {
                     setResourceTagFilter("");
                     setResourceCollectionFilter("");
                     setResourceKindFilter("");
-                    setResourceReadingFilter("");
                     setResourceStarredOnly(false);
-                    setResourceHealthFilter("");
                     setResourceStatusFilter("");
                     setResourceCreatedFrom("");
                     setResourceCreatedTo("");
