@@ -744,6 +744,33 @@ button.type-pill {
   font-size: 14px;
 }
 
+.resource-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.resource-pagination button {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 0 12px;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.resource-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .section-actions select {
   min-width: 0;
   height: 38px;

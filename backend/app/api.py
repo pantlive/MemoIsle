@@ -567,6 +567,7 @@ def list_memos_route(
     created_to: Annotated[date | None, Query()] = None,
     sort: Annotated[MemoSort, Query()] = MemoSort.UPDATED_DESC,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> MemoListResponse:
     """按类型及关键词读取当前用户条目。"""
 
@@ -600,6 +601,7 @@ def list_memos_route(
         created_to=normalized_created_to,
         sort=sort,
         limit=limit,
+        offset=offset,
     )
     total_count = count_memos(
         session,

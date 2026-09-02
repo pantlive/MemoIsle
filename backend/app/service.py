@@ -319,6 +319,7 @@ def list_memos(
     created_to: datetime | None = None,
     sort: MemoSort = MemoSort.UPDATED_DESC,
     limit: int = 100,
+    offset: int = 0,
     include_trashed: bool = False,
     oldest_first: bool = False,
 ) -> list[Memo]:
@@ -342,7 +343,7 @@ def list_memos(
         sort=sort,
         include_trashed=include_trashed,
         oldest_first=oldest_first,
-    ).limit(limit)
+    ).offset(offset).limit(limit)
     return list(session.scalars(query).all())
 
 

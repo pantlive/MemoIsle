@@ -41,6 +41,8 @@ type ActiveType = Extract<MemoType, "idea" | "resource" | "word">;
 type ActiveView = ActiveType | "all";
 type ResourceViewMode = "list" | "cards";
 
+const RESOURCE_PAGE_SIZE = 10;
+
 interface NavigationItem {
   label: string;
   icon: string;
@@ -165,6 +167,7 @@ export default function App() {
     ResourceCategory | ""
   >("");
   const [resourceStarredOnly, setResourceStarredOnly] = useState(false);
+  const [resourcePage, setResourcePage] = useState(1);
   const [memoSort, setMemoSort] = useState<MemoSort>("updated_desc");
   const [resourceViewMode, setResourceViewMode] =
     useState<ResourceViewMode>("list");
@@ -210,6 +213,10 @@ export default function App() {
   const loadRequestRef = useRef(0);
   const captureTokenHandledRef = useRef<string | null>(null);
   const copy = viewCopy[activeType];
+  const resourcePageCount = Math.max(
+    1,
+    Math.ceil(currentResultCount / RESOURCE_PAGE_SIZE),
+  );
 
   const selectedMemo = useMemo(
     () => memos.find((memo) => memo.id === selectedId) ?? null,
@@ -352,6 +359,8 @@ export default function App() {
         category: resourceView ? resourceCategoryFilter || undefined : undefined,
         starred: resourceView && resourceStarredOnly ? true : undefined,
         sort: memoSort,
+        limit: resourceView ? RESOURCE_PAGE_SIZE : undefined,
+        offset: resourceView ? (resourcePage - 1) * RESOURCE_PAGE_SIZE : undefined,
       });
       if (requestId !== loadRequestRef.current) {
         return;
@@ -374,6 +383,7 @@ export default function App() {
     debouncedQuery,
     memoSort,
     resourceCategoryFilter,
+    resourcePage,
     resourceStarredOnly,
   ]);
 
@@ -382,6 +392,13 @@ export default function App() {
     setMessage("");
     void loadCurrentMemos();
   }, [loadCurrentMemos]);
+
+  useEffect(() => {
+    if (activeType !== "resource") {
+      return;
+    }
+    setResourcePage((page) => Math.min(page, resourcePageCount));
+  }, [activeType, resourcePageCount]);
 
   useEffect(() => {
     const hasPendingResource = memos.some(
@@ -435,6 +452,7 @@ export default function App() {
 
   const switchType = (type: ActiveView) => {
     setActiveType(type);
+    setResourcePage(1);
     setSearchQuery("");
     setDebouncedQuery("");
     setSelectedId(null);
@@ -1109,7 +1127,12 @@ export default function App() {
                   <span className="sr-only">排序方式</span>
                   <select
                     value={memoSort}
-                    onChange={(event) => setMemoSort(event.target.value as MemoSort)}
+                    onChange={(event) => {
+                      setMemoSort(event.target.value as MemoSort);
+                      if (activeType === "resource") {
+                        setResourcePage(1);
+                      }
+                    }}
                   >
                     <option value="updated_desc">最近更新</option>
                     <option value="updated_asc">最早更新</option>
@@ -1144,7 +1167,10 @@ export default function App() {
                   <span>分类</span>
                   <button
                     className={!resourceCategoryFilter ? "active" : ""}
-                    onClick={() => setResourceCategoryFilter("")}
+                    onClick={() => {
+                      setResourceCategoryFilter("");
+                      setResourcePage(1);
+                    }}
                   >全部</button>
                   {resourceCategories.map((category) => (
                     <button
@@ -1152,16 +1178,20 @@ export default function App() {
                         resourceCategoryFilter === category.value ? "active" : ""
                       }
                       key={category.value}
-                      onClick={() => setResourceCategoryFilter(category.value)}
+                      onClick={() => {
+                        setResourceCategoryFilter(category.value);
+                        setResourcePage(1);
+                      }}
                     >{category.label}</button>
                   ))}
                   <label className="star-filter-toggle">
                     <input
                       type="checkbox"
                       checked={resourceStarredOnly}
-                      onChange={(event) =>
-                        setResourceStarredOnly(event.target.checked)
-                      }
+                      onChange={(event) => {
+                        setResourceStarredOnly(event.target.checked);
+                        setResourcePage(1);
+                      }}
                     />
                     只看星标
                   </label>
@@ -1325,6 +1355,30 @@ export default function App() {
                   </article>
                 ))}
               </div>
+            )}
+            {activeType === "resource" && currentResultCount > RESOURCE_PAGE_SIZE && (
+              <nav className="resource-pagination" aria-label="网页资料分页">
+                <button
+                  type="button"
+                  disabled={resourcePage === 1 || loadState === "loading"}
+                  onClick={() => setResourcePage((page) => Math.max(1, page - 1))}
+                >
+                  上一页
+                </button>
+                <span>
+                  第 {resourcePage} / {resourcePageCount} 页
+                </span>
+                <button
+                  type="button"
+                  disabled={
+                    resourcePage >= resourcePageCount ||
+                    loadState === "loading"
+                  }
+                  onClick={() => setResourcePage((page) => page + 1)}
+                >
+                  下一页
+                </button>
+              </nav>
             )}
           </section>
         </main>

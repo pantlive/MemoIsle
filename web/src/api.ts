@@ -73,6 +73,7 @@ export interface MemoListFilters {
   createdTo?: string;
   sort?: MemoSort;
   limit?: number;
+  offset?: number;
 }
 
 export async function listMemos(
@@ -120,6 +121,9 @@ export async function listMemos(
   }
   if (filters.limit) {
     searchParams.set("limit", String(filters.limit));
+  }
+  if (filters.offset) {
+    searchParams.set("offset", String(filters.offset));
   }
   const queryString = searchParams.toString();
   const response = await request<MemoListResponse>(

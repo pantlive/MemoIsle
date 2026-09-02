@@ -503,6 +503,41 @@ def test_memo_list_returns_total_for_filters(client: TestClient) -> None:
     assert len(response.json()["items"]) == 1
 
 
+def test_memo_list_supports_resource_pagination(client: TestClient) -> None:
+    """网页资料列表支持偏移分页，同时保留筛选总数。"""
+
+    for index in range(3):
+        response = client.post(
+            "/api/v1/memos",
+            json={
+                "client_id": str(uuid4()),
+                "type": "resource",
+                "body": f"分页资料 {index}",
+                "source_url": f"https://example.com/page-{index}",
+                "tags": [],
+            },
+        )
+        assert response.status_code == 201
+
+    first_page = client.get(
+        "/api/v1/memos",
+        params={"type": "resource", "limit": 1, "offset": 0},
+    )
+    second_page = client.get(
+        "/api/v1/memos",
+        params={"type": "resource", "limit": 1, "offset": 1},
+    )
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert first_page.json()["total_count"] == 3
+    assert second_page.json()["total_count"] == 3
+    assert len(first_page.json()["items"]) == 1
+    assert len(second_page.json()["items"]) == 1
+    first_item_id = first_page.json()["items"][0]["id"]
+    second_item_id = second_page.json()["items"][0]["id"]
+    assert first_item_id != second_item_id
+
+
 def test_word_requires_lemma_and_non_word_cannot_be_reviewed(
     client: TestClient,
 ) -> None:

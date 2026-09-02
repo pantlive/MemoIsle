@@ -149,7 +149,7 @@ Android Client ───┘                       │
 | 方法与路径 | 作用 |
 | --- | --- |
 | `POST /v1/memos` | 幂等创建条目 |
-| `GET /v1/memos` | 分页、搜索、筛选和增量拉取 |
+| `GET /v1/memos` | 分页、搜索、筛选和增量拉取；网页资料默认由 Web 每页读取 10 条 |
 | `GET /v1/memos/counts` | 返回未删除条目的类型数量，用于导航和列表摘要 |
 | `GET /v1/memos/{id}` | 获取条目详情 |
 | `PATCH /v1/memos/{id}` | 带版本号更新条目 |
