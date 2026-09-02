@@ -1425,16 +1425,38 @@ export default function App() {
                 }
               >
                 {memos.map((memo) => (
-                  <button
+                  <article
                     className={memo.id === selectedId ? "memo-row selected" : "memo-row"}
                     key={memo.id}
                     onClick={() => selectMemo(memo)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) {
+                        return;
+                      }
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectMemo(memo);
+                      }
+                    }}
+                    tabIndex={0}
                   >
                     <span className={`memo-type-icon ${memo.type}`}>
                       {memo.audio_mime_type ? "●" : viewCopy[memo.type].icon}
                     </span>
                     <span className="memo-copy">
-                      <strong>{memo.starred ? "★ " : ""}{memo.title}</strong>
+                      {memo.type === "resource" && memo.source_url ? (
+                        <a
+                          className="memo-title-link"
+                          href={memo.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {memo.starred ? "★ " : ""}{memo.title}
+                        </a>
+                      ) : (
+                        <strong>{memo.starred ? "★ " : ""}{memo.title}</strong>
+                      )}
                       <span>
                         {memo.type === "resource"
                           ? memo.resource_description ||
@@ -1447,7 +1469,22 @@ export default function App() {
                       </span>
                       <small className="memo-meta-line">
                         {memo.type === "resource"
-                          ? `${sourceHost(memo.source_url)} · ${categoryLabel(memo.resource_category)} · ${resourceKindLabel(memo.resource_kind)} · ${readingStatusLabel(memo.resource_reading_status)}`
+                          ? (
+                            <>
+                              {memo.source_url ? (
+                                <a
+                                  className="memo-url-link"
+                                  href={memo.source_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  {sourceHost(memo.source_url)} ↗
+                                </a>
+                              ) : sourceHost(memo.source_url)}
+                              {` · ${categoryLabel(memo.resource_category)} · ${resourceKindLabel(memo.resource_kind)} · ${readingStatusLabel(memo.resource_reading_status)}`}
+                            </>
+                          )
                           : memo.type === "word"
                             ? `熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.review_count} 次`
                             : memo.audio_mime_type ? "语音灵感" : "灵感"}
@@ -1464,7 +1501,7 @@ export default function App() {
                     <time dateTime={memo.updated_at}>
                       {timeFormatter.format(new Date(memo.updated_at))}
                     </time>
-                  </button>
+                  </article>
                 ))}
               </div>
             )}

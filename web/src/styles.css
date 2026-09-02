@@ -902,6 +902,11 @@ button.type-pill {
   background: color-mix(in srgb, var(--primary-soft) 30%, var(--surface));
 }
 
+.memo-row:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .memo-type-icon,
 .empty-icon {
   display: grid;
@@ -944,11 +949,31 @@ button.type-pill {
   font-size: 15px;
 }
 
+.memo-title-link {
+  display: block;
+  overflow: hidden;
+  color: var(--primary-hover);
+  font-family: Sora, "Noto Sans SC", sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-title-link:hover,
+.memo-url-link:hover {
+  text-decoration: underline;
+}
+
 .memo-copy > span,
 .memo-copy small,
 .memo-row time {
   color: var(--muted);
   font-size: 12px;
+}
+
+.memo-url-link {
+  color: inherit;
 }
 
 .auto-tag-list {
