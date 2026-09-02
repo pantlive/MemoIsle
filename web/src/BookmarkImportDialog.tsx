@@ -1,7 +1,15 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   createBookmarkImport,
+  getCurrentBrowserBookmarks,
   getBookmarkImport,
   previewBookmarkImport,
   retryBookmarkImport,
@@ -48,13 +56,14 @@ export default function BookmarkImportDialog({
   onClose,
   onImported,
 }: BookmarkImportDialogProps) {
-  const [fileName, setFileName] = useState("");
+  const [sourceLabel, setSourceLabel] = useState("");
   const [items, setItems] = useState<BookmarkInput[]>([]);
   const [preview, setPreview] = useState<BookmarkImportPreview | null>(null);
   const [batch, setBatch] = useState<BookmarkImportBatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const notifiedBatchRef = useRef<string | null>(null);
+  const initialReadStartedRef = useRef(false);
 
   const previewGroups = useMemo(() => {
     const groups = new Map<string, BookmarkPreviewItem[]>();
@@ -66,6 +75,52 @@ export default function BookmarkImportDialog({
     }
     return Array.from(groups.entries());
   }, [preview]);
+
+  const loadCurrentBrowserBookmarks = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    setPreview(null);
+    setBatch(null);
+    try {
+      const snapshot = await getCurrentBrowserBookmarks();
+      if (!snapshot.extension_connected) {
+        throw new Error(
+          "尚未收到浏览器书签。请重新下载或加载新版扩展，允许读取书签后重试。",
+        );
+      }
+      if (snapshot.items.length === 0) {
+        throw new Error("当前浏览器没有可读取的书签，也可以使用下方 HTML 备用导入。");
+      }
+      const result = await previewBookmarkImport(snapshot.items);
+      const syncedAt = snapshot.synced_at
+        ? new Date(snapshot.synced_at).toLocaleString()
+        : "刚刚";
+      const truncatedLabel = snapshot.truncated
+        ? ` · 仅预览前 ${snapshot.items.length} 条`
+        : "";
+      setSourceLabel(
+        `当前浏览器 · 共 ${snapshot.total_count} 条 · 同步于 ${syncedAt}${truncatedLabel}`,
+      );
+      setItems(snapshot.items);
+      setPreview(result);
+    } catch (browserError) {
+      setError(
+        browserError instanceof Error
+          ? browserError.message
+          : "读取当前浏览器书签失败。",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialReadStartedRef.current) {
+      return;
+    }
+    initialReadStartedRef.current = true;
+    void loadCurrentBrowserBookmarks();
+  }, [loadCurrentBrowserBookmarks]);
 
   useEffect(() => {
     if (!batch || !["pending", "processing"].includes(batch.status)) {
@@ -106,7 +161,7 @@ export default function BookmarkImportDialog({
       // HTML 仅在浏览器本地解析，服务端只接收结构化书签字段。
       const parsedItems = await parseChromeBookmarksFile(file);
       const result = await previewBookmarkImport(parsedItems);
-      setFileName(file.name);
+      setSourceLabel(`${file.name} · HTML 备用导入`);
       setItems(parsedItems);
       setPreview(result);
     } catch (fileError) {
@@ -171,8 +226,8 @@ export default function BookmarkImportDialog({
     }
   };
 
-  const chooseAnotherFile = () => {
-    setFileName("");
+  const chooseAnotherSource = () => {
+    setSourceLabel("");
     setItems([]);
     setPreview(null);
     setBatch(null);
@@ -189,7 +244,7 @@ export default function BookmarkImportDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label">Chrome HTML</span>
+            <span className="type-label">当前浏览器</span>
             <h2 id="bookmark-import-title">导入浏览器书签</h2>
           </div>
           <button className="icon-button" aria-label="关闭书签导入" onClick={onClose}>
@@ -198,17 +253,38 @@ export default function BookmarkImportDialog({
         </div>
 
         {!preview && !batch && (
-          <label className="bookmark-file-picker">
-            <span aria-hidden="true">⇧</span>
-            <strong>{busy ? "正在本地解析并检查…" : "选择 Chrome 导出的书签 HTML"}</strong>
-            <small>原始文件不会上传；单次最多 5000 条、10 MB。</small>
-            <input
-              type="file"
-              accept=".html,text/html"
-              disabled={busy}
-              onChange={(event) => void handleFile(event)}
-            />
-          </label>
+          <div className="bookmark-source-options">
+            <section className="browser-bookmark-source">
+              <span aria-hidden="true">◎</span>
+              <div>
+                <strong>
+                  {busy ? "正在读取并检查当前浏览器书签…" : "从当前浏览器直接读取"}
+                </strong>
+                <small>新版扩展只同步书签标题、网址和文件夹，不读取浏览历史或页面内容。</small>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void loadCurrentBrowserBookmarks()}
+              >
+                {busy ? "读取中…" : "重新读取"}
+              </button>
+            </section>
+            <div className="bookmark-source-divider"><span>备用方式</span></div>
+            <label className="bookmark-file-picker compact">
+              <span aria-hidden="true">⇧</span>
+              <span>
+                <strong>选择 Chrome 导出的书签 HTML</strong>
+                <small>适合未安装新版扩展时使用；原始文件不会上传。</small>
+              </span>
+              <input
+                type="file"
+                accept=".html,text/html"
+                disabled={busy}
+                onChange={(event) => void handleFile(event)}
+              />
+            </label>
+          </div>
         )}
 
         {preview && !batch && (
@@ -221,7 +297,7 @@ export default function BookmarkImportDialog({
                 <strong>{preview.invalid_count}</strong><span>无法导入</span>
               </div>
             </div>
-            <p className="bookmark-file-name">{fileName} · 保留原文件夹用于追溯，最终分类由系统自动判断。</p>
+            <p className="bookmark-file-name">{sourceLabel} · 保留原文件夹用于追溯，最终分类由系统自动判断。</p>
             <div className="bookmark-preview-list">
               {previewGroups.map(([folder, folderItems]) => (
                 <section key={folder}>
@@ -237,7 +313,7 @@ export default function BookmarkImportDialog({
               ))}
             </div>
             <div className="dialog-actions">
-              <button type="button" onClick={chooseAnotherFile}>重新选择</button>
+              <button type="button" onClick={chooseAnotherSource}>重新选择</button>
               <button
                 type="button"
                 className="primary"

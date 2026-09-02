@@ -1056,14 +1056,14 @@ export default function App() {
             <div className="resource-library-tools">
               <div>
                 <strong>批量整理已有收藏</strong>
-                <span>导入 Chrome HTML 后自动去重、分类并支持整批撤销。</span>
+                <span>从当前浏览器直接读取书签，自动去重、分类并支持整批撤销。</span>
               </div>
               <span className="resource-tool-actions">
                 <button type="button" onClick={() => setHealthCenterOpen(true)}>
                   ! 网页巡检{healthIssueCount > 0 ? ` ${healthIssueCount}` : ""}
                 </button>
                 <button type="button" onClick={() => setBookmarkImportOpen(true)}>
-                  ⇧ 导入 Chrome 书签
+                  ⇧ 导入浏览器书签
                 </button>
               </span>
             </div>

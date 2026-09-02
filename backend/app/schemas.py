@@ -414,6 +414,51 @@ class BookmarkImportRequest(BaseModel):
         return self
 
 
+class BrowserBookmarkSyncRequest(BaseModel):
+    """扩展提交的当前浏览器书签树快照。"""
+
+    extension_id: str = Field(pattern=r"^[a-p]{32}$")
+    items: list[BookmarkInput] = Field(default_factory=list, max_length=5_000)
+    total_count: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_snapshot_count(self) -> BrowserBookmarkSyncRequest:
+        """总数不能小于实际提交的书签数量。"""
+
+        if self.total_count < len(self.items):
+            raise ValueError("书签总数不能小于已提交数量")
+        identifiers = [item.client_item_id for item in self.items]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("书签项目标识不能重复")
+        return self
+
+
+class BrowserBookmarkSyncResponse(BaseModel):
+    """浏览器书签快照同步结果。"""
+
+    synced_count: int
+    truncated: bool
+
+
+class BrowserBookmarkSnapshotRead(BaseModel):
+    """Web 可直接导入的最近浏览器书签快照。"""
+
+    extension_connected: bool
+    synced_at: datetime | None
+    total_count: int
+    truncated: bool
+    items: list[BookmarkInput]
+
+    @field_serializer("synced_at")
+    def serialize_utc_datetime(self, value: datetime | None) -> str | None:
+        """统一输出书签快照同步时间。"""
+
+        if value is None:
+            return None
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 class BookmarkPreviewItem(BaseModel):
     """单条书签的导入校验结果。"""
 

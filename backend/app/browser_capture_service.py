@@ -12,9 +12,11 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BrowserCapture, BrowserOpenTab
+from app.models import BrowserBookmarkSnapshot, BrowserCapture, BrowserOpenTab
 from app.resource_processing import validate_public_resource_url
 from app.schemas import (
+    BrowserBookmarkSnapshotRead,
+    BrowserBookmarkSyncRequest,
     BrowserCaptureContext,
     BrowserCaptureCreate,
     BrowserCaptureCreated,
@@ -245,6 +247,73 @@ def list_open_browser_tabs(
         .limit(limit)
     )
     return list(session.scalars(query).all())
+
+
+def sync_browser_bookmarks(
+    session: Session,
+    user_id: str,
+    payload: BrowserBookmarkSyncRequest,
+    request_origin: str | None,
+) -> BrowserBookmarkSnapshot:
+    """持久化扩展读取的当前浏览器书签树快照。"""
+
+    expected_origin = f"chrome-extension://{payload.extension_id}"
+    if request_origin != expected_origin:
+        raise BrowserCaptureOriginError
+    now = datetime.now(UTC)
+    snapshot = session.scalar(
+        select(BrowserBookmarkSnapshot).where(
+            BrowserBookmarkSnapshot.user_id == user_id,
+            BrowserBookmarkSnapshot.extension_id == payload.extension_id,
+        )
+    )
+    if snapshot is None:
+        snapshot = BrowserBookmarkSnapshot(
+            id=str(uuid4()),
+            user_id=user_id,
+            extension_id=payload.extension_id,
+        )
+        session.add(snapshot)
+
+    # 书签字段已经过 Pydantic 清理，只保存导入所需的最小结构化信息。
+    snapshot.bookmarks = [item.model_dump(mode="json") for item in payload.items]
+    snapshot.total_count = payload.total_count
+    snapshot.truncated = payload.total_count > len(payload.items)
+    snapshot.synced_at = now
+    session.commit()
+    return snapshot
+
+
+def read_browser_bookmark_snapshot(
+    session: Session,
+    user_id: str,
+) -> BrowserBookmarkSnapshotRead:
+    """读取该用户最近一次由扩展同步的浏览器书签。"""
+
+    snapshot = session.scalar(
+        select(BrowserBookmarkSnapshot)
+        .where(BrowserBookmarkSnapshot.user_id == user_id)
+        .order_by(
+            BrowserBookmarkSnapshot.synced_at.desc(),
+            BrowserBookmarkSnapshot.id.desc(),
+        )
+        .limit(1)
+    )
+    if snapshot is None:
+        return BrowserBookmarkSnapshotRead(
+            extension_connected=False,
+            synced_at=None,
+            total_count=0,
+            truncated=False,
+            items=[],
+        )
+    return BrowserBookmarkSnapshotRead(
+        extension_connected=True,
+        synced_at=snapshot.synced_at,
+        total_count=snapshot.total_count,
+        truncated=snapshot.truncated,
+        items=snapshot.bookmarks,
+    )
 
 
 def exchange_browser_capture(

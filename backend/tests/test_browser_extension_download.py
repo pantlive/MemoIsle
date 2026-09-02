@@ -33,3 +33,4 @@ def test_browser_extension_download_contains_runtime_files(
         )
     assert manifest["manifest_version"] == 3
     assert "tabs" in manifest["permissions"]
+    assert "bookmarks" in manifest["permissions"]

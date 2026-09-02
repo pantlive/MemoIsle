@@ -2,6 +2,7 @@ import type {
   BookmarkImportBatch,
   BookmarkImportPreview,
   BookmarkInput,
+  BrowserBookmarkSnapshot,
   BrowserCaptureContext,
   BrowserOpenTab,
   BrowserOpenTabListResponse,
@@ -133,6 +134,10 @@ export async function previewBookmarkImport(
     method: "POST",
     body: JSON.stringify({ items }),
   });
+}
+
+export async function getCurrentBrowserBookmarks(): Promise<BrowserBookmarkSnapshot> {
+  return request<BrowserBookmarkSnapshot>("/browser-bookmarks/current");
 }
 
 export async function createBookmarkImport(

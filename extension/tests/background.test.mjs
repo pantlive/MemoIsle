@@ -23,6 +23,7 @@ function createHarness({
     favIconUrl: "https://developer.mozilla.org/favicon.ico",
   },
   openTabs,
+  bookmarkTree,
   fetchImpl,
   storedConfig = {},
 } = {}) {
@@ -32,6 +33,7 @@ function createHarness({
     contextMenus: [],
     fetches: [],
     queries: [],
+    bookmarkReads: 0,
     tabsCreated: [],
   };
   const resolvedFetch = fetchImpl ?? (async (url, options) => {
@@ -47,6 +49,7 @@ function createHarness({
   const chrome = {
     runtime: {
       id: "abcdefghijklmnopabcdefghijklmnop",
+      lastError: null,
       onInstalled: {
         addListener(callback) {
           listeners.installed = callback;
@@ -55,6 +58,37 @@ function createHarness({
       onStartup: {
         addListener(callback) {
           listeners.startup = callback;
+        },
+      },
+    },
+    bookmarks: {
+      getTree(callback) {
+        calls.bookmarkReads += 1;
+        callback(bookmarkTree ?? [{ id: "0", title: "", children: [] }]);
+      },
+      onCreated: {
+        addListener(callback) {
+          listeners.bookmarkCreated = callback;
+        },
+      },
+      onChanged: {
+        addListener(callback) {
+          listeners.bookmarkChanged = callback;
+        },
+      },
+      onMoved: {
+        addListener(callback) {
+          listeners.bookmarkMoved = callback;
+        },
+      },
+      onRemoved: {
+        addListener(callback) {
+          listeners.bookmarkRemoved = callback;
+        },
+      },
+      onImportEnded: {
+        addListener(callback) {
+          listeners.bookmarkImportEnded = callback;
         },
       },
     },
@@ -128,6 +162,8 @@ function createHarness({
       console,
       crypto: { randomUUID },
       fetch: resolvedFetch,
+      clearTimeout,
+      setTimeout,
     }),
     { filename: "background.js" },
   );
@@ -161,6 +197,74 @@ test("安装时注册最小化的网页右键菜单", () => {
 
 test("扩展清单允许读取当前浏览器打开的标签页", () => {
   assert.equal(manifest.permissions.includes("tabs"), true);
+});
+
+test("扩展清单明确申请读取当前浏览器书签", () => {
+  assert.equal(manifest.permissions.includes("bookmarks"), true);
+});
+
+test("安装后直接读取书签树并同步标题、网址和文件夹", async () => {
+  const harness = createHarness({
+    bookmarkTree: [
+      {
+        id: "0",
+        title: "",
+        children: [
+          {
+            id: "1",
+            title: "书签栏",
+            children: [
+              {
+                id: "10",
+                title: "学习资料",
+                children: [
+                  {
+                    id: "42",
+                    title: "PyTorch 文档",
+                    url: "https://pytorch.org/docs/stable/",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  harness.listeners.installed();
+  await waitFor(() => harness.calls.fetches.some((item) =>
+    item.url.endsWith("/browser-bookmarks/sync"),
+  ));
+
+  const request = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-bookmarks/sync"),
+  );
+  assert.ok(request);
+  assert.equal(harness.calls.bookmarkReads, 1);
+  assert.deepEqual(JSON.parse(request.options.body), {
+    extension_id: "abcdefghijklmnopabcdefghijklmnop",
+    items: [
+      {
+        client_item_id: "chrome:42",
+        title: "PyTorch 文档",
+        url: "https://pytorch.org/docs/stable/",
+        folder_path: "书签栏 / 学习资料",
+      },
+    ],
+    total_count: 1,
+  });
+});
+
+test("浏览器完成批量书签导入后刷新完整快照", async () => {
+  const harness = createHarness();
+
+  harness.listeners.bookmarkImportEnded();
+  await waitFor(() => harness.calls.fetches.some((item) =>
+    item.url.endsWith("/browser-bookmarks/sync"),
+  ));
+
+  assert.equal(harness.calls.bookmarkReads, 1);
 });
 
 test("点击扩展图标会同步当前浏览器网页并打开带一次性令牌的 Web", async () => {

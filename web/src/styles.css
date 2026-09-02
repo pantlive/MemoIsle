@@ -1440,6 +1440,81 @@ button.type-pill {
   font-size: 24px;
 }
 
+.bookmark-source-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.browser-bookmark-source {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+  border-radius: 14px;
+  background: var(--primary-soft);
+  padding: 18px;
+}
+
+.browser-bookmark-source > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 22px;
+}
+
+.browser-bookmark-source > div,
+.bookmark-file-picker.compact > span:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.browser-bookmark-source small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.browser-bookmark-source button {
+  min-height: 38px;
+  border: 1px solid var(--primary);
+  border-radius: 9px;
+  background: var(--primary);
+  padding: 0 14px;
+  color: white;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.browser-bookmark-source button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.bookmark-source-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.bookmark-source-divider::before,
+.bookmark-source-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+  content: "";
+}
+
 .bookmark-file-picker {
   display: grid;
   min-height: 240px;
@@ -1459,7 +1534,7 @@ button.type-pill {
   background: var(--primary-soft);
 }
 
-.bookmark-file-picker > span {
+.bookmark-file-picker > span:first-child {
   display: grid;
   width: 48px;
   height: 48px;
@@ -1468,6 +1543,25 @@ button.type-pill {
   background: var(--surface);
   color: var(--primary);
   font-size: 24px;
+}
+
+.bookmark-file-picker.compact {
+  min-height: 0;
+  grid-template-columns: auto 1fr;
+  place-items: center start;
+  align-content: initial;
+  gap: 12px;
+  margin-top: 0;
+  border-width: 1px;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.bookmark-file-picker.compact > span:first-child {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 18px;
 }
 
 .bookmark-file-picker small,
@@ -1971,6 +2065,15 @@ button.type-pill {
 
   .bookmark-summary {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .browser-bookmark-source {
+    grid-template-columns: auto 1fr;
+  }
+
+  .browser-bookmark-source button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .dialog-actions {

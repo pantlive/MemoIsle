@@ -149,7 +149,15 @@ export interface BookmarkInput {
   client_item_id: string;
   title: string;
   url: string;
-  folder_path?: string;
+  folder_path?: string | null;
+}
+
+export interface BrowserBookmarkSnapshot {
+  extension_connected: boolean;
+  synced_at: string | null;
+  total_count: number;
+  truncated: boolean;
+  items: BookmarkInput[];
 }
 
 export interface BookmarkPreviewItem {

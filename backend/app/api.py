@@ -37,6 +37,8 @@ from app.browser_capture_service import (
     create_browser_capture,
     exchange_browser_capture,
     list_open_browser_tabs,
+    read_browser_bookmark_snapshot,
+    sync_browser_bookmarks,
     sync_open_browser_tabs,
 )
 from app.browser_extension_service import build_browser_extension_archive
@@ -53,6 +55,9 @@ from app.schemas import (
     BookmarkImportBatchRead,
     BookmarkImportPreview,
     BookmarkImportRequest,
+    BrowserBookmarkSnapshotRead,
+    BrowserBookmarkSyncRequest,
+    BrowserBookmarkSyncResponse,
     BrowserCaptureContext,
     BrowserCaptureCreate,
     BrowserCaptureCreated,
@@ -222,6 +227,48 @@ def list_open_browser_tabs_route(
     return BrowserOpenTabListResponse(
         items=[BrowserOpenTabRead.model_validate(item) for item in items]
     )
+
+
+@router.post(
+    "/browser-bookmarks/sync",
+    response_model=BrowserBookmarkSyncResponse,
+    tags=["browser-bookmarks"],
+)
+def sync_browser_bookmarks_route(
+    payload: BrowserBookmarkSyncRequest,
+    request: Request,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> BrowserBookmarkSyncResponse:
+    """接收扩展直接读取的当前浏览器书签树快照。"""
+
+    try:
+        snapshot = sync_browser_bookmarks(
+            session,
+            user_id,
+            payload,
+            request.headers.get("origin"),
+        )
+    except BrowserCaptureOriginError as error:
+        raise HTTPException(status_code=403, detail="浏览器扩展来源不匹配") from error
+    return BrowserBookmarkSyncResponse(
+        synced_count=len(snapshot.bookmarks),
+        truncated=snapshot.truncated,
+    )
+
+
+@router.get(
+    "/browser-bookmarks/current",
+    response_model=BrowserBookmarkSnapshotRead,
+    tags=["browser-bookmarks"],
+)
+def read_browser_bookmarks_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> BrowserBookmarkSnapshotRead:
+    """向 Web 返回最近一次扩展同步的浏览器书签。"""
+
+    return read_browser_bookmark_snapshot(session, user_id)
 
 
 @router.post(

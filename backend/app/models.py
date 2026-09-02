@@ -330,6 +330,40 @@ class BrowserOpenTab(Base):
     )
 
 
+class BrowserBookmarkSnapshot(Base):
+    """浏览器扩展同步的书签树快照。"""
+
+    __tablename__ = "browser_bookmark_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "extension_id",
+            name="uq_browser_bookmark_snapshot_identity",
+        ),
+        Index(
+            "ix_browser_bookmark_snapshot_user_synced",
+            "user_id",
+            "synced_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    extension_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    bookmarks: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
 class BrowserCapture(Base):
     """浏览器扩展授权的短时一次性网页上下文。"""
 

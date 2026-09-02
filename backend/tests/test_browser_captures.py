@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from app.browser_capture_service import create_browser_capture, sync_open_browser_tabs
-from app.models import BrowserOpenTab
+from app.models import BrowserBookmarkSnapshot, BrowserOpenTab
 from app.schemas import (
     BrowserCaptureCreate,
     BrowserCaptureCreated,
@@ -192,3 +192,105 @@ def test_browser_capture_rejects_spoofed_origin_and_private_page(
         json=private_payload,
     )
     assert private_response.status_code == 422
+
+
+def test_browser_extension_syncs_bookmarks_for_direct_web_import(
+    client: TestClient,
+) -> None:
+    """扩展书签快照可由 Web 直接读取，并由下一次完整快照替换。"""
+
+    empty_response = client.get("/api/v1/browser-bookmarks/current")
+    assert empty_response.status_code == 200
+    assert empty_response.json() == {
+        "extension_connected": False,
+        "synced_at": None,
+        "total_count": 0,
+        "truncated": False,
+        "items": [],
+    }
+
+    sync_response = client.post(
+        "/api/v1/browser-bookmarks/sync",
+        headers={"Origin": EXTENSION_ORIGIN},
+        json={
+            "extension_id": EXTENSION_ID,
+            "total_count": 2,
+            "items": [
+                {
+                    "client_item_id": "chrome:41",
+                    "title": " PyTorch 文档 ",
+                    "url": "https://pytorch.org/docs/stable/",
+                    "folder_path": "书签栏 / 学习资料",
+                },
+                {
+                    "client_item_id": "chrome:42",
+                    "title": "文章",
+                    "url": "https://example.com/article",
+                    "folder_path": "其他书签",
+                },
+            ],
+        },
+    )
+    assert sync_response.status_code == 200
+    assert sync_response.json() == {"synced_count": 2, "truncated": False}
+
+    current = client.get("/api/v1/browser-bookmarks/current").json()
+    assert current["extension_connected"] is True
+    assert current["total_count"] == 2
+    assert current["truncated"] is False
+    assert current["synced_at"].endswith("Z")
+    assert current["items"] == [
+        {
+            "client_item_id": "chrome:41",
+            "title": "PyTorch 文档",
+            "url": "https://pytorch.org/docs/stable/",
+            "folder_path": "书签栏 / 学习资料",
+        },
+        {
+            "client_item_id": "chrome:42",
+            "title": "文章",
+            "url": "https://example.com/article",
+            "folder_path": "其他书签",
+        },
+    ]
+
+    replacement_response = client.post(
+        "/api/v1/browser-bookmarks/sync",
+        headers={"Origin": EXTENSION_ORIGIN},
+        json={
+            "extension_id": EXTENSION_ID,
+            "total_count": 5_001,
+            "items": [
+                {
+                    "client_item_id": "chrome:99",
+                    "title": "最新书签",
+                    "url": "https://example.com/latest",
+                }
+            ],
+        },
+    )
+    assert replacement_response.json() == {"synced_count": 1, "truncated": True}
+    latest = client.get("/api/v1/browser-bookmarks/current").json()
+    assert latest["items"][0]["client_item_id"] == "chrome:99"
+    assert latest["truncated"] is True
+
+    with client.app.state.database.session_factory() as session:
+        snapshots = session.scalars(select(BrowserBookmarkSnapshot)).all()
+        assert len(snapshots) == 1
+
+
+def test_browser_bookmark_sync_rejects_spoofed_extension_origin(
+    client: TestClient,
+) -> None:
+    """Web 页面或其他扩展不能伪造当前浏览器书签快照。"""
+
+    response = client.post(
+        "/api/v1/browser-bookmarks/sync",
+        headers={"Origin": f"chrome-extension://{'b' * 32}"},
+        json={
+            "extension_id": EXTENSION_ID,
+            "total_count": 0,
+            "items": [],
+        },
+    )
+    assert response.status_code == 403
