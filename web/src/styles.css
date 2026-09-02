@@ -717,7 +717,7 @@ button.type-pill {
 }
 
 .resource-filter-panel {
-  margin-top: 18px;
+  margin-top: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--surface) 75%, transparent);

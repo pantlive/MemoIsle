@@ -1069,35 +1069,6 @@ export default function App() {
             </div>
           )}
 
-          {activeType === "resource" && (
-            <section className="resource-filter-panel" aria-label="资料组合筛选">
-              <div className="category-filter">
-                <span>分类</span>
-                <button
-                  className={!resourceCategoryFilter ? "active" : ""}
-                  onClick={() => setResourceCategoryFilter("")}
-                >全部</button>
-                {resourceCategories.map((category) => (
-                  <button
-                    className={
-                      resourceCategoryFilter === category.value ? "active" : ""
-                    }
-                    key={category.value}
-                    onClick={() => setResourceCategoryFilter(category.value)}
-                  >{category.label}</button>
-                ))}
-                <label className="star-filter-toggle">
-                  <input
-                    type="checkbox"
-                    checked={resourceStarredOnly}
-                    onChange={(event) => setResourceStarredOnly(event.target.checked)}
-                  />
-                  只看星标
-                </label>
-              </div>
-            </section>
-          )}
-
           {message && <div className="status-message" role="status">{message}</div>}
 
           <section className="recent-section" aria-labelledby="recent-title">
@@ -1141,6 +1112,36 @@ export default function App() {
                 <button onClick={() => void loadCurrentMemos()}>刷新</button>
               </div>
             </div>
+            {activeType === "resource" && (
+              <div className="resource-filter-panel" aria-label="资料组合筛选">
+                <div className="category-filter">
+                  <span>分类</span>
+                  <button
+                    className={!resourceCategoryFilter ? "active" : ""}
+                    onClick={() => setResourceCategoryFilter("")}
+                  >全部</button>
+                  {resourceCategories.map((category) => (
+                    <button
+                      className={
+                        resourceCategoryFilter === category.value ? "active" : ""
+                      }
+                      key={category.value}
+                      onClick={() => setResourceCategoryFilter(category.value)}
+                    >{category.label}</button>
+                  ))}
+                  <label className="star-filter-toggle">
+                    <input
+                      type="checkbox"
+                      checked={resourceStarredOnly}
+                      onChange={(event) =>
+                        setResourceStarredOnly(event.target.checked)
+                      }
+                    />
+                    只看星标
+                  </label>
+                </div>
+              </div>
+            )}
             {loadState === "loading" && (
               <div className="state-panel">
                 {searchQuery.trim() ? "正在搜索资料库……" : `正在从共享资料库读取${copy.itemLabel}……`}

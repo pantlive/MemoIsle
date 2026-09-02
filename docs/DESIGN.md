@@ -87,6 +87,7 @@ Always pair unfamiliar icons with labels or accessible names.
 - The `@网页` menu opens below the composer, scrolls within a bounded height, and truncates long titles and source metadata without widening the page.
 - Browser-tab snapshots and pending resource metadata refresh silently after their first load, preserving the rendered menu and memo list instead of repeatedly switching the interface back to a loading state.
 - Resource titles and source hosts in Recent Content open the original page in a new tab; each resource row exposes an inline category select and star button and never opens the right editor panel.
+- The resource category/star filter bar belongs inside Recent Content, directly below its heading and directly above the rows.
 - The desktop top bar and disconnected `@网页` state expose a clear browser-extension download action with concise unzip-and-load guidance.
 
 ### Memo Row
