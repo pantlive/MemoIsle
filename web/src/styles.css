@@ -273,6 +273,24 @@ textarea:focus-visible {
   padding: 0 18px;
 }
 
+.extension-download-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  border: 1px solid var(--primary);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0 13px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.extension-download-button:hover {
+  background: var(--primary-soft);
+}
+
 .main-content {
   width: min(920px, calc(100% - 64px));
   margin: 0 auto;
@@ -471,7 +489,7 @@ textarea:focus-visible {
 }
 
 .web-attachment-card > span:not(.web-attachment-icon),
-.web-attachment-help > div {
+.web-attachment-help-copy {
   display: flex;
   min-width: 0;
   flex: 1;
@@ -506,7 +524,8 @@ textarea:focus-visible {
 }
 
 .web-attachment-card > button,
-.web-attachment-help > button {
+.web-attachment-help-actions a,
+.web-attachment-help-actions button {
   flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -519,11 +538,21 @@ textarea:focus-visible {
   height: 30px;
 }
 
-.web-attachment-help > button {
+.web-attachment-help-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.web-attachment-help-actions a,
+.web-attachment-help-actions button {
+  display: inline-flex;
   min-height: 34px;
+  align-items: center;
   padding: 0 10px;
   color: var(--primary);
   font-size: 11px;
+  text-decoration: none;
 }
 
 .resource-fields,
@@ -1841,12 +1870,23 @@ button.type-pill {
 @media (max-width: 720px) {
   .side-navigation,
   .sync-status,
+  .extension-download-button,
   .compact-new {
     display: none;
   }
 
   .workspace {
     margin-left: 0;
+  }
+
+  .web-attachment-help {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .web-attachment-help-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .top-bar {

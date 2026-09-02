@@ -11,6 +11,7 @@ import BookmarkImportDialog from "./BookmarkImportDialog";
 import LinkHealthDialog from "./LinkHealthDialog";
 import {
   ApiError,
+  browserExtensionDownloadUrl,
   createMemo,
   enrichResource,
   exchangeBrowserCapture,
@@ -951,6 +952,12 @@ export default function App() {
             )}
           </div>
           <span className="sync-status"><span className="sync-dot" /> 已同步</span>
+          <a
+            className="extension-download-button"
+            href={browserExtensionDownloadUrl()}
+            download="memoisle-browser-extension.zip"
+            title="下载后解压，并在 Chrome 或 Edge 中加载已解压的扩展"
+          >↓ 下载扩展</a>
           <button className="compact-new" onClick={focusCapture}>＋ 新建</button>
         </header>
 
@@ -1016,18 +1023,24 @@ export default function App() {
             )}
             {activeType === "resource" && webAttachmentHelp && !webAttachment && (
               <div className="web-attachment-help">
-                <div>
+                <div className="web-attachment-help-copy">
                   <strong>@网页暂未连接当前浏览器</strong>
                   <span>请启用 MemoIsle 扩展并刷新浏览器页面，然后输入 @ 选择当前打开的网页。</span>
-                  <small>开发安装：Chrome 扩展管理 → 加载已解压扩展 → 选择项目 extension 目录。</small>
+                  <small>下载 ZIP 并解压 → Chrome 扩展管理 → 加载已解压扩展 → 选择 memoisle-extension 文件夹。</small>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWebAttachmentHelp(false);
-                    urlRef.current?.focus();
-                  }}
-                >改为粘贴网址</button>
+                <div className="web-attachment-help-actions">
+                  <a
+                    href={browserExtensionDownloadUrl()}
+                    download="memoisle-browser-extension.zip"
+                  >下载扩展</a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWebAttachmentHelp(false);
+                      urlRef.current?.focus();
+                    }}
+                  >粘贴网址</button>
+                </div>
               </div>
             )}
             {activeType === "word" && (

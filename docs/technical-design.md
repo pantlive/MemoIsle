@@ -126,6 +126,7 @@ Android Client ───┘                       │
 - 扩展只提供页面基础信息，公开元数据仍由服务端 SSRF 防护任务抓取，扩展不得上传页面正文。
 - 扩展授权或通信失败不能清空用户已输入的备注；Web 回退到粘贴网址流程。
 - 身份认证使用可撤销、短期且仅具收藏权限的扩展令牌，不把 Web 会话 Cookie 或长期访问令牌写入页面 URL。
+- 后端按请求将 `manifest.json`、后台脚本和安装说明打包为 ZIP；下载包不包含测试、依赖、数据或密钥，Web 顶栏与未连接状态均指向该接口。
 
 ### 4.7 网页健康巡检
 
@@ -162,6 +163,7 @@ Android Client ───┘                       │
 | `GET /v1/bookmark-imports/{id}` | 获取导入进度与失败摘要 |
 | `POST /v1/bookmark-imports/{id}/retry` | 重试失败项目 |
 | `POST /v1/bookmark-imports/{id}/undo` | 撤销本批次新建资料 |
+| `GET /v1/browser-extension/download` | 下载可解压安装的浏览器扩展 ZIP |
 | `POST /v1/browser-tabs/sync` | 扩展同步当前浏览器打开网页快照 |
 | `GET /v1/browser-tabs/open` | Web 读取当前浏览器可选择的打开网页 |
 | `POST /v1/browser-captures/exchange` | 使用一次性凭据交换扩展授权的当前页上下文 |

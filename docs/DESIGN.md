@@ -84,6 +84,7 @@ Always pair unfamiliar icons with labels or accessible names.
 - Supports type switch, text/URL input, microphone, and one clear Save action.
 - Advanced metadata stays collapsed until requested.
 - Typing `@` in Web capture opens a command menu; `@网页` lists the currently open HTTP(S) pages from the connected Chrome browser and renders the selected page as an attachment card rather than plain text.
+- The desktop top bar and disconnected `@网页` state expose a clear browser-extension download action with concise unzip-and-load guidance.
 
 ### Memo Row
 

@@ -182,6 +182,10 @@ export async function listOpenBrowserTabs(): Promise<BrowserOpenTab[]> {
   return response.items;
 }
 
+export function browserExtensionDownloadUrl(): string {
+  return `${API_BASE_URL}/browser-extension/download`;
+}
+
 export async function getLinkHealthCenter(
   status?: LinkHealthStatus,
 ): Promise<LinkHealthCenter> {

@@ -16,7 +16,7 @@ from fastapi import (
     Request,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.bookmark_service import (
@@ -39,6 +39,7 @@ from app.browser_capture_service import (
     list_open_browser_tabs,
     sync_open_browser_tabs,
 )
+from app.browser_extension_service import build_browser_extension_archive
 from app.config import Settings
 from app.dependencies import get_current_user_id, get_session, get_settings
 from app.link_health_service import (
@@ -103,6 +104,27 @@ def health() -> dict[str, str]:
     """提供部署和开发环境健康检查。"""
 
     return {"status": "ok"}
+
+
+@router.get(
+    "/browser-extension/download",
+    response_class=Response,
+    tags=["browser-extension"],
+)
+def download_browser_extension_route() -> Response:
+    """下载可解压后加载到 Chrome 或 Edge 的扩展包。"""
+
+    archive = build_browser_extension_archive()
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="memoisle-browser-extension.zip"'
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post(

@@ -78,6 +78,7 @@ Web / Android 搜索
 | GET | `/api/v1/bookmark-imports/{id}` | 获取批次和逐项进度 |
 | POST | `/api/v1/bookmark-imports/{id}/retry` | 重试失败项目 |
 | POST | `/api/v1/bookmark-imports/{id}/undo` | 撤销未编辑的本批资料 |
+| GET | `/api/v1/browser-extension/download` | 下载可解压安装的浏览器扩展 ZIP |
 | POST | `/api/v1/browser-tabs/sync` | 扩展同步当前浏览器打开网页快照 |
 | GET | `/api/v1/browser-tabs/open` | Web 读取当前浏览器可选择的打开网页 |
 | POST | `/api/v1/browser-captures` | 扩展提交当前页并换取短时凭据 |
@@ -102,6 +103,7 @@ Web / Android 搜索
 - 支持 Chrome 书签 HTML 本地解析、预览、文件夹追溯、批次进度、失败重试和撤销。
 - 书签导入先完成可搜索写入，再由后台补充元数据与分类；服务重启会自动恢复等待中或处理中批次。
 - 支持 Chrome Manifest V3 扩展同步当前浏览器各窗口的 HTTP(S) 打开网页，Web 输入 `@` 可选择任意网页；扩展动作仍通过一次性令牌直接捕获当前页。
+- Web 顶栏和 `@网页` 未连接提示提供扩展 ZIP 下载入口，下载包只包含清单、后台脚本和安装说明。
 - 支持网页巡检中心、失效网页角标、状态摘要、人工重试、采用跳转网址、更新网址/资料、忽略和删除。
 - 支持单词、音标、释义和例句的收藏与编辑。
 - 单词复习默认隐藏答案，显示后可提交三档反馈。
@@ -183,12 +185,18 @@ Debug APK 生成在：
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### 3.4 浏览器扩展
+
+点击 Web 顶栏“下载扩展”，解压 `memoisle-browser-extension.zip`，然后在
+Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解压的扩展”。
+本地开发也可以直接加载仓库中的 `extension` 目录。
+
 ## 4. 已执行验证
 
 | 范围 | 命令/方式 | 结果 |
 | --- | --- | --- |
 | Python 静态检查 | `ruff check backend` | 通过 |
-| 后端测试 | `pytest -q` | 31 个测试通过 |
+| 后端测试 | `pytest -q` | 32 个测试通过 |
 | Web 类型与生产构建 | `npm run build` | 通过 |
 | Android 单元测试 | `./gradlew testDebugUnitTest` | 通过（7 项） |
 | Android APK | `./gradlew assembleDebug` | 通过 |
@@ -199,6 +207,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 | 语音真实联调 | Android 录音 → 创建灵感 → 上传 → 下载 | 243,944 字节有效 MP4 |
 | 搜索 API 联调 | `GET /memos?q=...` → 跨类型结果 | 通过 |
 | Chrome 扩展静态检查 | `node --check extension/background.js`、Manifest JSON 校验 | 通过 |
+| Chrome 扩展下载 | Web 按钮 → 下载 ZIP → 校验运行文件和 Manifest V3 权限 | 通过（接口测试） |
 | Chrome 扩展行为测试 | `cd extension && npm test` | 17 项测试通过，覆盖清单权限、打开网页快照、标签页变化、协议/地址拦截、失败回退和配置地址 |
 | Chrome Web 捕获 | 当前浏览器多个打开网页快照 → Web `@网页` 选择 → 附件标题/网址渲染；当前页动作仍支持一次性凭据 | 自动化通过；需在现有 Chrome 加载扩展后手动验收 |
 | 书签导入接口 | 预览 → 去重 → 导入 → 搜索 → 重试 → 撤销 | 通过（测试覆盖） |
