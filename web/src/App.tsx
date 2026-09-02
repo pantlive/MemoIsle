@@ -14,6 +14,7 @@ import {
   browserExtensionDownloadUrl,
   createMemo,
   exchangeBrowserCapture,
+  getMemoCounts,
   getLinkHealthCenter,
   listOpenBrowserTabs,
   listMemos,
@@ -26,6 +27,7 @@ import type {
   BrowserCaptureContext,
   BrowserOpenTab,
   Memo,
+  MemoCounts,
   MemoSort,
   MemoType,
   ResourceCategory,
@@ -153,6 +155,7 @@ function sourceHost(sourceUrl: string | null): string {
 export default function App() {
   const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
+  const [memoCounts, setMemoCounts] = useState<MemoCounts | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -222,6 +225,14 @@ export default function App() {
     }
   }, []);
 
+  const refreshMemoCounts = useCallback(async () => {
+    try {
+      setMemoCounts(await getMemoCounts());
+    } catch {
+      // 数量摘要失败不应阻断最近内容列表。
+    }
+  }, []);
+
   const refreshOpenBrowserTabs = useCallback(async (showLoading = true) => {
     if (showLoading) {
       setOpenBrowserTabsLoading(true);
@@ -270,6 +281,10 @@ export default function App() {
     const timer = window.setInterval(() => void refreshHealthSummary(), 60_000);
     return () => window.clearInterval(timer);
   }, [refreshHealthSummary]);
+
+  useEffect(() => {
+    void refreshMemoCounts();
+  }, [refreshMemoCounts]);
 
   useEffect(() => {
     if (!webCommandOpen) {
@@ -539,6 +554,7 @@ export default function App() {
         created,
         ...current.filter((memo) => memo.id !== created.id),
       ]);
+      void refreshMemoCounts();
       setNewBody("");
       setNewUrl("");
       setNewTitle("");
@@ -765,6 +781,7 @@ export default function App() {
       } else {
         switchType("idea");
       }
+      void refreshMemoCounts();
       setVoicePanelOpen(false);
       resetVoiceCapture();
       setMessage("语音灵感已保存，并可在详情中播放。");
@@ -804,6 +821,9 @@ export default function App() {
               >
                 <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                 {item.label}
+                {item.view === "resource" && memoCounts !== null && (
+                  <span className="nav-count">{memoCounts.resource_count}</span>
+                )}
                 {item.action === "health" && healthIssueCount > 0 && (
                   <span className="nav-count">{healthIssueCount}</span>
                 )}
@@ -850,7 +870,11 @@ export default function App() {
         <main className="main-content">
           <div className="page-heading">
             <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1></div>
-            <span>{memos.length} 条内容</span>
+            <span>
+              {activeType === "resource" && memoCounts !== null
+                ? `${memoCounts.resource_count} 条资料`
+                : `${memos.length} 条内容`}
+            </span>
           </div>
 
           {activeType !== "all" && (
@@ -1478,7 +1502,10 @@ export default function App() {
       {bookmarkImportOpen && (
         <BookmarkImportDialog
           onClose={() => setBookmarkImportOpen(false)}
-          onImported={() => void loadCurrentMemos()}
+          onImported={() => {
+            void loadCurrentMemos();
+            void refreshMemoCounts();
+          }}
         />
       )}
 
@@ -1488,6 +1515,7 @@ export default function App() {
           onChanged={() => {
             void refreshHealthSummary();
             void loadCurrentMemos();
+            void refreshMemoCounts();
           }}
         />
       )}

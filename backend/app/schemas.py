@@ -324,6 +324,15 @@ class MemoListResponse(BaseModel):
     items: list[MemoRead]
 
 
+class MemoCountsResponse(BaseModel):
+    """当前用户各内容类型的数量。"""
+
+    total_count: int
+    word_count: int
+    resource_count: int
+    idea_count: int
+
+
 class LinkHealthListResponse(BaseModel):
     """网页巡检中心列表与状态摘要。"""
 

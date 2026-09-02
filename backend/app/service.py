@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from sqlalchemy import Select, String, cast, or_, select
+from sqlalchemy import Select, String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Memo
@@ -344,6 +344,23 @@ def list_memos(
         oldest_first=oldest_first,
     ).limit(limit)
     return list(session.scalars(query).all())
+
+
+def count_memos_by_type(session: Session, user_id: str) -> dict[MemoType, int]:
+    """统计当前用户未删除的各内容类型数量。"""
+
+    counts = {memo_type: 0 for memo_type in MemoType}
+    rows = session.execute(
+        select(Memo.type, func.count(Memo.id))
+        .where(
+            Memo.user_id == user_id,
+            Memo.status != MemoStatus.TRASHED,
+        )
+        .group_by(Memo.type)
+    )
+    for memo_type, count in rows:
+        counts[MemoType(memo_type)] = int(count)
+    return counts
 
 
 def get_memo(session: Session, user_id: str, memo_id: str) -> Memo:

@@ -447,6 +447,36 @@ def test_create_word_and_submit_review(client: TestClient) -> None:
     assert empty_queue.json()["items"] == []
 
 
+def test_memo_counts_include_current_resource_total(client: TestClient) -> None:
+    """类型数量接口返回未删除网页资料的真实总数。"""
+
+    for memo_type, body in (
+        ("resource", "网页资料"),
+        ("resource", "另一条网页资料"),
+        ("idea", "一条灵感"),
+    ):
+        payload = {
+            "client_id": str(uuid4()),
+            "type": memo_type,
+            "body": body,
+            "source_url": "https://example.com/" + str(uuid4())
+            if memo_type == "resource"
+            else None,
+            "tags": [],
+        }
+        response = client.post("/api/v1/memos", json=payload)
+        assert response.status_code == 201
+
+    counts_response = client.get("/api/v1/memos/counts")
+    assert counts_response.status_code == 200
+    assert counts_response.json() == {
+        "total_count": 3,
+        "word_count": 0,
+        "resource_count": 2,
+        "idea_count": 1,
+    }
+
+
 def test_word_requires_lemma_and_non_word_cannot_be_reviewed(
     client: TestClient,
 ) -> None:

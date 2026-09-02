@@ -67,6 +67,7 @@ Web / Android 搜索
 | GET | `/api/v1/health` | 健康检查 |
 | POST | `/api/v1/memos` | 幂等创建条目 |
 | GET | `/api/v1/memos` | 读取条目；支持关键词、类型、分类、资源形态、阅读进度、标签、收藏夹、星标、状态、日期和排序参数 |
+| GET | `/api/v1/memos/counts` | 读取未删除的单词、网页资料、灵感和全部内容数量 |
 | GET | `/api/v1/memos/{id}` | 读取详情 |
 | PATCH | `/api/v1/memos/{id}` | 带版本号编辑 |
 | GET | `/api/v1/sync/changes` | 按游标增量同步 |

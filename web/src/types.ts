@@ -110,6 +110,13 @@ export interface MemoListResponse {
   items: Memo[];
 }
 
+export interface MemoCounts {
+  total_count: number;
+  word_count: number;
+  resource_count: number;
+  idea_count: number;
+}
+
 export interface MemoCreateRequest {
   client_id: string;
   type: MemoType;

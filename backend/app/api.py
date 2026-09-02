@@ -69,6 +69,7 @@ from app.schemas import (
     LinkHealthActionRequest,
     LinkHealthListResponse,
     LinkHealthStatus,
+    MemoCountsResponse,
     MemoCreate,
     MemoListResponse,
     MemoRead,
@@ -89,6 +90,7 @@ from app.service import (
     MemoTypeError,
     MemoVersionConflictError,
     attach_audio,
+    count_memos_by_type,
     create_memo,
     get_audio_path,
     get_memo,
@@ -596,6 +598,22 @@ def list_memos_route(
         limit=limit,
     )
     return MemoListResponse(items=[MemoRead.model_validate(item) for item in items])
+
+
+@router.get("/memos/counts", response_model=MemoCountsResponse, tags=["memos"])
+def count_memos_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> MemoCountsResponse:
+    """返回当前用户未删除内容的类型数量。"""
+
+    counts = count_memos_by_type(session, user_id)
+    return MemoCountsResponse(
+        total_count=sum(counts.values()),
+        word_count=counts[MemoType.WORD],
+        resource_count=counts[MemoType.RESOURCE],
+        idea_count=counts[MemoType.IDEA],
+    )
 
 
 @router.get("/memos/{memo_id}", response_model=MemoRead, tags=["memos"])

@@ -10,6 +10,7 @@ import type {
   LinkHealthCenter,
   LinkHealthStatus,
   Memo,
+  MemoCounts,
   MemoCreateRequest,
   MemoListResponse,
   MemoSort,
@@ -119,6 +120,10 @@ export async function listMemos(filters: MemoListFilters = {}): Promise<Memo[]> 
     `/memos${queryString ? `?${queryString}` : ""}`,
   );
   return response.items;
+}
+
+export async function getMemoCounts(): Promise<MemoCounts> {
+  return request<MemoCounts>("/memos/counts");
 }
 
 export async function enrichResource(memoId: string): Promise<Memo> {
