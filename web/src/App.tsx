@@ -79,7 +79,7 @@ const resourceCategories: Array<{
 
 const viewCopy = {
   all: {
-    title: "全部内容",
+    title: "最近内容",
     eyebrow: "一个入口，找回所有收藏",
     icon: "□",
     itemLabel: "内容",
@@ -151,7 +151,7 @@ function sourceHost(sourceUrl: string | null): string {
 }
 
 export default function App() {
-  const [activeType, setActiveType] = useState<ActiveView>("idea");
+  const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState("");
@@ -1076,7 +1076,7 @@ export default function App() {
               <h2 id="recent-title">
                 {searchQuery.trim()
                   ? `“${searchQuery.trim()}”的搜索结果`
-                  : activeType === "all" ? "全部内容" : "最近内容"}
+                  : copy.title}
               </h2>
               <div className="section-actions">
                 <label>
