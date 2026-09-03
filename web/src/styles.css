@@ -175,7 +175,7 @@ textarea:focus-visible {
 
 .account-block {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 9px;
   margin-top: auto;
@@ -183,6 +183,203 @@ textarea:focus-visible {
   padding: 18px 8px 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.account-block span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-logout {
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 5px 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.account-logout:hover {
+  color: var(--danger);
+}
+
+.auth-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  display: grid;
+  width: min(420px, 100%);
+  justify-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  padding: 36px 28px;
+  box-shadow: 0 24px 70px color-mix(in srgb, #24403b 14%, transparent);
+  text-align: center;
+}
+
+.auth-card .brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  font-size: 20px;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-family: Sora, "Noto Sans SC", sans-serif;
+  font-size: 26px;
+}
+
+.auth-card > p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.auth-actions {
+  display: grid;
+  width: 100%;
+  gap: 10px;
+}
+
+.auth-toggle {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 620;
+}
+
+.auth-toggle:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.auth-actions a,
+.auth-actions button {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.auth-actions a:hover,
+.auth-actions button:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.auth-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.auth-error {
+  color: var(--danger) !important;
+}
+
+.auth-email-form {
+  display: grid;
+  width: 100%;
+  gap: 12px;
+  text-align: left;
+}
+
+.auth-email-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-email-form input {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0 12px;
+  color: var(--text);
+}
+
+.auth-email-form input:focus {
+  border-color: var(--focus);
+}
+
+.auth-email-form > button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.auth-email-form > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.auth-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  padding: 4px;
+}
+
+.auth-mode-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 620;
+}
+
+.auth-mode-tabs button.active {
+  background: var(--surface);
+  color: var(--primary-hover);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+
+.auth-hint {
+  margin: 0;
+  color: var(--muted);
 }
 
 .avatar {

@@ -18,6 +18,7 @@ MemoIsle 是一个面向 Web 与 Android 的统一收藏、记录与回顾工具
 - 服务端支持受限音频上传、私有读取和跨端播放。
 - Web 提供全部内容页和服务端跨类型搜索，Android 提供统一资料库与本地即时搜索。
 - Web 与 Android 提供今日回顾：混合到期单词、未读资料和待整理灵感，可跳过或按类型处理。
+- 服务端支持邮箱密码、微信、Google 和 Apple ID 登录，Web 与 Android 使用可撤销 Bearer 会话访问数据。
 - Web 与 Android 视觉样式均来自 Stitch 设计系统。
 
 ## 快速运行

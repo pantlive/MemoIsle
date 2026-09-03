@@ -1,5 +1,6 @@
 package com.memoisle.app
 
+import android.media.MediaPlayer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,7 +12,9 @@ import com.memoisle.app.data.MemoRepository
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.DuplicateLemmaException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class MemoUiState(
     val isRefreshing: Boolean = false,
@@ -28,6 +31,7 @@ class MemoViewModel(
 
     var uiState by mutableStateOf(MemoUiState(isRefreshing = true))
         private set
+    private var mediaPlayer: MediaPlayer? = null
 
     init {
         refresh()
@@ -397,7 +401,29 @@ class MemoViewModel(
         }
     }
 
-    fun audioUrl(memoId: String): String = repository.audioUrl(memoId)
+    fun playAudio(memo: Memo) {
+        viewModelScope.launch {
+            runCatching {
+                val audioFile = withContext(Dispatchers.IO) { repository.audioFile(memo) }
+                withContext(Dispatchers.Main) {
+                    mediaPlayer?.release()
+                    mediaPlayer = MediaPlayer().apply {
+                        setDataSource(audioFile.toString())
+                        setOnPreparedListener { player -> player.start() }
+                        prepareAsync()
+                    }
+                }
+            }.onFailure { error ->
+                uiState = uiState.copy(message = "录音播放失败：${error.readableMessage()}")
+            }
+        }
+    }
+
+    override fun onCleared() {
+        mediaPlayer?.release()
+        mediaPlayer = null
+        super.onCleared()
+    }
 
     companion object {
         fun factory(repository: MemoRepository): ViewModelProvider.Factory {

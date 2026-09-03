@@ -50,6 +50,15 @@ Android Client ───┘                       │
 - 使用临时文件安全保存录音，条目落库后再进入上传队列。
 - 设备相关代码不得假定特定厂商或硬件能力。
 
+### 3.3 账号认证
+
+- Web 与 Android 均通过服务端发起微信、Google 和 Apple ID OAuth 授权码登录。
+- Web 与 Android 支持邮箱密码注册和登录，凭据使用 PBKDF2-SHA256 加盐哈希保存。
+- 服务端保存 `user`、`auth_identity` 和 `auth_session`；第三方主体可绑定到同一账号，已验证邮箱可用于跨提供方归并。
+- OAuth `state` 使用服务端密钥 HMAC 签名并设置短时效；回调后的跳转地址必须来自 Web CORS 白名单或显式配置的 Android 深链。
+- 登录成功签发 opaque Bearer 令牌，数据库仅保存 SHA-256 哈希；所有业务接口通过依赖注入取得当前用户并按用户隔离数据。
+- Android 使用系统浏览器授权，通过 `memoisle://auth/callback` 深链返回；切换账号前清空本机 SQLite 缓存，避免跨用户数据混用。
+
 ## 4. 核心数据模型
 
 ### 4.1 memo
@@ -151,6 +160,13 @@ Android Client ───┘                       │
 
 | 方法与路径 | 作用 |
 | --- | --- |
+| `GET /v1/auth/providers` | 读取可用登录方式 |
+| `POST /v1/auth/register` | 使用邮箱和密码注册 |
+| `POST /v1/auth/login` | 使用邮箱和密码登录 |
+| `GET /v1/auth/{provider}/authorize` | 跳转到第三方授权页 |
+| `GET/POST /v1/auth/{provider}/callback` | 处理 OAuth 回调并回跳客户端 |
+| `GET /v1/auth/me` | 读取当前登录用户 |
+| `POST /v1/auth/logout` | 撤销当前 Bearer 会话 |
 | `POST /v1/memos` | 幂等创建条目 |
 | `GET /v1/memos` | 分页、搜索、筛选和增量拉取；网页资料默认由 Web 每页读取 10 条 |
 | `GET /v1/memos/counts` | 返回未删除条目的类型数量，用于导航和列表摘要 |
@@ -247,6 +263,7 @@ MVP 可先使用 PostgreSQL 全文搜索与前缀匹配：
 ## 9. 安全与隐私
 
 - 所有查询必须以认证用户为边界，服务端不接受客户端传入的任意 `user_id` 作为授权依据。
+- 第三方客户端凭据和 `MEMOISLE_AUTH_TOKEN_SECRET` 只能来自密钥管理环境，不写入仓库或客户端。
 - 传输使用 TLS；对象存储默认私有，下载使用短时签名地址。
 - 访问令牌、密码、第三方 API 密钥通过密钥管理注入，不进入配置文件或仓库。
 - 网页元数据服务阻止访问本机、内网、云元数据地址，防止 SSRF。

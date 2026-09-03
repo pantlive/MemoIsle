@@ -21,6 +21,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         database_url=f"sqlite+pysqlite:///{database_path}",
         cors_origins=("http://localhost:5173",),
         local_user_id="00000000-0000-0000-0000-000000000001",
+        auth_dev_mode=True,
+        auth_token_secret="test-auth-token-secret",
         audio_directory=tmp_path / "audio",
         resource_enrichment_enabled=False,
         resource_health_monitor_enabled=False,

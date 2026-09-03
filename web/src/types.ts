@@ -1,4 +1,32 @@
 export type MemoType = "word" | "resource" | "idea";
+export type AuthProvider = "google" | "wechat" | "apple";
+
+export interface AuthProviderInfo {
+  provider: AuthProvider;
+  label: string;
+  enabled: boolean;
+}
+
+export interface AuthProvidersResponse {
+  providers: AuthProviderInfo[];
+  dev_login_available: boolean;
+  email_login_enabled: boolean;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  display_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthSession {
+  access_token: string;
+  token_type: string;
+  expires_at: string;
+  user: AuthUser;
+}
 export type MemoStatus = "inbox" | "active" | "archived" | "trashed";
 export type MemoSort =
   | "updated_desc"

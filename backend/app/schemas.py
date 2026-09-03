@@ -17,6 +17,122 @@ from pydantic import (
 )
 
 
+class AuthProvider(StrEnum):
+    """支持的第三方登录提供方。"""
+
+    GOOGLE = "google"
+    WECHAT = "wechat"
+    APPLE = "apple"
+
+
+class AuthProviderInfo(BaseModel):
+    """单个第三方登录入口信息。"""
+
+    provider: AuthProvider
+    label: str
+    enabled: bool
+
+
+class AuthProvidersResponse(BaseModel):
+    """当前应用可用的登录方式。"""
+
+    providers: list[AuthProviderInfo]
+    dev_login_available: bool
+    email_login_enabled: bool = True
+
+
+class AuthUserResponse(BaseModel):
+    """当前登录用户信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str | None
+    display_name: str
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_utc_datetime(self, value: datetime) -> str:
+        """统一输出账号时间。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class AuthSessionResponse(BaseModel):
+    """登录成功后返回的 Bearer 会话。"""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    user: AuthUserResponse
+
+    @field_serializer("expires_at")
+    def serialize_utc_datetime(self, value: datetime) -> str:
+        """统一输出会话到期时间。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class AuthLogoutResponse(BaseModel):
+    """退出登录结果。"""
+
+    revoked: bool
+
+
+class EmailRegisterRequest(BaseModel):
+    """邮箱注册请求。"""
+
+    email: str = Field(min_length=5, max_length=320)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+    display_name: str | None = Field(default=None, max_length=120)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        """校验并统一邮箱格式。"""
+
+        cleaned = value.strip().lower()
+        if "@" not in cleaned or cleaned.startswith("@") or cleaned.endswith("@"):
+            raise ValueError("请输入有效的邮箱地址")
+        local, domain = cleaned.rsplit("@", 1)
+        if not local or not domain or "." not in domain or " " in cleaned:
+            raise ValueError("请输入有效的邮箱地址")
+        return cleaned
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str | None) -> str | None:
+        """清理可选昵称。"""
+
+        return normalize_optional_text(value)
+
+    @model_validator(mode="after")
+    def validate_password_confirmation(self) -> EmailRegisterRequest:
+        """确保两次输入的注册密码一致。"""
+
+        if self.password != self.confirm_password:
+            raise ValueError("两次输入的密码不一致")
+        return self
+
+
+class EmailLoginRequest(BaseModel):
+    """邮箱登录请求。"""
+
+    email: str = Field(min_length=5, max_length=320)
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        """统一邮箱大小写和空白。"""
+
+        return value.strip().lower()
+
+
 class MemoType(StrEnum):
     """条目类型。"""
 

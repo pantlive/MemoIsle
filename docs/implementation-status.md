@@ -2,8 +2,8 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 里程碑 | M7：今日回顾 |
-| 状态 | P0 核心代码与 Web/Android 运行时冒烟已通过；扩展图标/快捷键仍需在现有 Chrome 开发者模式下手动点击验收 |
+| 里程碑 | M8：第三方账号认证 |
+| 状态 | 后端、Web 与 Android 构建验证已通过；微信/Google/Apple 真实凭据与真机授权验收待配置 |
 | 更新日期 | 2026-09-02 |
 
 ## 1. 已实现范围
@@ -63,13 +63,24 @@ Web / Android 搜索
 - 自动分类提供“用户分类模板/规则 → 固定七类系统规则 → 可选大模型 → 其他”的处理链，并校验大模型分类白名单。
 - Web 支持创建、停用自定义分类模板，配置域名、网址或标题/描述关键词规则；规则会应用到已有网页资料，Android 同步显示自定义分类名称。
 - 网页健康调度支持同站点单轮限流、连续失败阈值、指数退避和审计事件。
-- 本地开发用户由服务端配置产生，不接收客户端传入的 `user_id`。
+- 支持微信、Google 和 Apple ID OAuth 授权码登录，`state` 使用 HMAC 签名并限制回跳来源。
+- 支持邮箱密码注册与登录，密码使用 PBKDF2-SHA256、随机盐和 600,000 次迭代保存。
+- 登录成功创建 `user` 与 `auth_identity`，签发 opaque Bearer 会话；数据库只保存令牌哈希，支持撤销。
+- 所有业务接口通过认证依赖取得当前用户，不接收客户端传入的 `user_id`。
+- 显式开启 `MEMOISLE_AUTH_DEV_MODE` 时提供本地开发登录，生产环境默认关闭该入口。
 
 当前接口：
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/v1/health` | 健康检查 |
+| GET | `/api/v1/auth/providers` | 读取微信、Google、Apple 登录可用状态 |
+| POST | `/api/v1/auth/register` | 使用邮箱和密码注册 |
+| POST | `/api/v1/auth/login` | 使用邮箱和密码登录 |
+| GET | `/api/v1/auth/{provider}/authorize` | 跳转第三方授权页 |
+| GET/POST | `/api/v1/auth/{provider}/callback` | 处理 OAuth 回调并回跳 Web 或 Android |
+| GET | `/api/v1/auth/me` | 读取当前登录用户 |
+| POST | `/api/v1/auth/logout` | 撤销当前登录会话 |
 | POST | `/api/v1/memos` | 幂等创建条目 |
 | GET | `/api/v1/memos` | 读取条目；支持关键词、类型、分类、资源形态、阅读进度、标签、收藏夹、星标、状态、日期和排序参数；网页资料支持 `limit`/`offset` 分页，并返回当前筛选条件的 `total_count` |
 | GET | `/api/v1/memos/counts` | 读取未删除的单词、网页资料、灵感和全部内容数量 |
@@ -109,6 +120,9 @@ Web / Android 搜索
 ### Web
 
 - React + TypeScript + Vite。
+- 提供登录门禁，支持邮箱密码注册/登录以及微信、Google、Apple ID；令牌保存在本地存储并自动附加 Bearer 请求头。
+- 登录后侧栏显示当前账号，可退出并撤销服务端会话。
+- 录音上传和详情播放均携带认证凭据，音频 Blob 通过对象 URL 播放。
 - 遵循 Stitch 的暖白背景、深青主色、柔和边框和 10/14 px 圆角体系。
 - 支持在全部内容、灵感、网页资料和英语单词工作区之间切换。
 - 顶部全局搜索支持 `/` 快捷键、输入防抖、清除和无结果状态。
@@ -139,6 +153,9 @@ Web / Android 搜索
 ### Android
 
 - 原生 Jetpack Compose，最低 API 26，目标 API 36。
+- 提供邮箱密码登录/注册，以及微信、Google 和 Apple ID 登录页；第三方登录通过系统浏览器授权并以 `memoisle://auth/callback` 深链返回。
+- 登录令牌保存在私有偏好存储；切换账号或退出登录时清空本机 SQLite 缓存。
+- API 客户端统一附加 Bearer 请求头，录音上传同步携带认证凭据。
 - 使用 Android SQLite 保存本地灵感，不依赖 Room/KSP。
 - Android SQLite 已升级到版本 8，可同时缓存灵感与网页资料元数据、分类名称、资源形态、阅读进度、收藏夹、星标和巡检状态。
 - 灵感和英语单词支持本地创建/编辑；网页资料仅在系统分享确认时保存，已保存网页资料只读。
@@ -221,11 +238,11 @@ Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解�
 | 范围 | 命令/方式 | 结果 |
 | --- | --- | --- |
 | Python 静态检查 | `ruff check backend` | 通过 |
-| 后端测试 | `pytest -q` | 今日回顾与既有接口测试 |
+| 后端测试 | `pytest -q` | 43 项通过，覆盖邮箱登录、第三方登录、Bearer 会话、撤销和用户隔离 |
 | Web 类型与生产构建 | `npm run build` | 通过 |
-| Android 单元测试 | `./gradlew testDebugUnitTest` | 通过（7 项） |
-| Android APK | `./gradlew assembleDebug` | 通过 |
-| Android lint | `./gradlew lintDebug` | 通过 |
+| Android 单元测试 | `JAVA_HOME=<JDK17> ./gradlew testDebugUnitTest` | 通过 |
+| Android APK | `JAVA_HOME=<JDK17> ./gradlew assembleDebug` | 通过 |
+| Android lint | `JAVA_HOME=<JDK17> ./gradlew lintDebug` | 通过 |
 | API 真实联调 | health → create → list → update | 200/201，版本 1 → 2 |
 | Android 系统分享 | `ACTION_SEND` → 资料表单 → 保存 → API | 201，列表显示“已同步” |
 | 单词真实联调 | Android 创建 → 显示答案 → “记得” | 版本 1 → 2，熟悉度 0 → 1 |
@@ -247,7 +264,10 @@ Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解�
 
 - 网页资料核心 P0 已完成代码、接口和 Web/Android 运行时验收；扩展已覆盖当前浏览器打开网页快照和当前页一次性捕获。扩展的图标/快捷键属于浏览器安装态入口，仍需在现有 Chrome 的开发者模式下手动加载后点击确认。
 - 生产部署时需将扩展清单中的本地 API 主机权限替换为正式 API 域名，并配置正式 Web 地址。
-- 账号认证尚未实现，目前使用服务端固定的本地开发用户。
+- 第三方登录代码已完成，但微信、Google、Apple 的正式 App ID/Services ID、Client Secret 和服务端回调 URL 仍需在开放平台配置；本仓库未提交任何凭据。
+- 邮箱密码登录暂未发送邮箱所有权验证邮件，也未实现密码找回和生产级登录频率限制。
+- Android 认证代码已通过单元测试、APK 构建和 lint，但尚未完成微信、Google、Apple 真机授权验收。
+- Apple 登录当前使用预生成的 client secret，后续可增加由私钥自动签发短期 client secret 的任务。
 - 开发环境默认 SQLite，生产环境迁移 PostgreSQL 时需要补数据库迁移脚本。
 - Web 暂未提供离线编辑。
 - Web 网页资料已收敛为“一个分类 + 星标”的组织模型；旧的资源形态、阅读进度、标签、收藏夹和状态字段仅保留接口与历史数据兼容，不再出现在 Web/Android 资料界面；巡检状态只在网页巡检中心处理。
@@ -261,5 +281,5 @@ Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解�
 
 ## 6. 下一里程碑建议
 
-下一步优先完成现有 Chrome 扩展手动点击与 Android 实体设备验收、正式域名配置和账号认证；随后处理生产数据库迁移、
+下一步优先完成微信/Google/Apple 开放平台回调配置和三端真实账号验收；随后处理现有 Chrome 扩展手动点击、正式域名、生产数据库迁移、
 WorkManager 后台同步、私有对象存储、语音转写、单词词典数据源、JSON 导出和回收站。

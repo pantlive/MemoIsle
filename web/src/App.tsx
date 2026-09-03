@@ -25,9 +25,9 @@ import {
   getMemoCounts,
   getLinkHealthCenter,
   getReviewQueue,
+  loadMemoAudioUrl,
   listOpenBrowserTabs,
   listMemos,
-  memoAudioUrl,
   mergeWord,
   reviewWord,
   skipReview,
@@ -36,6 +36,7 @@ import {
   uploadMemoAudio,
 } from "./api";
 import type {
+  AuthUser,
   BrowserCaptureContext,
   BrowserOpenTab,
   Memo,
@@ -58,6 +59,11 @@ type ActiveView = ActiveType | "all" | "review";
 type ResourceViewMode = "list" | "cards";
 
 const RESOURCE_PAGE_SIZE = 10;
+
+interface AppProps {
+  authUser: AuthUser;
+  onLogout: () => void;
+}
 
 interface NavigationItem {
   label: string;
@@ -237,7 +243,7 @@ function sourceHost(sourceUrl: string | null): string {
   }
 }
 
-export default function App() {
+export default function App({ authUser, onLogout }: AppProps) {
   const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
   const [currentResultCount, setCurrentResultCount] = useState(0);
@@ -313,6 +319,7 @@ export default function App() {
   const [voiceText, setVoiceText] = useState("");
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const [voiceDraftMemo, setVoiceDraftMemo] = useState<Memo | null>(null);
+  const [audioUrl, setAudioUrl] = useState("");
   const captureRef = useRef<HTMLTextAreaElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const wordRef = useRef<HTMLInputElement>(null);
@@ -334,6 +341,41 @@ export default function App() {
     [memos, selectedId],
   );
   const selectedCopy = selectedMemo ? viewCopy[selectedMemo.type] : copy;
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    if (!selectedMemo?.audio_mime_type) {
+      setAudioUrl("");
+      return;
+    }
+
+    // 录音接口需要 Bearer 头，因此先读取 Blob 再生成对象 URL。
+    void loadMemoAudioUrl(selectedMemo.id)
+      .then((url) => {
+        if (!active) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setAudioUrl(url);
+      })
+      .catch(() => {
+        if (active) {
+          setAudioUrl("");
+        }
+      });
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [
+    selectedMemo?.audio_mime_type,
+    selectedMemo?.id,
+    selectedMemo?.version,
+  ]);
 
   const refreshHealthSummary = useCallback(async () => {
     try {
@@ -1478,8 +1520,13 @@ export default function App() {
           })}
         </nav>
         <div className="account-block">
-          <span className="avatar">林</span><span>本地开发账号</span>
-          <span className="sync-dot" aria-label="同步正常" />
+          <span className="avatar">{authUser.display_name.slice(0, 1)}</span>
+          <span>{authUser.email ?? authUser.display_name}</span>
+          <button
+            className="account-logout"
+            onClick={() => void onLogout()}
+            type="button"
+          >退出</button>
         </div>
       </aside>
 
@@ -2314,7 +2361,7 @@ export default function App() {
                     : "语音记录"}
                 </span>
               </div>
-              <audio controls preload="metadata" src={memoAudioUrl(selectedMemo.id)} />
+              <audio controls preload="metadata" src={audioUrl || undefined} />
             </div>
           )}
           <form onSubmit={handleUpdate}>

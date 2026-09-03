@@ -104,6 +104,7 @@ fun MemoHomeScreen(
     viewModel: MemoViewModel,
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
+    onLogout: () -> Unit = {},
 ) {
     val memos by viewModel.memos.collectAsState()
     val uiState = viewModel.uiState
@@ -307,6 +308,7 @@ fun MemoHomeScreen(
                 MemoHeader(
                     isRefreshing = uiState.isRefreshing,
                     onRefresh = viewModel::refresh,
+                    onLogout = onLogout,
                 )
             }
             item {
@@ -551,7 +553,7 @@ fun MemoHomeScreen(
                     }
                 },
                 onPlayAudio = {
-                    memo.id?.let { memoId -> uriHandler.openUri(viewModel.audioUrl(memoId)) }
+                    viewModel.playAudio(memo)
                 },
             )
         }
@@ -744,7 +746,11 @@ fun MemoHomeScreen(
 }
 
 @Composable
-private fun MemoHeader(isRefreshing: Boolean, onRefresh: () -> Unit) {
+private fun MemoHeader(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    onLogout: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -772,6 +778,9 @@ private fun MemoHeader(isRefreshing: Boolean, onRefresh: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
             }
             Text(if (isRefreshing) "同步中" else "同步")
+        }
+        TextButton(onClick = onLogout) {
+            Text("退出")
         }
     }
 }

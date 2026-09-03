@@ -3,6 +3,8 @@ package com.memoisle.app.data
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.DuplicateLemmaException
 import com.memoisle.app.network.MemoApiClient
+import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
@@ -14,9 +16,27 @@ import kotlinx.coroutines.withContext
 class MemoRepository(
     private val database: MemoDatabaseHelper,
     private val api: MemoApiClient,
+    private val cacheDirectory: Path,
 ) {
     private val mutableMemos = MutableStateFlow(database.loadMemos())
     val memos: StateFlow<List<Memo>> = mutableMemos.asStateFlow()
+    private var activeUserId: String? = null
+
+    fun activateUser(userId: String): Unit {
+        if (activeUserId == userId) {
+            return
+        }
+        // 切换账号时清空本机缓存，避免不同用户的数据混在同一个资料库。
+        database.clearAll()
+        mutableMemos.value = emptyList()
+        activeUserId = userId
+    }
+
+    fun clearForLogout(): Unit {
+        database.clearAll()
+        mutableMemos.value = emptyList()
+        activeUserId = null
+    }
 
     suspend fun refresh() {
         withContext(Dispatchers.IO) {
@@ -264,7 +284,15 @@ class MemoRepository(
         }
     }
 
-    fun audioUrl(memoId: String): String = api.audioUrl(memoId)
+    fun audioFile(memo: Memo): Path {
+        memo.localAudioPath
+            ?.let(Paths::get)
+            ?.takeIf(Files::exists)
+            ?.let { return it }
+        val memoId = requireNotNull(memo.id) { "播放录音前必须先完成同步" }
+        val target = cacheDirectory.resolve("memoisle-$memoId.audio")
+        return api.downloadAudio(memoId, target)
+    }
 
     private fun syncPendingInternal() {
         database.loadPending().forEach { memo ->

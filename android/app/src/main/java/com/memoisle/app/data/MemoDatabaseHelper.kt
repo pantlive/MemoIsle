@@ -247,6 +247,11 @@ class MemoDatabaseHelper(context: Context) :
     fun loadMemos(): List<Memo> = queryMemos(selection = null, arguments = null)
 
     @Synchronized
+    fun clearAll(): Unit {
+        writableDatabase.delete(TABLE_MEMO, null, null)
+    }
+
+    @Synchronized
     fun loadPending(): List<Memo> = queryMemos(
         selection = "$COLUMN_SYNC_STATE != ?",
         arguments = arrayOf(SyncState.SYNCED.name),

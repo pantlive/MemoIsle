@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
+from urllib.parse import parse_qsl, urlencode
 from uuid import UUID
 
 from fastapi import (
@@ -16,9 +18,28 @@ from fastapi import (
     Request,
     status,
 )
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
+from app.auth_service import (
+    AuthProviderDisabledError,
+    AuthProviderError,
+    AuthStateError,
+    EmailAlreadyRegisteredError,
+    InvalidEmailCredentialsError,
+    build_authorization_url,
+    create_dev_session,
+    exchange_authorization_code,
+    login_with_password,
+    login_with_provider,
+    provider_enabled,
+    provider_label,
+    register_with_password,
+    resolve_post_login_uri,
+    revoke_session,
+    sign_state,
+    verify_state,
+)
 from app.bookmark_service import (
     BookmarkBatchNotFoundError,
     BookmarkBatchStateError,
@@ -65,7 +86,7 @@ from app.link_health_service import (
     check_resource_link,
     list_link_health_center,
 )
-from app.models import ResourceCategoryRule
+from app.models import ResourceCategoryRule, User
 from app.resource_processing import UnsafeResourceUrlError
 from app.resource_service import (
     apply_user_category_rules_in_background,
@@ -74,6 +95,12 @@ from app.resource_service import (
     reclassify_user_rule_resources_in_background,
 )
 from app.schemas import (
+    AuthLogoutResponse,
+    AuthProvider,
+    AuthProviderInfo,
+    AuthProvidersResponse,
+    AuthSessionResponse,
+    AuthUserResponse,
     BookmarkImportBatchRead,
     BookmarkImportPreview,
     BookmarkImportRequest,
@@ -88,6 +115,8 @@ from app.schemas import (
     BrowserOpenTabRead,
     BrowserTabSyncRequest,
     BrowserTabSyncResponse,
+    EmailLoginRequest,
+    EmailRegisterRequest,
     LinkHealthActionRequest,
     LinkHealthListResponse,
     LinkHealthStatus,
@@ -139,6 +168,92 @@ UserDependency = Annotated[str, Depends(get_current_user_id)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
 
 
+async def _read_callback_payload(request: Request) -> dict[str, str]:
+    """读取 GET 查询或 Apple POST 表单中的回调参数。"""
+
+    payload = dict(request.query_params)
+    if request.method == "POST":
+        body = await request.body()
+        payload.update(parse_qsl(body.decode("utf-8"), keep_blank_values=True))
+    return payload
+
+
+def _auth_error_redirect(post_login_uri: str, message: str) -> RedirectResponse:
+    """把登录失败信息放回前端 URL 片段，避免敏感信息进入日志。"""
+
+    fragment = urlencode({"auth_error": message})
+    separator = "#" if "#" not in post_login_uri else "&"
+    return RedirectResponse(
+        url=f"{post_login_uri}{separator}{fragment}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+async def _handle_auth_callback(
+    provider: AuthProvider,
+    request: Request,
+    session: Session,
+    settings: Settings,
+) -> RedirectResponse:
+    """处理 OAuth 提供方回调并给前端签发登录会话。"""
+
+    payload = await _read_callback_payload(request)
+    try:
+        state_provider, post_login_uri = verify_state(
+            settings,
+            payload.get("state", ""),
+        )
+        if state_provider != provider:
+            raise AuthStateError("登录 state 与提供方不匹配")
+        if payload.get("error"):
+            return _auth_error_redirect(
+                post_login_uri,
+                payload.get("error_description") or payload["error"],
+            )
+        code = payload.get("code")
+        if not code:
+            return _auth_error_redirect(post_login_uri, "第三方登录未返回授权码")
+        callback_user = None
+        if payload.get("user"):
+            callback_user = json.loads(payload["user"])
+        profile = exchange_authorization_code(
+            settings,
+            provider,
+            code,
+            str(request.url.replace(query="")),
+            callback_user,
+        )
+        created = login_with_provider(session, settings, profile)
+    except AuthStateError as error:
+        return _auth_error_redirect(
+            resolve_post_login_uri(settings, None),
+            str(error),
+        )
+    except AuthProviderError as error:
+        return _auth_error_redirect(
+            resolve_post_login_uri(settings, None),
+            str(error),
+        )
+
+    expires_in = int(
+        (
+            created.session.expires_at.replace(tzinfo=UTC)
+            - datetime.now(UTC)
+        ).total_seconds(),
+    )
+    fragment = urlencode(
+        {
+            "access_token": created.token,
+            "token_type": "bearer",
+            "expires_in": expires_in,
+        },
+    )
+    return RedirectResponse(
+        url=f"{post_login_uri}#{fragment}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 def resource_category_rule_read(
     session: Session,
     user_id: str,
@@ -167,6 +282,179 @@ def health() -> dict[str, str]:
     """提供部署和开发环境健康检查。"""
 
     return {"status": "ok"}
+
+
+@router.get("/auth/providers", response_model=AuthProvidersResponse, tags=["auth"])
+def read_auth_providers(settings: SettingsDependency) -> AuthProvidersResponse:
+    """返回当前环境可用的第三方登录方式。"""
+
+    providers = [
+        AuthProviderInfo(
+            provider=provider,
+            label=provider_label(provider),
+            enabled=provider_enabled(settings, provider),
+        )
+        for provider in AuthProvider
+    ]
+    return AuthProvidersResponse(
+        providers=providers,
+        dev_login_available=settings.auth_dev_mode,
+        email_login_enabled=True,
+    )
+
+
+@router.post(
+    "/auth/register",
+    response_model=AuthSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["auth"],
+)
+def register_with_email_route(
+    payload: EmailRegisterRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthSessionResponse:
+    """使用邮箱和密码注册账号。"""
+
+    try:
+        created = register_with_password(
+            session,
+            settings,
+            payload.email,
+            payload.password,
+            payload.display_name,
+        )
+    except EmailAlreadyRegisteredError as error:
+        raise HTTPException(status_code=409, detail="该邮箱已被注册") from error
+    return AuthSessionResponse(
+        access_token=created.token,
+        expires_at=created.session.expires_at,
+        user=AuthUserResponse.model_validate(created.user),
+    )
+
+
+@router.post("/auth/login", response_model=AuthSessionResponse, tags=["auth"])
+def login_with_email_route(
+    payload: EmailLoginRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthSessionResponse:
+    """使用邮箱和密码登录。"""
+
+    try:
+        created = login_with_password(
+            session,
+            settings,
+            payload.email,
+            payload.password,
+        )
+    except InvalidEmailCredentialsError as error:
+        raise HTTPException(status_code=401, detail="邮箱或密码不正确") from error
+    return AuthSessionResponse(
+        access_token=created.token,
+        expires_at=created.session.expires_at,
+        user=AuthUserResponse.model_validate(created.user),
+    )
+
+
+@router.get("/auth/{provider}/authorize", tags=["auth"])
+def authorize_third_party_login(
+    provider: AuthProvider,
+    request: Request,
+    settings: SettingsDependency,
+    redirect_to: str | None = Query(default=None, max_length=2048),
+) -> RedirectResponse:
+    """跳转到微信、Google 或 Apple 的 OAuth 授权页。"""
+
+    try:
+        post_login_uri = resolve_post_login_uri(settings, redirect_to)
+        state = sign_state(settings, provider, post_login_uri)
+        authorization_url = build_authorization_url(
+            settings,
+            provider,
+            str(request.url.replace(query="")),
+            state,
+        )
+    except AuthProviderDisabledError as error:
+        raise HTTPException(status_code=404, detail="该登录方式未配置") from error
+    except AuthProviderError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return RedirectResponse(url=authorization_url, status_code=302)
+
+
+@router.get("/auth/{provider}/callback", tags=["auth"])
+async def third_party_login_callback(
+    provider: AuthProvider,
+    request: Request,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> RedirectResponse:
+    """处理 OAuth 提供方的 GET 回调。"""
+
+    return await _handle_auth_callback(provider, request, session, settings)
+
+
+@router.post("/auth/{provider}/callback", tags=["auth"])
+async def third_party_login_form_callback(
+    provider: AuthProvider,
+    request: Request,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> RedirectResponse:
+    """处理 Apple 登录的 POST 表单回调。"""
+
+    return await _handle_auth_callback(provider, request, session, settings)
+
+
+@router.post(
+    "/auth/dev-login",
+    response_model=AuthSessionResponse,
+    tags=["auth"],
+    include_in_schema=False,
+)
+def dev_login(
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthSessionResponse:
+    """仅在显式开启本地开发模式时签发登录会话。"""
+
+    if not settings.auth_dev_mode:
+        raise HTTPException(status_code=404, detail="开发登录未启用")
+    created = create_dev_session(session, settings)
+    return AuthSessionResponse(
+        access_token=created.token,
+        expires_at=created.session.expires_at,
+        user=AuthUserResponse.model_validate(created.user),
+    )
+
+
+@router.get("/auth/me", response_model=AuthUserResponse, tags=["auth"])
+def read_current_auth_user(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> AuthUserResponse:
+    """返回当前登录用户。"""
+
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="当前用户不存在")
+    return AuthUserResponse.model_validate(user)
+
+
+@router.post("/auth/logout", response_model=AuthLogoutResponse, tags=["auth"])
+def logout(
+    session: SessionDependency,
+    user_id: UserDependency,
+    authorization: Annotated[str | None, Header()] = None,
+) -> AuthLogoutResponse:
+    """撤销当前 Bearer 登录会话。"""
+
+    if not authorization:
+        return AuthLogoutResponse(revoked=False)
+    scheme, separator, token = authorization.partition(" ")
+    if not separator or scheme.lower() != "bearer":
+        return AuthLogoutResponse(revoked=False)
+    return AuthLogoutResponse(revoked=revoke_session(session, token.strip()))
 
 
 @router.get(

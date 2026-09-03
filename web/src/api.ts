@@ -1,4 +1,8 @@
 import type {
+  AuthProvidersResponse,
+  AuthProvider,
+  AuthSession,
+  AuthUser,
   BookmarkImportBatch,
   BookmarkImportPreview,
   BookmarkInput,
@@ -31,6 +35,19 @@ import type {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+const ACCESS_TOKEN_STORAGE_KEY = "memoisle_access_token";
+
+export function getAccessToken(): string | null {
+  return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+}
+
+export function setAccessToken(token: string): void {
+  window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
+}
+
+export function clearAccessToken(): void {
+  window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -47,15 +64,20 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const accessToken = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
     const payload = (await response.json().catch(() => null)) as {
       detail?: string | {
         message?: string;
@@ -73,6 +95,58 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(message, response.status, code, current);
   }
   return (await response.json()) as T;
+}
+
+export function authAuthorizationUrl(
+  provider: AuthProvider,
+  redirectTo: string,
+): string {
+  const searchParams = new URLSearchParams({ redirect_to: redirectTo });
+  return `${API_BASE_URL}/auth/${provider}/authorize?${searchParams}`;
+}
+
+export async function getAuthProviders(): Promise<AuthProvidersResponse> {
+  return request<AuthProvidersResponse>("/auth/providers");
+}
+
+export async function devLogin(): Promise<AuthSession> {
+  return request<AuthSession>("/auth/dev-login", { method: "POST" });
+}
+
+export async function registerWithEmail(
+  email: string,
+  password: string,
+  confirmPassword: string,
+  displayName?: string,
+): Promise<AuthSession> {
+  return request<AuthSession>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      password,
+      confirm_password: confirmPassword,
+      display_name: displayName?.trim() || undefined,
+    }),
+  });
+}
+
+export async function loginWithEmail(
+  email: string,
+  password: string,
+): Promise<AuthSession> {
+  return request<AuthSession>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function getAuthUser(): Promise<AuthUser> {
+  return request<AuthUser>("/auth/me");
+}
+
+export async function logout(): Promise<void> {
+  await request<{ revoked: boolean }>("/auth/logout", { method: "POST" });
+  clearAccessToken();
 }
 
 export interface MemoListFilters {
@@ -395,6 +469,7 @@ export async function uploadMemoAudio(
   audio: Blob,
   durationMs: number,
 ): Promise<Memo> {
+  const accessToken = getAccessToken();
   const response = await fetch(
     `${API_BASE_URL}/memos/${memoId}/audio?expected_version=${expectedVersion}`,
     {
@@ -402,6 +477,7 @@ export async function uploadMemoAudio(
       headers: {
         "Content-Type": audio.type || "audio/webm",
         "X-Audio-Duration-Ms": String(durationMs),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: audio,
     },
@@ -420,6 +496,15 @@ export async function uploadMemoAudio(
   return (await response.json()) as Memo;
 }
 
-export function memoAudioUrl(memoId: string): string {
-  return `${API_BASE_URL}/memos/${memoId}/audio`;
+export async function loadMemoAudioUrl(memoId: string): Promise<string> {
+  const accessToken = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/memos/${memoId}/audio`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!response.ok) {
+    clearAccessToken();
+    throw new ApiError(`录音读取失败（${response.status}）`, response.status);
+  }
+  const audio = await response.blob();
+  return URL.createObjectURL(audio);
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,16 @@ class Settings:
     cors_origins: tuple[str, ...]
     local_user_id: str
     audio_directory: Path
+    auth_dev_mode: bool = False
+    auth_token_secret: str = ""
+    auth_token_ttl_seconds: int = 30 * 24 * 60 * 60
+    auth_mobile_redirect_uri: str = "memoisle://auth/callback"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    wechat_app_id: str = ""
+    wechat_app_secret: str = ""
+    apple_client_id: str = ""
+    apple_client_secret: str = ""
     resource_enrichment_enabled: bool = True
     resource_fetch_timeout_seconds: float = 6.0
     resource_fetch_max_bytes: int = 512 * 1024
@@ -58,6 +69,18 @@ class Settings:
             "MEMOISLE_LOCAL_USER_ID",
             "00000000-0000-0000-0000-000000000001",
         )
+        auth_dev_mode = environment_flag("MEMOISLE_AUTH_DEV_MODE", False)
+        auth_token_secret = os.environ.get("MEMOISLE_AUTH_TOKEN_SECRET", "")
+        auth_mobile_redirect_uri = os.environ.get(
+            "MEMOISLE_AUTH_MOBILE_REDIRECT_URI",
+            "memoisle://auth/callback",
+        )
+        google_client_id = os.environ.get("MEMOISLE_GOOGLE_CLIENT_ID", "")
+        google_client_secret = os.environ.get("MEMOISLE_GOOGLE_CLIENT_SECRET", "")
+        wechat_app_id = os.environ.get("MEMOISLE_WECHAT_APP_ID", "")
+        wechat_app_secret = os.environ.get("MEMOISLE_WECHAT_APP_SECRET", "")
+        apple_client_id = os.environ.get("MEMOISLE_APPLE_CLIENT_ID", "")
+        apple_client_secret = os.environ.get("MEMOISLE_APPLE_CLIENT_SECRET", "")
         audio_directory = Path(
             os.environ.get("MEMOISLE_AUDIO_DIRECTORY", DEFAULT_AUDIO_DIRECTORY),
         )
@@ -73,6 +96,18 @@ class Settings:
             database_url=database_url,
             cors_origins=cors_origins,
             local_user_id=local_user_id,
+            auth_dev_mode=auth_dev_mode,
+            auth_token_secret=auth_token_secret or secrets.token_urlsafe(32),
+            auth_token_ttl_seconds=int(
+                os.environ.get("MEMOISLE_AUTH_TOKEN_TTL_SECONDS", "2592000"),
+            ),
+            auth_mobile_redirect_uri=auth_mobile_redirect_uri,
+            google_client_id=google_client_id,
+            google_client_secret=google_client_secret,
+            wechat_app_id=wechat_app_id,
+            wechat_app_secret=wechat_app_secret,
+            apple_client_id=apple_client_id,
+            apple_client_secret=apple_client_secret,
             audio_directory=audio_directory,
             resource_enrichment_enabled=resource_enrichment_enabled,
             resource_health_monitor_enabled=resource_health_monitor_enabled,

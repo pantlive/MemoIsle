@@ -5,8 +5,10 @@ import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_WORD
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -28,8 +30,103 @@ class ApiException(
     }
 }
 
+data class AuthProviderInfo(
+    val provider: String,
+    val label: String,
+    val enabled: Boolean,
+)
+
+data class AuthProvidersResponse(
+    val providers: List<AuthProviderInfo>,
+    val devLoginAvailable: Boolean,
+    val emailLoginEnabled: Boolean,
+)
+
+data class AuthUser(
+    val id: String,
+    val email: String?,
+    val displayName: String,
+)
+
+data class AuthSession(
+    val accessToken: String,
+    val user: AuthUser,
+)
+
 class MemoApiClient(baseUrl: String) {
     private val normalizedBaseUrl = baseUrl.trimEnd('/') + "/"
+    var accessToken: String? = null
+
+    fun authorizationUrl(provider: String, redirectTo: String): String {
+        val encodedRedirect = URLEncoder.encode(redirectTo, Charsets.UTF_8.name())
+        return normalizedBaseUrl + "auth/$provider/authorize?redirect_to=$encodedRedirect"
+    }
+
+    fun getAuthProviders(): AuthProvidersResponse {
+        val response = execute("GET", "auth/providers")
+        val providerArray = response.getJSONArray("providers")
+        val providers = buildList {
+            for (index in 0 until providerArray.length()) {
+                val item = providerArray.getJSONObject(index)
+                add(
+                    AuthProviderInfo(
+                        provider = item.getString("provider"),
+                        label = item.getString("label"),
+                        enabled = item.getBoolean("enabled"),
+                    ),
+                )
+            }
+        }
+        return AuthProvidersResponse(
+            providers = providers,
+            devLoginAvailable = response.getBoolean("dev_login_available"),
+            emailLoginEnabled = response.optBoolean("email_login_enabled", true),
+        )
+    }
+
+    fun getCurrentUser(): AuthUser = execute("GET", "auth/me").toAuthUser()
+
+    fun devLogin(): AuthSession {
+        val response = execute("POST", "auth/dev-login")
+        accessToken = response.getString("access_token")
+        return AuthSession(
+            accessToken = response.getString("access_token"),
+            user = response.getJSONObject("user").toAuthUser(),
+        )
+    }
+
+    fun loginWithEmail(email: String, password: String): AuthSession {
+        val body = JSONObject().apply {
+            put("email", email)
+            put("password", password)
+        }
+        return emailSession(execute("POST", "auth/login", body))
+    }
+
+    fun registerWithEmail(
+        email: String,
+        password: String,
+        confirmPassword: String,
+        displayName: String?,
+    ): AuthSession {
+        val body = JSONObject().apply {
+            put("email", email)
+            put("password", password)
+            put("confirm_password", confirmPassword)
+            displayName?.takeIf { it.isNotBlank() }?.let { put("display_name", it) }
+        }
+        return emailSession(execute("POST", "auth/register", body))
+    }
+
+    fun logout(): Boolean = execute("POST", "auth/logout").getBoolean("revoked")
+
+    private fun emailSession(response: JSONObject): AuthSession {
+        accessToken = response.getString("access_token")
+        return AuthSession(
+            accessToken = response.getString("access_token"),
+            user = response.getJSONObject("user").toAuthUser(),
+        )
+    }
 
     fun listMemos(status: String? = null): List<Memo> {
         val query = if (status == null) {
@@ -130,6 +227,9 @@ class MemoApiClient(baseUrl: String) {
             connection.readTimeout = 30_000
             connection.doOutput = true
             connection.setRequestProperty("Accept", "application/json")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
             connection.setRequestProperty("Content-Type", "audio/mp4")
             connection.setRequestProperty("X-Audio-Duration-Ms", durationMs.toString())
             val audioSize = Files.size(audioPath)
@@ -158,6 +258,35 @@ class MemoApiClient(baseUrl: String) {
 
     fun audioUrl(memoId: String): String = normalizedBaseUrl + "memos/$memoId/audio"
 
+    fun downloadAudio(memoId: String, target: Path): Path {
+        val connection = URL(normalizedBaseUrl + "memos/$memoId/audio")
+            .openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 30_000
+            connection.setRequestProperty("Accept", "*/*")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            Files.createDirectories(target.parent)
+            connection.inputStream.use { input ->
+                Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING)
+            }
+            target
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun execute(method: String, path: String, body: JSONObject? = null): JSONObject {
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
         return try {
@@ -165,6 +294,9 @@ class MemoApiClient(baseUrl: String) {
             connection.connectTimeout = 8_000
             connection.readTimeout = 12_000
             connection.setRequestProperty("Accept", "application/json")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
             if (body != null) {
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -188,6 +320,14 @@ class MemoApiClient(baseUrl: String) {
             connection.disconnect()
         }
     }
+}
+
+private fun JSONObject.toAuthUser(): AuthUser {
+    return AuthUser(
+        id = getString("id"),
+        email = if (isNull("email")) null else getString("email"),
+        displayName = getString("display_name"),
+    )
 }
 
 private fun JSONObject.toMemo(): Memo {
