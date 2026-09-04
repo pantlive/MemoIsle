@@ -43,6 +43,11 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -54,6 +59,54 @@ class User(Base):
         nullable=False,
         default=utc_now,
         onupdate=utc_now,
+    )
+
+
+class AuthEmailToken(Base):
+    """邮箱验证和密码重置的一次性邮件令牌。"""
+
+    __tablename__ = "auth_email_token"
+    __table_args__ = (
+        Index("ix_auth_email_token_user_purpose", "user_id", "purpose"),
+        Index("ix_auth_email_token_expires", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    purpose: Mapped[str] = mapped_column(String(30), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
+class AuthLoginAttempt(Base):
+    """邮箱登录失败记录，用于按账号维度限流。"""
+
+    __tablename__ = "auth_login_attempt"
+    __table_args__ = (Index("ix_auth_login_attempt_email_time", "email", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    successful: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
     )
 
 
@@ -299,6 +352,14 @@ class Memo(Base):
         nullable=True,
     )
     word_phonetic: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    word_us_audio_url: Mapped[str | None] = mapped_column(
+        String(2048),
+        nullable=True,
+    )
+    word_uk_audio_url: Mapped[str | None] = mapped_column(
+        String(2048),
+        nullable=True,
+    )
     normalized_lemma: Mapped[str | None] = mapped_column(
         String(200),
         nullable=True,

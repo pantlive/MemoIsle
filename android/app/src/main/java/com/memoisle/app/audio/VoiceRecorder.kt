@@ -22,7 +22,9 @@ class VoiceRecorder(private val context: Context) {
         if (recorder != null) {
             return false
         }
-        val audioDirectory = context.cacheDir.toPath().resolve("voice-drafts")
+        // 录音属于待同步用户数据，不能放在可被系统清理的缓存目录。
+        // noBackupFilesDir 保证跨进程和重启可恢复，同时避免把私人录音自动备份到云端。
+        val audioDirectory = context.noBackupFilesDir.toPath().resolve("voice-drafts")
         Files.createDirectories(audioDirectory)
         val path = audioDirectory.resolve("${UUID.randomUUID()}.m4a")
         val newRecorder = createRecorder()

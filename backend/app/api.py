@@ -26,18 +26,26 @@ from app.auth_service import (
     AuthProviderError,
     AuthStateError,
     EmailAlreadyRegisteredError,
+    EmailNotVerifiedError,
+    EmailTokenInvalidError,
     InvalidEmailCredentialsError,
+    LoginRateLimitedError,
     build_authorization_url,
     create_dev_session,
     exchange_authorization_code,
+    issue_email_token,
     login_with_password,
     login_with_provider,
     provider_enabled,
     provider_label,
     register_with_password,
+    request_email_verification_token,
+    request_password_reset_token,
+    reset_password_with_token,
     resolve_post_login_uri,
     revoke_session,
     sign_state,
+    verify_email_token,
     verify_state,
 )
 from app.bookmark_service import (
@@ -81,6 +89,7 @@ from app.category_service import (
 )
 from app.config import Settings
 from app.dependencies import get_current_user_id, get_session, get_settings
+from app.email_service import EmailDeliveryError, send_auth_email
 from app.link_health_service import (
     apply_link_health_action,
     check_resource_link,
@@ -95,6 +104,7 @@ from app.resource_service import (
     reclassify_user_rule_resources_in_background,
 )
 from app.schemas import (
+    AuthActionResponse,
     AuthLogoutResponse,
     AuthProvider,
     AuthProviderInfo,
@@ -117,6 +127,9 @@ from app.schemas import (
     BrowserTabSyncResponse,
     EmailLoginRequest,
     EmailRegisterRequest,
+    EmailRegisterResponse,
+    EmailTokenConfirmRequest,
+    EmailTokenRequest,
     LinkHealthActionRequest,
     LinkHealthListResponse,
     LinkHealthStatus,
@@ -128,6 +141,7 @@ from app.schemas import (
     MemoStatus,
     MemoType,
     MemoUpdate,
+    PasswordResetConfirmRequest,
     ResourceCategoryCreate,
     ResourceCategoryRead,
     ResourceCategoryRuleCreate,
@@ -160,6 +174,11 @@ from app.service import (
     review_word,
     skip_review_item,
     update_memo,
+)
+from app.word_service import (
+    WordDictionaryUnavailableError,
+    enrich_word,
+    enrich_word_in_background,
 )
 
 router = APIRouter()
@@ -305,7 +324,7 @@ def read_auth_providers(settings: SettingsDependency) -> AuthProvidersResponse:
 
 @router.post(
     "/auth/register",
-    response_model=AuthSessionResponse,
+    response_model=EmailRegisterResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["auth"],
 )
@@ -313,8 +332,8 @@ def register_with_email_route(
     payload: EmailRegisterRequest,
     session: SessionDependency,
     settings: SettingsDependency,
-) -> AuthSessionResponse:
-    """使用邮箱和密码注册账号。"""
+) -> EmailRegisterResponse:
+    """使用邮箱和密码注册待验证账号。"""
 
     try:
         created = register_with_password(
@@ -326,10 +345,20 @@ def register_with_email_route(
         )
     except EmailAlreadyRegisteredError as error:
         raise HTTPException(status_code=409, detail="该邮箱已被注册") from error
-    return AuthSessionResponse(
-        access_token=created.token,
-        expires_at=created.session.expires_at,
-        user=AuthUserResponse.model_validate(created.user),
+    verification_email_sent = True
+    try:
+        verification_token = issue_email_token(
+            session,
+            settings,
+            created,
+            "verify_email",
+        )
+        send_auth_email(settings, payload.email, "verify_email", verification_token)
+    except EmailDeliveryError:
+        verification_email_sent = False
+    return EmailRegisterResponse(
+        user=AuthUserResponse.model_validate(created),
+        verification_email_sent=verification_email_sent,
     )
 
 
@@ -350,11 +379,104 @@ def login_with_email_route(
         )
     except InvalidEmailCredentialsError as error:
         raise HTTPException(status_code=401, detail="邮箱或密码不正确") from error
+    except EmailNotVerifiedError as error:
+        raise HTTPException(status_code=403, detail="请先验证邮箱") from error
+    except LoginRateLimitedError as error:
+        raise HTTPException(
+            status_code=429,
+            detail="登录尝试次数过多，请稍后重试",
+            headers={"Retry-After": str(error.retry_after_seconds)},
+        ) from error
     return AuthSessionResponse(
         access_token=created.token,
         expires_at=created.session.expires_at,
         user=AuthUserResponse.model_validate(created.user),
     )
+
+
+@router.post(
+    "/auth/verify-email/request",
+    response_model=AuthActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["auth"],
+)
+def request_email_verification_route(
+    payload: EmailTokenRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthActionResponse:
+    """请求重新发送邮箱验证链接。"""
+
+    token_result = request_email_verification_token(session, settings, payload.email)
+    if token_result is None:
+        # 不区分未注册和已验证，避免暴露账号注册状态。
+        return AuthActionResponse(status="ok")
+    _, verification_token = token_result
+    try:
+        send_auth_email(settings, payload.email, "verify_email", verification_token)
+    except EmailDeliveryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return AuthActionResponse(status="ok")
+
+
+@router.post(
+    "/auth/verify-email",
+    response_model=AuthActionResponse,
+    tags=["auth"],
+)
+def verify_email_route(
+    payload: EmailTokenConfirmRequest,
+    session: SessionDependency,
+) -> AuthActionResponse:
+    """使用一次性令牌验证邮箱所有权。"""
+
+    try:
+        verify_email_token(session, payload.token)
+    except EmailTokenInvalidError as error:
+        raise HTTPException(status_code=400, detail="验证链接无效或已过期") from error
+    return AuthActionResponse(status="ok")
+
+
+@router.post(
+    "/auth/password-reset/request",
+    response_model=AuthActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["auth"],
+)
+def request_password_reset_route(
+    payload: EmailTokenRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthActionResponse:
+    """请求密码重置链接；结果不暴露邮箱是否注册。"""
+
+    token_result = request_password_reset_token(session, settings, payload.email)
+    if token_result is None:
+        return AuthActionResponse(status="ok")
+    _, reset_token = token_result
+    try:
+        send_auth_email(settings, payload.email, "password_reset", reset_token)
+    except EmailDeliveryError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return AuthActionResponse(status="ok")
+
+
+@router.post(
+    "/auth/password-reset",
+    response_model=AuthActionResponse,
+    tags=["auth"],
+)
+def reset_password_route(
+    payload: PasswordResetConfirmRequest,
+    session: SessionDependency,
+) -> AuthActionResponse:
+    """使用一次性令牌设置新密码并撤销旧会话。"""
+
+    try:
+        reset_password_with_token(session, payload.token, payload.password)
+    except EmailTokenInvalidError as error:
+        raise HTTPException(status_code=400, detail="重置链接无效或已过期") from error
+    return AuthActionResponse(status="ok")
 
 
 @router.get("/auth/{provider}/authorize", tags=["auth"])
@@ -651,6 +773,14 @@ def create_memo_route(
     ):
         background_tasks.add_task(
             enrich_resource_in_background,
+            settings.database_url,
+            user_id,
+            memo.id,
+            settings,
+        )
+    if memo.type == MemoType.WORD and settings.word_dictionary_enabled:
+        background_tasks.add_task(
+            enrich_word_in_background,
             settings.database_url,
             user_id,
             memo.id,
@@ -1372,6 +1502,26 @@ def merge_word_route(
             status_code=status.HTTP_409_CONFLICT,
             detail={"message": str(error), "current": current.model_dump(mode="json")},
         ) from error
+    return MemoRead.model_validate(memo)
+
+
+@router.post(
+    "/words/{memo_id}/dictionary",
+    response_model=MemoRead,
+    tags=["words"],
+)
+def enrich_word_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> MemoRead:
+    """手动补全单词释义、音标、例句和英美音源。"""
+
+    try:
+        memo = enrich_word(session, user_id, str(memo_id), settings)
+    except WordDictionaryUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     return MemoRead.model_validate(memo)
 
 

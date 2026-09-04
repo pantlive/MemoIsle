@@ -45,12 +45,18 @@ data class AuthProvidersResponse(
 data class AuthUser(
     val id: String,
     val email: String?,
+    val emailVerified: Boolean,
     val displayName: String,
 )
 
 data class AuthSession(
     val accessToken: String,
     val user: AuthUser,
+)
+
+data class EmailRegisterResponse(
+    val user: AuthUser,
+    val verificationEmailSent: Boolean,
 )
 
 class MemoApiClient(baseUrl: String) {
@@ -108,14 +114,18 @@ class MemoApiClient(baseUrl: String) {
         password: String,
         confirmPassword: String,
         displayName: String?,
-    ): AuthSession {
+    ): EmailRegisterResponse {
         val body = JSONObject().apply {
             put("email", email)
             put("password", password)
             put("confirm_password", confirmPassword)
             displayName?.takeIf { it.isNotBlank() }?.let { put("display_name", it) }
         }
-        return emailSession(execute("POST", "auth/register", body))
+        val response = execute("POST", "auth/register", body)
+        return EmailRegisterResponse(
+            user = response.getJSONObject("user").toAuthUser(),
+            verificationEmailSent = response.getBoolean("verification_email_sent"),
+        )
     }
 
     fun logout(): Boolean = execute("POST", "auth/logout").getBoolean("revoked")
@@ -326,6 +336,7 @@ private fun JSONObject.toAuthUser(): AuthUser {
     return AuthUser(
         id = getString("id"),
         email = if (isNull("email")) null else getString("email"),
+        emailVerified = optBoolean("email_verified", false),
         displayName = getString("display_name"),
     )
 }

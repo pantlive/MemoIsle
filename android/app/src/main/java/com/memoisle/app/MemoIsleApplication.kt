@@ -5,6 +5,7 @@ import com.memoisle.app.data.AuthTokenStore
 import com.memoisle.app.data.MemoDatabaseHelper
 import com.memoisle.app.data.MemoRepository
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.sync.MemoSyncScheduler
 
 class MemoIsleApplication : Application() {
     lateinit var repository: MemoRepository
@@ -22,6 +23,11 @@ class MemoIsleApplication : Application() {
             database = MemoDatabaseHelper(applicationContext),
             api = api,
             cacheDirectory = applicationContext.cacheDir.toPath(),
+            initialActiveUserId = tokenStore.loadUserId(),
+            onSyncNeeded = { MemoSyncScheduler.enqueueNow(applicationContext) },
         )
+        if (!tokenStore.loadToken().isNullOrBlank() && !tokenStore.loadUserId().isNullOrBlank()) {
+            MemoSyncScheduler.schedule(applicationContext)
+        }
     }
 }

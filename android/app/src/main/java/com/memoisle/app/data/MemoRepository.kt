@@ -11,41 +11,78 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+data class SyncResult(
+    val hasRetryableFailure: Boolean = false,
+    val wasCancelledForUserSwitch: Boolean = false,
+)
 
 class MemoRepository(
     private val database: MemoDatabaseHelper,
     private val api: MemoApiClient,
     private val cacheDirectory: Path,
+    initialActiveUserId: String? = null,
+    private val onSyncNeeded: () -> Unit = {},
 ) {
     private val mutableMemos = MutableStateFlow(database.loadMemos())
     val memos: StateFlow<List<Memo>> = mutableMemos.asStateFlow()
-    private var activeUserId: String? = null
+    @Volatile
+    private var activeUserId: String? = initialActiveUserId
+    private val syncMutex = Mutex()
 
+    @Synchronized
     fun activateUser(userId: String): Unit {
         if (activeUserId == userId) {
             return
         }
         // 切换账号时清空本机缓存，避免不同用户的数据混在同一个资料库。
-        database.clearAll()
-        mutableMemos.value = emptyList()
         activeUserId = userId
-    }
-
-    fun clearForLogout(): Unit {
         database.clearAll()
         mutableMemos.value = emptyList()
-        activeUserId = null
     }
 
-    suspend fun refresh() {
-        withContext(Dispatchers.IO) {
-            // 先上传本地失败或等待中的内容，再拉取服务端最新版本。
-            syncPendingInternal()
-            api.listMemos().forEach(database::upsert)
-            // 单独拉取回收站墓碑，让 Web 删除能从 Android 可见列表消失。
-            api.listMemos(status = "trashed").forEach(database::upsert)
-            publishLocalSnapshot()
+    fun activeUserId(): String? = activeUserId
+
+    @Synchronized
+    fun clearForLogout(): Unit {
+        activeUserId = null
+        database.clearAll()
+        mutableMemos.value = emptyList()
+    }
+
+    suspend fun refresh(expectedUserId: String? = null): SyncResult {
+        return withContext(Dispatchers.IO) {
+            syncMutex.withLock {
+                if (!isActiveFor(expectedUserId)) {
+                    return@withLock SyncResult(wasCancelledForUserSwitch = true)
+                }
+                // 先上传本地失败或等待中的内容，再拉取服务端最新版本。
+                val pendingResult = syncPendingInternal(expectedUserId)
+                if (!isActiveFor(expectedUserId)) {
+                    return@withLock SyncResult(
+                        hasRetryableFailure = pendingResult.hasRetryableFailure,
+                        wasCancelledForUserSwitch = true,
+                    )
+                }
+                api.listMemos().forEach { memo ->
+                    writeIfActive(expectedUserId) { database.upsert(memo) }
+                }
+                // 单独拉取回收站墓碑，让 Web 删除能从 Android 可见列表消失。
+                api.listMemos(status = "trashed").forEach { memo ->
+                    writeIfActive(expectedUserId) { database.upsert(memo) }
+                }
+                if (!isActiveFor(expectedUserId)) {
+                    return@withLock SyncResult(
+                        hasRetryableFailure = pendingResult.hasRetryableFailure,
+                        wasCancelledForUserSwitch = true,
+                    )
+                }
+                publishLocalSnapshot()
+                pendingResult
+            }
         }
     }
 
@@ -63,6 +100,7 @@ class MemoRepository(
             } catch (error: Exception) {
                 database.updateSyncState(localMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             }
         }
@@ -82,6 +120,7 @@ class MemoRepository(
             } catch (error: Exception) {
                 database.updateSyncState(localMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             }
         }
@@ -118,10 +157,12 @@ class MemoRepository(
                 }
                 database.updateSyncState(localMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             } catch (error: Exception) {
                 database.updateSyncState(localMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             }
         }
@@ -147,6 +188,9 @@ class MemoRepository(
             }
             database.upsert(merged)
             publishLocalSnapshot()
+            if (existing.id == null) {
+                requestBackgroundSync()
+            }
             merged
         }
     }
@@ -182,6 +226,7 @@ class MemoRepository(
             } catch (error: Exception) {
                 database.upsert(latestMemo.copy(syncState = SyncState.FAILED))
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             }
         }
@@ -201,7 +246,13 @@ class MemoRepository(
                 database.upsert(api.updateMemo(pendingMemo))
                 publishLocalSnapshot()
             } catch (error: Exception) {
-                database.updateSyncState(pendingMemo.clientId, SyncState.FAILED)
+                if (error is ApiException && error.statusCode == 409 && error.current != null) {
+                    // 冲突时以服务端版本作为新的编辑基线，避免再次用旧版本提交。
+                    database.upsert(error.current)
+                } else {
+                    database.updateSyncState(pendingMemo.clientId, SyncState.FAILED)
+                    requestBackgroundSync()
+                }
                 publishLocalSnapshot()
                 throw error
             }
@@ -247,6 +298,7 @@ class MemoRepository(
             } catch (error: Exception) {
                 database.updateSyncState(pendingMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             }
         }
@@ -279,6 +331,7 @@ class MemoRepository(
             } catch (error: Exception) {
                 database.updateSyncState(pendingMemo.clientId, SyncState.FAILED)
                 publishLocalSnapshot()
+                requestBackgroundSync()
                 throw error
             }
         }
@@ -294,8 +347,15 @@ class MemoRepository(
         return api.downloadAudio(memoId, target)
     }
 
-    private fun syncPendingInternal() {
+    private fun syncPendingInternal(expectedUserId: String?): SyncResult {
+        var hasRetryableFailure = false
         database.loadPending().forEach { memo ->
+            if (!isActiveFor(expectedUserId)) {
+                return SyncResult(
+                    hasRetryableFailure = hasRetryableFailure,
+                    wasCancelledForUserSwitch = true,
+                )
+            }
             runCatching {
                 val isCreate = memo.id == null
                 var remoteMemo = if (isCreate) {
@@ -313,15 +373,50 @@ class MemoRepository(
                     )
                 }
                 val reconciledMemo = remoteMemo.copy(localAudioPath = localAudioPath)
-                if (isCreate) {
-                    database.reconcileCreatedMemo(memo.clientId, reconciledMemo)
-                } else {
-                    database.upsert(reconciledMemo)
+                writeIfActive(expectedUserId) {
+                    if (isCreate) {
+                        database.reconcileCreatedMemo(memo.clientId, reconciledMemo)
+                    } else {
+                        database.upsert(reconciledMemo)
+                    }
                 }
-            }.onFailure {
-                database.updateSyncState(memo.clientId, SyncState.FAILED)
+            }.onFailure { error ->
+                if (writeIfActive(expectedUserId) {
+                    database.updateSyncState(memo.clientId, SyncState.FAILED)
+                }) {
+                    hasRetryableFailure = hasRetryableFailure || isRetryable(error)
+                }
             }
         }
+        return SyncResult(hasRetryableFailure = hasRetryableFailure)
+    }
+
+    private fun writeIfActive(expectedUserId: String?, operation: () -> Unit): Boolean {
+        return synchronized(this) {
+            if (!isActiveFor(expectedUserId)) {
+                false
+            } else {
+                operation()
+                true
+            }
+        }
+    }
+
+    private fun isActiveFor(expectedUserId: String?): Boolean {
+        return expectedUserId == null || activeUserId == expectedUserId
+    }
+
+    private fun isRetryable(error: Throwable): Boolean {
+        return when (error) {
+            is ApiException -> error.statusCode == 408 ||
+                error.statusCode == 429 ||
+                error.statusCode >= 500
+            else -> true
+        }
+    }
+
+    private fun requestBackgroundSync(): Unit {
+        runCatching { onSyncNeeded() }
     }
 
     private fun publishLocalSnapshot() {

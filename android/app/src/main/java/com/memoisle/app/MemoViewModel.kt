@@ -13,6 +13,7 @@ import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.DuplicateLemmaException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -32,18 +33,40 @@ class MemoViewModel(
     var uiState by mutableStateOf(MemoUiState(isRefreshing = true))
         private set
     private var mediaPlayer: MediaPlayer? = null
+    private var refreshJob: Job? = null
 
     init {
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        if (refreshJob?.isActive == true) {
+            return
+        }
+        val expectedUserId = repository.activeUserId()
+        if (expectedUserId == null) {
+            uiState = uiState.copy(isRefreshing = false)
+            return
+        }
+        refreshJob = viewModelScope.launch {
             uiState = uiState.copy(isRefreshing = true, message = null)
-            uiState = runCatching { repository.refresh() }
+            uiState = runCatching { repository.refresh(expectedUserId) }
                 .fold(
-                    onSuccess = {
-                        uiState.copy(isRefreshing = false, message = "已与 Web 端同步")
+                    onSuccess = { result ->
+                        when {
+                            result.wasCancelledForUserSwitch -> {
+                                uiState.copy(isRefreshing = false, message = null)
+                            }
+                            result.hasRetryableFailure -> {
+                                uiState.copy(
+                                    isRefreshing = false,
+                                    message = "已同步，部分内容将在联网后自动重试",
+                                )
+                            }
+                            else -> {
+                                uiState.copy(isRefreshing = false, message = "已与 Web 端同步")
+                            }
+                        }
                     },
                     onFailure = { error ->
                         uiState.copy(
@@ -52,6 +75,7 @@ class MemoViewModel(
                         )
                     },
                 )
+            refreshJob = null
         }
     }
 
@@ -237,6 +261,7 @@ class MemoViewModel(
         wordMeaning: String?,
         wordExample: String?,
         onSuccess: () -> Unit,
+        onConflict: (Memo) -> Unit = {},
     ) {
         if (memo.type == TYPE_RESOURCE) {
             uiState = uiState.copy(message = "Android 端网页资料为只读，请在 Web 端整理")
@@ -260,13 +285,23 @@ class MemoViewModel(
                     onSuccess()
                 }
                 .onFailure { error ->
-                    val conflictMessage = if (error is ApiException && error.statusCode == 409) {
-                        "其他设备已更新这条灵感，请刷新后重新编辑。"
+                    if (error is ApiException && error.statusCode == 409) {
+                        uiState = uiState.copy(
+                            isSaving = false,
+                            message = if (error.current == null) {
+                                "其他设备已更新这条灵感，请刷新后重新编辑。"
+                            } else {
+                                "其他设备已更新这条灵感，已载入最新版本，请确认后重新保存。"
+                            },
+                        )
+                        error.current?.let(onConflict)
                     } else {
-                        "修改已保存在本机，稍后重试同步：${error.readableMessage()}"
+                        uiState = uiState.copy(
+                            isSaving = false,
+                            message = "修改已保存在本机，稍后重试同步：${error.readableMessage()}",
+                        )
+                        onSuccess()
                     }
-                    uiState = uiState.copy(isSaving = false, message = conflictMessage)
-                    onSuccess()
                 }
         }
     }

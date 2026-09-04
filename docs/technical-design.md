@@ -54,6 +54,8 @@ Android Client ───┘                       │
 
 - Web 与 Android 均通过服务端发起微信、Google 和 Apple ID OAuth 授权码登录。
 - Web 与 Android 支持邮箱密码注册和登录，凭据使用 PBKDF2-SHA256 加盐哈希保存。
+- 邮箱注册先创建待验证账号；一次性验证链接和密码重置令牌只保存 SHA-256 哈希。
+- 同一邮箱连续登录失败触发账号维度限流；密码重置成功后撤销既有 Bearer 会话。
 - 服务端保存 `user`、`auth_identity` 和 `auth_session`；第三方主体可绑定到同一账号，已验证邮箱可用于跨提供方归并。
 - OAuth `state` 使用服务端密钥 HMAC 签名并设置短时效；回调后的跳转地址必须来自 Web CORS 白名单或显式配置的 Android 深链。
 - 登录成功签发 opaque Bearer 令牌，数据库仅保存 SHA-256 哈希；所有业务接口通过依赖注入取得当前用户并按用户隔离数据。
@@ -163,6 +165,10 @@ Android Client ───┘                       │
 | `GET /v1/auth/providers` | 读取可用登录方式 |
 | `POST /v1/auth/register` | 使用邮箱和密码注册 |
 | `POST /v1/auth/login` | 使用邮箱和密码登录 |
+| `POST /v1/auth/verify-email/request` | 重新发送邮箱验证链接 |
+| `POST /v1/auth/verify-email` | 验证邮箱所有权 |
+| `POST /v1/auth/password-reset/request` | 请求密码重置链接 |
+| `POST /v1/auth/password-reset` | 使用一次性令牌重置密码 |
 | `GET /v1/auth/{provider}/authorize` | 跳转到第三方授权页 |
 | `GET/POST /v1/auth/{provider}/callback` | 处理 OAuth 回调并回跳客户端 |
 | `GET /v1/auth/me` | 读取当前登录用户 |

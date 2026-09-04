@@ -65,6 +65,9 @@ Web / Android 搜索
 - 网页健康调度支持同站点单轮限流、连续失败阈值、指数退避和审计事件。
 - 支持微信、Google 和 Apple ID OAuth 授权码登录，`state` 使用 HMAC 签名并限制回跳来源。
 - 支持邮箱密码注册与登录，密码使用 PBKDF2-SHA256、随机盐和 600,000 次迭代保存。
+- 邮箱注册后发送一次性验证链接，未验证邮箱不能登录；支持重新发送验证邮件。
+- 支持一次性密码重置链接；重置成功后更新密码、验证邮箱并撤销既有会话。
+- 同一邮箱 15 分钟内连续 5 次登录失败后返回 429，并携带 `Retry-After`。
 - 登录成功创建 `user` 与 `auth_identity`，签发 opaque Bearer 会话；数据库只保存令牌哈希，支持撤销。
 - 所有业务接口通过认证依赖取得当前用户，不接收客户端传入的 `user_id`。
 - 显式开启 `MEMOISLE_AUTH_DEV_MODE` 时提供本地开发登录，生产环境默认关闭该入口。
@@ -77,6 +80,10 @@ Web / Android 搜索
 | GET | `/api/v1/auth/providers` | 读取微信、Google、Apple 登录可用状态 |
 | POST | `/api/v1/auth/register` | 使用邮箱和密码注册 |
 | POST | `/api/v1/auth/login` | 使用邮箱和密码登录 |
+| POST | `/api/v1/auth/verify-email/request` | 重新发送邮箱验证链接 |
+| POST | `/api/v1/auth/verify-email` | 验证邮箱所有权 |
+| POST | `/api/v1/auth/password-reset/request` | 请求密码重置链接 |
+| POST | `/api/v1/auth/password-reset` | 使用一次性令牌重置密码 |
 | GET | `/api/v1/auth/{provider}/authorize` | 跳转第三方授权页 |
 | GET/POST | `/api/v1/auth/{provider}/callback` | 处理 OAuth 回调并回跳 Web 或 Android |
 | GET | `/api/v1/auth/me` | 读取当前登录用户 |
@@ -159,7 +166,7 @@ Web / Android 搜索
 - 使用 Android SQLite 保存本地灵感，不依赖 Room/KSP。
 - Android SQLite 已升级到版本 8，可同时缓存灵感与网页资料元数据、分类名称、资源形态、阅读进度、收藏夹、星标和巡检状态。
 - 灵感和英语单词支持本地创建/编辑；网页资料仅在系统分享确认时保存，已保存网页资料只读。
-- 启动或手动刷新时重试本地待同步内容，再拉取服务端数据。
+- 启动、登录后或手动刷新时重试本地待同步内容，再拉取服务端数据；WorkManager 在联网时后台重试并使用指数退避。
 - 注册 `ACTION_SEND` 的 `text/plain` 分享目标，可从浏览器或其他应用接收链接。
 - 分享链接后自动打开最小确认表单，并预填原始网址和可识别标题；保存后不提供资料编辑入口。
 - Android 分享已收藏网址时会原子移除本地临时行并采用服务端原资料，避免重复和永久待同步状态。
@@ -238,7 +245,7 @@ Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解�
 | 范围 | 命令/方式 | 结果 |
 | --- | --- | --- |
 | Python 静态检查 | `ruff check backend` | 通过 |
-| 后端测试 | `pytest -q` | 43 项通过，覆盖邮箱登录、第三方登录、Bearer 会话、撤销和用户隔离 |
+| 后端测试 | `pytest -q` | 48 项通过，覆盖邮箱验证、密码重置、登录限流、第三方登录、Bearer 会话、撤销和用户隔离 |
 | Web 类型与生产构建 | `npm run build` | 通过 |
 | Android 单元测试 | `JAVA_HOME=<JDK17> ./gradlew testDebugUnitTest` | 通过 |
 | Android APK | `JAVA_HOME=<JDK17> ./gradlew assembleDebug` | 通过 |
@@ -265,7 +272,7 @@ Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解�
 - 网页资料核心 P0 已完成代码、接口和 Web/Android 运行时验收；扩展已覆盖当前浏览器打开网页快照和当前页一次性捕获。扩展的图标/快捷键属于浏览器安装态入口，仍需在现有 Chrome 的开发者模式下手动加载后点击确认。
 - 生产部署时需将扩展清单中的本地 API 主机权限替换为正式 API 域名，并配置正式 Web 地址。
 - 第三方登录代码已完成，但微信、Google、Apple 的正式 App ID/Services ID、Client Secret 和服务端回调 URL 仍需在开放平台配置；本仓库未提交任何凭据。
-- 邮箱密码登录暂未发送邮箱所有权验证邮件，也未实现密码找回和生产级登录频率限制。
+- 邮箱验证、密码找回和登录频率限制已实现；生产环境还需配置正式 SMTP 与 Web 域名后完成真实邮件验收。
 - Android 认证代码已通过单元测试、APK 构建和 lint，但尚未完成微信、Google、Apple 真机授权验收。
 - Apple 登录当前使用预生成的 client secret，后续可增加由私钥自动签发短期 client secret 的任务。
 - 开发环境默认 SQLite，生产环境迁移 PostgreSQL 时需要补数据库迁移脚本。

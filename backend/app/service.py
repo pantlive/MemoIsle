@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,6 +26,7 @@ from app.schemas import (
     WordReviewRequest,
 )
 from app.url_normalization import canonicalize_resource_url
+from app.word_service import normalize_word_lemma
 
 
 class MemoNotFoundError(LookupError):
@@ -65,13 +65,6 @@ ALLOWED_AUDIO_TYPES = {
     "audio/webm",
     "audio/x-m4a",
 }
-
-
-def normalize_lemma(value: str) -> str:
-    """把英语词形规范为可比较的小写形式。"""
-
-    folded = unicodedata.normalize("NFKC", value).casefold().strip()
-    return " ".join(folded.split())
 
 
 def append_unique_text(existing: str | None, incoming: str | None) -> str | None:
@@ -158,7 +151,7 @@ def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
                     continue
 
     if payload.type == MemoType.WORD:
-        lemma = normalize_lemma(payload.title or "")
+        lemma = normalize_word_lemma(payload.title or "")
         existing_word = session.scalar(
             select(Memo).where(
                 Memo.user_id == user_id,
@@ -212,7 +205,7 @@ def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
         word_meaning=payload.word_meaning,
         word_example=payload.word_example,
         normalized_lemma=(
-            normalize_lemma(payload.title or "")
+            normalize_word_lemma(payload.title or "")
             if payload.type == MemoType.WORD
             else None
         ),
@@ -489,7 +482,7 @@ def update_memo(
     if "body" in changes and "title" not in changes:
         memo.title = build_title(None, memo.body)
     if memo.type == MemoType.WORD and "title" in changes:
-        memo.normalized_lemma = normalize_lemma(memo.title)
+        memo.normalized_lemma = normalize_word_lemma(memo.title)
     if memo.type == MemoType.RESOURCE and "title" in changes:
         memo.resource_title_user_defined = True
     if (

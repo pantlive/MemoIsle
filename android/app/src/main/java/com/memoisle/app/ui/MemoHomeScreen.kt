@@ -543,9 +543,12 @@ fun MemoHomeScreen(
                         phonetic,
                         meaning,
                         example,
-                    ) {
-                        selectedMemo = null
-                    }
+                        onSuccess = { selectedMemo = null },
+                        onConflict = { currentMemo ->
+                            // 用服务端最新版本替换编辑基线，但保留对话框让用户确认后再保存。
+                            selectedMemo = currentMemo
+                        },
+                    )
                 },
                 onReview = { feedback ->
                     viewModel.reviewWord(memo, feedback) {
@@ -1547,20 +1550,22 @@ private fun EditMemoDialog(
     onReview: (String) -> Unit,
     onPlayAudio: () -> Unit,
 ) {
-    var title by rememberSaveable(memo.clientId) { mutableStateOf(memo.title) }
-    var body by rememberSaveable(memo.clientId) {
+    var title by rememberSaveable(memo.clientId, memo.version) { mutableStateOf(memo.title) }
+    var body by rememberSaveable(memo.clientId, memo.version) {
         mutableStateOf(memo.body)
     }
-    var wordPhonetic by rememberSaveable(memo.clientId) {
+    var wordPhonetic by rememberSaveable(memo.clientId, memo.version) {
         mutableStateOf(memo.wordPhonetic.orEmpty())
     }
-    var wordMeaning by rememberSaveable(memo.clientId) {
+    var wordMeaning by rememberSaveable(memo.clientId, memo.version) {
         mutableStateOf(memo.wordMeaning.orEmpty())
     }
-    var wordExample by rememberSaveable(memo.clientId) {
+    var wordExample by rememberSaveable(memo.clientId, memo.version) {
         mutableStateOf(memo.wordExample.orEmpty())
     }
-    var showWordAnswer by rememberSaveable(memo.clientId) { mutableStateOf(false) }
+    var showWordAnswer by rememberSaveable(memo.clientId, memo.version) {
+        mutableStateOf(false)
+    }
     val isWord = memo.type == TYPE_WORD
 
     AlertDialog(

@@ -26,6 +26,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         audio_directory=tmp_path / "audio",
         resource_enrichment_enabled=False,
         resource_health_monitor_enabled=False,
+        word_dictionary_enabled=False,
     )
     app = create_app(settings=settings, database=Database(settings.database_url))
     with TestClient(app) as test_client:

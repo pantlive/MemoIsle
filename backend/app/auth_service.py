@@ -15,11 +15,19 @@ from urllib.parse import urlencode, urlsplit
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import AuthCredential, AuthIdentity, AuthSession, User, utc_now
+from app.models import (
+    AuthCredential,
+    AuthEmailToken,
+    AuthIdentity,
+    AuthLoginAttempt,
+    AuthSession,
+    User,
+    utc_now,
+)
 from app.schemas import AuthProvider
 
 GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -33,6 +41,8 @@ APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
 STATE_TTL_SECONDS = 10 * 60
 PASSWORD_ITERATIONS = 600_000
 DUMMY_PASSWORD_SALT = "0" * 32
+VERIFY_EMAIL_PURPOSE = "verify_email"
+PASSWORD_RESET_PURPOSE = "password_reset"
 
 
 class AuthProviderDisabledError(Exception):
@@ -53,6 +63,24 @@ class EmailAlreadyRegisteredError(Exception):
 
 class InvalidEmailCredentialsError(Exception):
     """邮箱或密码不正确。"""
+
+
+class EmailNotVerifiedError(Exception):
+    """邮箱账号在登录前需要完成所有权验证。"""
+
+
+class LoginRateLimitedError(Exception):
+    """邮箱登录因连续失败被临时限制。"""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        """记录剩余限制秒数，供响应头使用。"""
+
+        super().__init__("登录尝试次数过多，请稍后重试")
+        self.retry_after_seconds = retry_after_seconds
+
+
+class EmailTokenInvalidError(Exception):
+    """邮件令牌无效、已使用或已过期。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,14 +433,205 @@ def _password_digest(
     ).hex()
 
 
+def _email_token_hash(token: str) -> str:
+    """把邮件令牌转换为数据库中保存的哈希。"""
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def issue_email_token(
+    session: Session,
+    settings: Settings,
+    user: User,
+    purpose: str,
+) -> str:
+    """签发一次性邮件令牌，并让同用途旧令牌全部失效。"""
+
+    old_tokens = session.scalars(
+        select(AuthEmailToken).where(
+            AuthEmailToken.user_id == user.id,
+            AuthEmailToken.purpose == purpose,
+        ),
+    )
+    now = utc_now()
+    for old_token in old_tokens:
+        old_token.used_at = now
+
+    token = secrets.token_urlsafe(32)
+    ttl_seconds = (
+        settings.auth_email_verification_ttl_seconds
+        if purpose == VERIFY_EMAIL_PURPOSE
+        else settings.auth_password_reset_ttl_seconds
+    )
+    session.add(
+        AuthEmailToken(
+            id=str(uuid4()),
+            user_id=user.id,
+            purpose=purpose,
+            token_hash=_email_token_hash(token),
+            expires_at=now + timedelta(seconds=ttl_seconds),
+        ),
+    )
+    session.commit()
+    return token
+
+
+def _load_valid_email_token(
+    session: Session,
+    token: str,
+    purpose: str,
+) -> AuthEmailToken:
+    """按哈希读取仍有效的邮件令牌。"""
+
+    email_token = session.scalar(
+        select(AuthEmailToken).where(
+            AuthEmailToken.token_hash == _email_token_hash(token),
+            AuthEmailToken.purpose == purpose,
+        ),
+    )
+    if (
+        email_token is None
+        or email_token.used_at is not None
+        or _normalized_expires_at(email_token.expires_at) <= utc_now()
+    ):
+        raise EmailTokenInvalidError
+    return email_token
+
+
+def request_email_verification_token(
+    session: Session,
+    settings: Settings,
+    email: str,
+) -> tuple[User, str] | None:
+    """为未验证邮箱账号签发验证令牌。"""
+
+    credential = session.scalar(
+        select(AuthCredential).where(AuthCredential.email == email),
+    )
+    if credential is None:
+        return None
+    user = session.get(User, credential.user_id)
+    if user is None or user.email_verified:
+        return None
+    token = issue_email_token(
+        session,
+        settings,
+        user,
+        VERIFY_EMAIL_PURPOSE,
+    )
+    return user, token
+
+
+def verify_email_token(session: Session, token: str) -> User:
+    """消费验证令牌并绑定已验证邮箱到账号。"""
+
+    email_token = _load_valid_email_token(session, token, VERIFY_EMAIL_PURPOSE)
+    credential = session.scalar(
+        select(AuthCredential).where(
+            AuthCredential.user_id == email_token.user_id,
+        ),
+    )
+    user = session.get(User, email_token.user_id)
+    if user is None or credential is None:
+        raise EmailTokenInvalidError
+    email_token.used_at = utc_now()
+    user.email = credential.email
+    user.email_verified = True
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def request_password_reset_token(
+    session: Session,
+    settings: Settings,
+    email: str,
+) -> tuple[User, str] | None:
+    """为已有邮箱账号签发密码重置令牌。"""
+
+    credential = session.scalar(
+        select(AuthCredential).where(AuthCredential.email == email),
+    )
+    user = session.get(User, credential.user_id) if credential else None
+    if user is None or credential is None:
+        return None
+    token = issue_email_token(
+        session,
+        settings,
+        user,
+        PASSWORD_RESET_PURPOSE,
+    )
+    return user, token
+
+
+def reset_password_with_token(
+    session: Session,
+    token: str,
+    password: str,
+) -> User:
+    """消费重置令牌，更新密码并撤销现有会话。"""
+
+    email_token = _load_valid_email_token(session, token, PASSWORD_RESET_PURPOSE)
+    user = session.get(User, email_token.user_id)
+    credential = session.scalar(
+        select(AuthCredential).where(
+            AuthCredential.user_id == email_token.user_id,
+        ),
+    )
+    if user is None or credential is None:
+        raise EmailTokenInvalidError
+
+    password_salt = secrets.token_bytes(16).hex()
+    credential.password_hash = _password_digest(
+        password,
+        password_salt,
+        PASSWORD_ITERATIONS,
+    )
+    credential.password_salt = password_salt
+    credential.password_iterations = PASSWORD_ITERATIONS
+    user.email = credential.email
+    user.email_verified = True
+    email_token.used_at = utc_now()
+    session.execute(
+        update(AuthSession)
+        .where(AuthSession.user_id == user.id)
+        .values(revoked_at=utc_now()),
+    )
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def _record_login_failure(session: Session, email: str) -> None:
+    """记录一次失败登录，供账号维度限流查询。"""
+
+    session.add(
+        AuthLoginAttempt(
+            id=str(uuid4()),
+            email=email,
+            successful=False,
+        ),
+    )
+    session.commit()
+
+
+def _clear_login_attempts(session: Session, email: str) -> None:
+    """登录成功后清除该邮箱的失败记录。"""
+
+    session.execute(
+        delete(AuthLoginAttempt).where(AuthLoginAttempt.email == email),
+    )
+    session.commit()
+
+
 def register_with_password(
     session: Session,
     settings: Settings,
     email: str,
     password: str,
     display_name: str | None = None,
-) -> CreatedAuthSession:
-    """创建邮箱密码账号并签发登录会话。"""
+) -> User:
+    """创建待验证的邮箱密码账号。"""
 
     existing_credential = session.scalar(
         select(AuthCredential).where(AuthCredential.email == email),
@@ -425,6 +644,7 @@ def register_with_password(
     user = User(
         id=str(uuid4()),
         email=None,
+        email_verified=False,
         display_name=(display_name or email.rsplit("@", 1)[0])[:120],
     )
     credential = AuthCredential(
@@ -439,7 +659,7 @@ def register_with_password(
     session.add(credential)
     session.commit()
     session.refresh(user)
-    return _create_session(session, settings, user, "email")
+    return user
 
 
 def login_with_password(
@@ -450,12 +670,28 @@ def login_with_password(
 ) -> CreatedAuthSession:
     """校验邮箱密码并签发登录会话。"""
 
+    cutoff = utc_now() - timedelta(
+        seconds=settings.auth_login_rate_limit_window_seconds,
+    )
+    failed_count = session.scalar(
+        select(func.count())
+        .select_from(AuthLoginAttempt)
+        .where(
+            AuthLoginAttempt.email == email,
+            AuthLoginAttempt.successful.is_(False),
+            AuthLoginAttempt.created_at >= cutoff,
+        ),
+    )
+    if failed_count and failed_count >= settings.auth_login_rate_limit_attempts:
+        raise LoginRateLimitedError(settings.auth_login_rate_limit_window_seconds)
+
     credential = session.scalar(
         select(AuthCredential).where(AuthCredential.email == email),
     )
     if credential is None:
         # 对不存在账号也执行一次摘要计算，减少响应时间差异。
         _password_digest(password, DUMMY_PASSWORD_SALT, PASSWORD_ITERATIONS)
+        _record_login_failure(session, email)
         raise InvalidEmailCredentialsError
 
     candidate_hash = _password_digest(
@@ -464,10 +700,15 @@ def login_with_password(
         credential.password_iterations,
     )
     if not hmac.compare_digest(candidate_hash, credential.password_hash):
+        _record_login_failure(session, email)
         raise InvalidEmailCredentialsError
     user = session.get(User, credential.user_id)
     if user is None:
+        _record_login_failure(session, email)
         raise InvalidEmailCredentialsError
+    if not user.email_verified:
+        raise EmailNotVerifiedError
+    _clear_login_attempts(session, email)
     return _create_session(session, settings, user, "email")
 
 
@@ -515,6 +756,7 @@ def login_with_provider(
         user = User(
             id=str(uuid4()),
             email=profile.email if profile.email_verified else None,
+            email_verified=profile.email_verified,
             display_name=profile.display_name[:120] or "MemoIsle 用户",
         )
         session.add(user)
@@ -535,6 +777,7 @@ def login_with_provider(
         identity.email = profile.email if profile.email_verified else identity.email
         if profile.email_verified and user.email is None:
             user.email = profile.email
+            user.email_verified = True
     session.commit()
     session.refresh(user)
     return _create_session(session, settings, user, profile.provider)

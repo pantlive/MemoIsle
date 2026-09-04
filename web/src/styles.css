@@ -264,6 +264,22 @@ textarea:focus-visible {
   background: var(--primary-soft);
 }
 
+.auth-dev-login {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.auth-dev-login:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .auth-actions a,
 .auth-actions button {
   display: flex;
@@ -292,6 +308,11 @@ textarea:focus-visible {
 
 .auth-error {
   color: var(--danger) !important;
+}
+
+.auth-notice {
+  margin: 0;
+  color: var(--primary-hover);
 }
 
 .auth-email-form {
@@ -332,6 +353,24 @@ textarea:focus-visible {
 }
 
 .auth-email-form > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.auth-text-button {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.auth-text-button:hover:not(:disabled) {
+  color: var(--primary-hover);
+}
+
+.auth-text-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }

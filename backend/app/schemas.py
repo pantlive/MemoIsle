@@ -48,6 +48,7 @@ class AuthUserResponse(BaseModel):
 
     id: UUID
     email: str | None
+    email_verified: bool = False
     display_name: str
     created_at: datetime
     updated_at: datetime
@@ -74,6 +75,13 @@ class AuthSessionResponse(BaseModel):
 
         resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
         return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class EmailRegisterResponse(BaseModel):
+    """注册后等待邮箱验证的结果。"""
+
+    user: AuthUserResponse
+    verification_email_sent: bool
 
 
 class AuthLogoutResponse(BaseModel):
@@ -131,6 +139,47 @@ class EmailLoginRequest(BaseModel):
         """统一邮箱大小写和空白。"""
 
         return value.strip().lower()
+
+
+class EmailTokenRequest(BaseModel):
+    """请求邮件验证或密码重置链接。"""
+
+    email: str = Field(min_length=5, max_length=320)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        """统一邮箱大小写和空白。"""
+
+        return value.strip().lower()
+
+
+class EmailTokenConfirmRequest(BaseModel):
+    """提交邮件链接中的一次性令牌。"""
+
+    token: str = Field(min_length=16, max_length=256)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """提交密码重置令牌和新密码。"""
+
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_password_confirmation(self) -> PasswordResetConfirmRequest:
+        """确保两次输入的重置密码一致。"""
+
+        if self.password != self.confirm_password:
+            raise ValueError("两次输入的密码不一致")
+        return self
+
+
+class AuthActionResponse(BaseModel):
+    """认证辅助操作的通用结果。"""
+
+    status: str = "ok"
 
 
 class MemoType(StrEnum):
@@ -413,6 +462,8 @@ class MemoRead(BaseModel):
     link_consecutive_failures: int
     link_effective_url: str | None
     word_phonetic: str | None
+    word_us_audio_url: str | None
+    word_uk_audio_url: str | None
     word_meaning: str | None
     word_example: str | None
     familiarity: int

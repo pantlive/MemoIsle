@@ -16,6 +16,7 @@ export interface AuthProvidersResponse {
 export interface AuthUser {
   id: string;
   email: string | null;
+  email_verified: boolean;
   display_name: string;
   created_at: string;
   updated_at: string;
@@ -26,6 +27,11 @@ export interface AuthSession {
   token_type: string;
   expires_at: string;
   user: AuthUser;
+}
+
+export interface EmailRegisterResponse {
+  user: AuthUser;
+  verification_email_sent: boolean;
 }
 export type MemoStatus = "inbox" | "active" | "archived" | "trashed";
 export type MemoSort =
@@ -109,6 +115,8 @@ export interface Memo {
   link_consecutive_failures: number;
   link_effective_url: string | null;
   word_phonetic: string | null;
+  word_us_audio_url: string | null;
+  word_uk_audio_url: string | null;
   word_meaning: string | null;
   word_example: string | null;
   familiarity: number;

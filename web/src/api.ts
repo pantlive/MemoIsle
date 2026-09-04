@@ -10,6 +10,7 @@ import type {
   BrowserCaptureContext,
   BrowserOpenTab,
   BrowserOpenTabListResponse,
+  EmailRegisterResponse,
   LinkHealthAction,
   LinkHealthCenter,
   LinkHealthStatus,
@@ -118,14 +119,50 @@ export async function registerWithEmail(
   password: string,
   confirmPassword: string,
   displayName?: string,
-): Promise<AuthSession> {
-  return request<AuthSession>("/auth/register", {
+): Promise<EmailRegisterResponse> {
+  return request<EmailRegisterResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify({
       email,
       password,
       confirm_password: confirmPassword,
       display_name: displayName?.trim() || undefined,
+    }),
+  });
+}
+
+export async function requestEmailVerification(email: string): Promise<void> {
+  await request<{ status: string }>("/auth/verify-email/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyEmailToken(token: string): Promise<void> {
+  await request<{ status: string }>("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  await request<{ status: string }>("/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(
+  token: string,
+  password: string,
+  confirmPassword: string,
+): Promise<void> {
+  await request<{ status: string }>("/auth/password-reset", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      password,
+      confirm_password: confirmPassword,
     }),
   });
 }

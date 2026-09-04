@@ -67,8 +67,17 @@ class Database:
 
         if self.engine.dialect.name != "sqlite":
             return
+        user_columns = {
+            column["name"] for column in inspect(self.engine).get_columns("user")
+        }
         existing_columns = inspect(self.engine).get_columns("memo")
         columns = {column["name"] for column in existing_columns}
+        user_migrations = {
+            "email_verified": (
+                "ALTER TABLE user ADD COLUMN email_verified BOOLEAN "
+                "NOT NULL DEFAULT 0"
+            ),
+        }
         migrations = {
             "source_url": "ALTER TABLE memo ADD COLUMN source_url VARCHAR(2048)",
             "source_title": "ALTER TABLE memo ADD COLUMN source_title VARCHAR(200)",
@@ -162,6 +171,12 @@ class Database:
             "link_metadata_fingerprint": (
                 "ALTER TABLE memo ADD COLUMN link_metadata_fingerprint VARCHAR(64)"
             ),
+            "word_us_audio_url": (
+                "ALTER TABLE memo ADD COLUMN word_us_audio_url VARCHAR(2048)"
+            ),
+            "word_uk_audio_url": (
+                "ALTER TABLE memo ADD COLUMN word_uk_audio_url VARCHAR(2048)"
+            ),
             "word_phonetic": "ALTER TABLE memo ADD COLUMN word_phonetic VARCHAR(120)",
             "normalized_lemma": (
                 "ALTER TABLE memo ADD COLUMN normalized_lemma VARCHAR(200)"
@@ -199,10 +214,30 @@ class Database:
             ),
         }
         with self.engine.begin() as connection:
+            for column_name, statement in user_migrations.items():
+                if column_name not in user_columns:
+                    # 迁移语句来自固定映射，不拼接外部输入。
+                    connection.execute(text(statement))
             for column_name, statement in migrations.items():
                 if column_name not in columns:
                     # 迁移语句来自固定映射，不拼接外部输入。
                     connection.execute(text(statement))
+            from app.word_service import normalize_word_lemma
+
+            word_rows = connection.execute(
+                text("SELECT id, title FROM memo WHERE type = 'word'"),
+            ).all()
+            for word_id, title in word_rows:
+                connection.execute(
+                    text(
+                        "UPDATE memo SET normalized_lemma = :normalized_lemma "
+                        "WHERE id = :id",
+                    ),
+                    {
+                        "id": word_id,
+                        "normalized_lemma": normalize_word_lemma(title),
+                    },
+                )
             # 旧资料在新增字段后进入待处理状态，其他类型保持 none。
             connection.execute(
                 text(

@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.memoisle.app.data.AuthTokenStore
 import com.memoisle.app.data.MemoRepository
 import com.memoisle.app.network.AuthProvidersResponse
+import com.memoisle.app.network.AuthSession
 import com.memoisle.app.network.AuthUser
+import com.memoisle.app.network.EmailRegisterResponse
 import com.memoisle.app.network.MemoApiClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -149,10 +151,13 @@ class AuthViewModel(
                 api.accessToken = null
                 repository.clearForLogout()
             }
-            val providers = withContext(Dispatchers.IO) { api.getAuthProviders() }
+            val providers = runCatching {
+                withContext(Dispatchers.IO) { api.getAuthProviders() }
+            }.getOrNull()
             mutableUiState.value = AuthUiState(
                 status = AuthStatus.ANONYMOUS,
                 providers = providers,
+                message = if (providers == null) "已退出登录，当前无法读取登录方式" else null,
             )
         }
     }
@@ -201,21 +206,34 @@ class AuthViewModel(
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val session = if (!isRegistration) {
-                        api.loginWithEmail(email, password)
-                    } else {
+                    if (isRegistration) {
                         api.registerWithEmail(email, password, confirmPassword, displayName)
+                    } else {
+                        val session = api.loginWithEmail(email, password)
+                        tokenStore.save(session.accessToken, session.user.id)
+                        repository.activateUser(session.user.id)
+                        session
                     }
-                    tokenStore.save(session.accessToken, session.user.id)
-                    repository.activateUser(session.user.id)
-                    session.user
                 }
             }.fold(
-                onSuccess = { user ->
-                    mutableUiState.value = AuthUiState(
-                        status = AuthStatus.AUTHENTICATED,
-                        user = user,
-                    )
+                onSuccess = { result ->
+                    if (result is AuthSession) {
+                        mutableUiState.value = AuthUiState(
+                            status = AuthStatus.AUTHENTICATED,
+                            user = result.user,
+                        )
+                    } else {
+                        val registration = result as EmailRegisterResponse
+                        mutableUiState.value = mutableUiState.value.copy(
+                            status = AuthStatus.ANONYMOUS,
+                            isBusy = false,
+                            message = if (registration.verificationEmailSent) {
+                                "注册成功，请查收邮箱并完成验证。"
+                            } else {
+                                "注册成功，但验证邮件发送失败，请稍后重试。"
+                            },
+                        )
+                    }
                 },
                 onFailure = { error ->
                     mutableUiState.value = mutableUiState.value.copy(
@@ -229,11 +247,17 @@ class AuthViewModel(
     }
 
     private suspend fun loadAnonymousState(message: String? = null): Unit {
-        val providers = withContext(Dispatchers.IO) { api.getAuthProviders() }
+        val providers = runCatching {
+            withContext(Dispatchers.IO) { api.getAuthProviders() }
+        }.getOrNull()
         mutableUiState.value = AuthUiState(
             status = AuthStatus.ANONYMOUS,
             providers = providers,
-            message = message,
+            message = message ?: if (providers == null) {
+                "当前无法连接服务端，请检查网络后重试"
+            } else {
+                null
+            },
         )
     }
 

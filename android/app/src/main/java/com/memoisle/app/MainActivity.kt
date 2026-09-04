@@ -7,11 +7,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import com.memoisle.app.sync.MemoSyncScheduler
 import com.memoisle.app.ui.AuthScreen
 import com.memoisle.app.ui.MemoHomeScreen
 import com.memoisle.app.ui.MemoIsleTheme
@@ -37,7 +40,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val authState by authViewModel.uiState.collectAsState()
+            val context = LocalContext.current
             val uriHandler = LocalUriHandler.current
+            LaunchedEffect(authState.status, authState.user?.id) {
+                if (authState.status == AuthStatus.AUTHENTICATED) {
+                    // 每次登录（包括退出后重新登录）都重新拉取当前账号的数据。
+                    MemoSyncScheduler.schedule(context)
+                    viewModel.refresh()
+                } else if (authState.status == AuthStatus.ANONYMOUS) {
+                    MemoSyncScheduler.cancel(context)
+                }
+            }
             MemoIsleTheme {
                 when (authState.status) {
                     AuthStatus.AUTHENTICATED -> MemoHomeScreen(
