@@ -11,3 +11,17 @@ dependencies:
   - pytest=8.4.2
   - sqlalchemy=2.0.51
   - uvicorn=0.48.0
+  - pillow=12.3.0
+  # 云盘凭据加密（Fernet）。
+  - cryptography=45.0.7
+  - pip
+  - pip:
+      - sanotts==0.5.0
+      # 图片批量识别使用本地 PyTorch，图像不发送到第三方服务。
+      - torch
+      - torchvision
+      - easyocr==1.7.2
+      # 图片 OCR 本地引擎（可选）：仅在设置 MEMOISLE_IMAGE_OCR_PROVIDER=local/auto 时需要。
+      # 不默认安装，避免引入 onnxruntime 与随包模型体积。
+      # - rapidocr-onnxruntime
+      # 也可改用系统 tesseract + pytesseract（需自行安装语言包）。

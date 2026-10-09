@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { pendingHealthIssueCount } from "./linkHealth";
 
-import { applyLinkHealthAction, getLinkHealthCenter } from "./api";
+import {
+  applyLinkHealthAction,
+  getLinkHealthCenter,
+  updateLinkHealthSettings,
+  updateLinkHealthSitePause,
+} from "./api";
 import type {
   LinkHealthAction,
   LinkHealthCenter,
@@ -45,6 +51,17 @@ function formatTime(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : "暂无";
 }
 
+function hostnameFromUrl(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function actionsFor(memo: Memo): LinkHealthAction[] {
   if (memo.link_health_status === "ignored") {
     return ["resume"];
@@ -61,7 +78,7 @@ function actionsFor(memo: Memo): LinkHealthAction[] {
 function actionLabel(action: LinkHealthAction): string {
   const labels: Record<LinkHealthAction, string> = {
     retry: "重新检查",
-    ignore: "忽略提醒",
+    ignore: "暂停此条",
     resume: "恢复巡检",
     adopt_redirect: "采用新网址",
     update_url: "更新网址",
@@ -79,6 +96,9 @@ export default function LinkHealthDialog({
   const [center, setCenter] = useState<LinkHealthCenter | null>(null);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [healthEnabled, setHealthEnabled] = useState(true);
+  const [intervalHours, setIntervalHours] = useState(720);
   const [error, setError] = useState("");
 
   const loadCenter = useCallback(async () => {
@@ -96,6 +116,47 @@ export default function LinkHealthDialog({
   useEffect(() => {
     void loadCenter();
   }, [loadCenter]);
+
+  useEffect(() => {
+    if (!center) {
+      return;
+    }
+    setHealthEnabled(center.settings.enabled);
+    setIntervalHours(center.settings.interval_hours);
+  }, [center]);
+
+  const handleSettingsSave = async () => {
+    setSettingsBusy(true);
+    setError("");
+    try {
+      const updated = await updateLinkHealthSettings({
+        enabled: healthEnabled,
+        interval_hours: intervalHours,
+      });
+      setCenter(updated);
+      onChanged();
+    } catch (settingsError) {
+      setError(
+        settingsError instanceof Error ? settingsError.message : "保存巡检设置失败。",
+      );
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  const handleSitePause = async (hostname: string, paused: boolean) => {
+    setSettingsBusy(true);
+    setError("");
+    try {
+      const updated = await updateLinkHealthSitePause(hostname, paused);
+      setCenter(updated);
+      onChanged();
+    } catch (pauseError) {
+      setError(pauseError instanceof Error ? pauseError.message : "更新网站巡检设置失败。");
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
 
   const handleAction = async (memo: Memo, action: LinkHealthAction) => {
     let newUrl: string | undefined;
@@ -137,6 +198,9 @@ export default function LinkHealthDialog({
           <div>
             <span className="type-label">自动巡检</span>
             <h2 id="health-dialog-title">网页巡检中心</h2>
+            {center && <p>
+              当前显示 {center.items.length} 条，共 {filter ? center.counts[filter] : pendingHealthIssueCount(center.counts)} 条待处理
+            </p>}
           </div>
           <button className="icon-button" aria-label="关闭巡检中心" onClick={onClose}>×</button>
         </div>
@@ -147,6 +211,65 @@ export default function LinkHealthDialog({
           <div><strong>{counts?.changed ?? 0}</strong><span>信息变化</span></div>
           <div><strong>{counts?.temporary_failure ?? 0}</strong><span>暂时失败</span></div>
         </div>
+
+        <section className="health-settings" aria-label="巡检设置">
+          <div className="health-settings-heading">
+            <div>
+              <strong>巡检设置</strong>
+              <span>控制当前账号的自动巡检范围和频率</span>
+            </div>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void handleSettingsSave()}
+              disabled={settingsBusy}
+            >
+              {settingsBusy ? "保存中…" : "保存设置"}
+            </button>
+          </div>
+          <div className="health-settings-fields">
+            <label className="health-toggle">
+              <input
+                type="checkbox"
+                checked={healthEnabled}
+                onChange={(event) => setHealthEnabled(event.target.checked)}
+              />
+              <span>启用账号巡检</span>
+            </label>
+            <label>
+              检查频率
+              <select
+                value={intervalHours}
+                onChange={(event) => setIntervalHours(Number(event.target.value))}
+                disabled={settingsBusy}
+              >
+                <option value={24}>每天</option>
+                <option value={72}>每 3 天</option>
+                <option value={168}>每周</option>
+                <option value={720}>每 30 天</option>
+                <option value={2160}>每 90 天</option>
+                <option value={8760}>每年</option>
+              </select>
+            </label>
+          </div>
+          {!!center?.settings.paused_sites.length && (
+            <div className="health-paused-sites">
+              <span>已暂停网站</span>
+              <div>
+                {center.settings.paused_sites.map((hostname) => (
+                  <button
+                    type="button"
+                    key={hostname}
+                    onClick={() => void handleSitePause(hostname, false)}
+                    disabled={settingsBusy}
+                  >
+                    {hostname} · 恢复
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
 
         <div className="health-filters" aria-label="巡检结果筛选">
           {filters.map((item) => (
@@ -169,7 +292,9 @@ export default function LinkHealthDialog({
               <div className="health-result-heading">
                 <div>
                   <span className={`health-status ${memo.link_health_status}`}>
-                    {statusLabels[memo.link_health_status]}
+                    {memo.link_health_status === "healthy" && memo.resource_ai_review_required
+                      ? "已恢复，待人工确认"
+                      : statusLabels[memo.link_health_status]}
                   </span>
                   <h3>{memo.title}</h3>
                 </div>
@@ -196,6 +321,25 @@ export default function LinkHealthDialog({
                     onClick={() => void handleAction(memo, action)}
                   >{actingId === memo.id ? "处理中…" : actionLabel(action)}</button>
                 ))}
+                {hostnameFromUrl(memo.source_url) && (
+                  <button
+                    type="button"
+                    disabled={settingsBusy || actingId === memo.id}
+                    onClick={() => {
+                      const hostname = hostnameFromUrl(memo.source_url);
+                      if (hostname) {
+                        void handleSitePause(
+                          hostname,
+                          !center?.settings.paused_sites.includes(hostname),
+                        );
+                      }
+                    }}
+                  >
+                    {center?.settings.paused_sites.includes(
+                      hostnameFromUrl(memo.source_url) || "",
+                    ) ? "恢复此站点" : "暂停此站点"}
+                  </button>
+                )}
               </div>
             </article>
           ))}

@@ -42,12 +42,30 @@ def read_outbox_token(
     raise AssertionError(f"未找到 {purpose} 邮件")
 
 
+def read_outbox_verification_code(outbox_directory: Path) -> str:
+    """从开发收件箱读取六位注册验证码。"""
+
+    for email_file in sorted(outbox_directory.glob("*.eml")):
+        message = BytesParser(policy=policy.default).parsebytes(
+            email_file.read_bytes(),
+        )
+        body = message.get_body(preferencelist=("plain",)).get_content()
+        if "注册验证码" not in body:
+            continue
+        for line in body.splitlines():
+            candidate = line.strip()
+            if len(candidate) == 6 and candidate.isdigit():
+                return candidate
+    raise AssertionError("未找到注册验证码邮件")
+
+
 def create_auth_client(
     tmp_path: Path,
     *,
     auth_dev_mode: bool = False,
+    oauth_login_enabled: bool = False,
 ) -> TestClient:
-    """创建隔离的第三方登录测试客户端。"""
+    """创建隔离的认证测试客户端。"""
 
     database_path = tmp_path / "auth-test.db"
     settings = Settings(
@@ -63,8 +81,10 @@ def create_auth_client(
         wechat_app_secret="wechat-app-secret",
         apple_client_id="apple-client-id",
         apple_client_secret="apple-client-secret",
+        oauth_login_enabled=oauth_login_enabled,
         audio_directory=tmp_path / "audio",
         email_outbox_directory=tmp_path / "email-outbox",
+        email_provider="outbox",
         resource_enrichment_enabled=False,
         resource_health_monitor_enabled=False,
     )
@@ -72,13 +92,30 @@ def create_auth_client(
     return TestClient(app)
 
 
+def test_third_party_login_is_disabled_by_default(tmp_path: Path) -> None:
+    """未显式开启时，即使配置了凭据也不开放微信、Google、Apple 登录。"""
+
+    with create_auth_client(tmp_path) as client:
+        providers = client.get("/api/v1/auth/providers").json()
+        assert providers["email_login_enabled"] is True
+        assert {
+            item["provider"]: item["enabled"] for item in providers["providers"]
+        } == {"google": False, "wechat": False, "apple": False}
+        response = client.get(
+            "/api/v1/auth/google/authorize",
+            params={"redirect_to": "http://localhost:5173/"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 404
+
+
 def test_third_party_login_issues_bearer_session(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Google 授权码应转换为可撤销的 Bearer 会话。"""
+    """显式开启后，Google 授权码应转换为可撤销的 Bearer 会话。"""
 
-    with create_auth_client(tmp_path) as client:
+    with create_auth_client(tmp_path, oauth_login_enabled=True) as client:
         providers = client.get("/api/v1/auth/providers").json()
         assert providers["dev_login_available"] is False
         assert {
@@ -172,50 +209,41 @@ def test_email_register_login_and_reject_wrong_password(tmp_path: Path) -> None:
     """邮箱账号支持注册、登录和错误密码拒绝。"""
 
     with create_auth_client(tmp_path, auth_dev_mode=True) as client:
+        verification_request = client.post(
+            "/api/v1/auth/verification-code",
+            json={"email": "User@Example.com"},
+        )
+        assert verification_request.status_code == 202
+        verification_code = read_outbox_verification_code(
+            tmp_path / "email-outbox",
+        )
         register = client.post(
             "/api/v1/auth/register",
             json={
                 "email": "User@Example.com",
                 "password": "memoisle-password",
                 "confirm_password": "memoisle-password",
+                "verification_code": verification_code,
                 "display_name": "邮箱用户",
             },
         )
         assert register.status_code == 201
         assert register.json()["user"]["display_name"] == "邮箱用户"
-        assert register.json()["verification_email_sent"] is True
-        assert register.json()["user"]["email_verified"] is False
-        assert "access_token" not in register.json()
+        assert register.json()["user"]["email"] == "user@example.com"
+        assert register.json()["user"]["email_verified"] is True
 
-        unverified_login = client.post(
+        login = client.post(
             "/api/v1/auth/login",
             json={"email": "user@example.com", "password": "memoisle-password"},
         )
-        assert unverified_login.status_code == 403
-        verification_token = read_outbox_token(
-            tmp_path / "email-outbox",
-            "verify_email",
-        )
-        assert (
-            client.post(
-                "/api/v1/auth/verify-email",
-                json={"token": verification_token},
-            ).status_code
-            == 200
-        )
-        assert (
-            client.post(
-                "/api/v1/auth/verify-email",
-                json={"token": verification_token},
-            ).status_code
-            == 400
-        )
+        assert login.status_code == 200
         duplicate = client.post(
             "/api/v1/auth/register",
             json={
                 "email": "user@example.com",
                 "password": "another-password",
                 "confirm_password": "another-password",
+                "verification_code": "000000",
             },
         )
         assert duplicate.status_code == 409
@@ -226,15 +254,11 @@ def test_email_register_login_and_reject_wrong_password(tmp_path: Path) -> None:
                 "email": "another@example.com",
                 "password": "memoisle-password",
                 "confirm_password": "different-password",
+                "verification_code": "000000",
             },
         )
         assert mismatched_password.status_code == 422
 
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"email": "user@example.com", "password": "memoisle-password"},
-        )
-        assert login.status_code == 200
         assert login.json()["access_token"]
 
         wrong_password = client.post(
@@ -250,30 +274,85 @@ def test_email_register_login_and_reject_wrong_password(tmp_path: Path) -> None:
         assert unknown_email.status_code == 401
 
 
+def test_verification_code_resend_is_rate_limited(tmp_path: Path) -> None:
+    """同一邮箱在重发间隔内再次请求应返回 429。"""
+
+    with create_auth_client(tmp_path, auth_dev_mode=True) as client:
+        first = client.post(
+            "/api/v1/auth/verification-code",
+            json={"email": "resend@example.com"},
+        )
+        assert first.status_code == 202
+        second = client.post(
+            "/api/v1/auth/verification-code",
+            json={"email": "resend@example.com"},
+        )
+        assert second.status_code == 429
+        assert second.headers["Retry-After"]
+
+
+def test_unconsumed_verification_code_is_unique_per_email(tmp_path: Path) -> None:
+    """同一邮箱同时只能有一条未消费验证码。"""
+
+    from datetime import timedelta
+
+    from app.models import AuthVerificationCode, utc_now
+    from sqlalchemy.exc import IntegrityError
+
+    database = Database(f"sqlite+pysqlite:///{tmp_path / 'code.db'}")
+    database.create_schema()
+    now = utc_now()
+    with database.session_factory() as session:
+        session.add(
+            AuthVerificationCode(
+                id=str(uuid4()),
+                email="unique@example.com",
+                code_hash="a" * 64,
+                sent_at=now,
+                expires_at=now + timedelta(minutes=10),
+                attempt_count=0,
+            ),
+        )
+        session.commit()
+        session.add(
+            AuthVerificationCode(
+                id=str(uuid4()),
+                email="unique@example.com",
+                code_hash="b" * 64,
+                sent_at=now,
+                expires_at=now + timedelta(minutes=10),
+                attempt_count=0,
+            ),
+        )
+        try:
+            session.commit()
+            raise AssertionError("应拒绝第二条未消费验证码")
+        except IntegrityError:
+            session.rollback()
+
+
 def test_password_reset_updates_password_and_revokes_sessions(tmp_path: Path) -> None:
     """密码重置链接应更新密码、验证邮箱并撤销旧会话。"""
 
     with create_auth_client(tmp_path, auth_dev_mode=True) as client:
+        verification_request = client.post(
+            "/api/v1/auth/verification-code",
+            json={"email": "reset@example.com"},
+        )
+        assert verification_request.status_code == 202
+        verification_code = read_outbox_verification_code(
+            tmp_path / "email-outbox",
+        )
         register = client.post(
             "/api/v1/auth/register",
             json={
                 "email": "reset@example.com",
                 "password": "old-password",
                 "confirm_password": "old-password",
+                "verification_code": verification_code,
             },
         )
         assert register.status_code == 201
-        verification_token = read_outbox_token(
-            tmp_path / "email-outbox",
-            "verify_email",
-        )
-        assert (
-            client.post(
-                "/api/v1/auth/verify-email",
-                json={"token": verification_token},
-            ).status_code
-            == 200
-        )
         old_session = client.post(
             "/api/v1/auth/login",
             json={"email": "reset@example.com", "password": "old-password"},
@@ -342,26 +421,24 @@ def test_login_is_rate_limited_after_repeated_failures(tmp_path: Path) -> None:
     """连续失败登录应触发临时限制。"""
 
     with create_auth_client(tmp_path, auth_dev_mode=True) as client:
+        verification_request = client.post(
+            "/api/v1/auth/verification-code",
+            json={"email": "limit@example.com"},
+        )
+        assert verification_request.status_code == 202
+        verification_code = read_outbox_verification_code(
+            tmp_path / "email-outbox",
+        )
         register = client.post(
             "/api/v1/auth/register",
             json={
                 "email": "limit@example.com",
                 "password": "memoisle-password",
                 "confirm_password": "memoisle-password",
+                "verification_code": verification_code,
             },
         )
         assert register.status_code == 201
-        verification_token = read_outbox_token(
-            tmp_path / "email-outbox",
-            "verify_email",
-        )
-        assert (
-            client.post(
-                "/api/v1/auth/verify-email",
-                json={"token": verification_token},
-            ).status_code
-            == 200
-        )
 
         for _ in range(5):
             failed = client.post(

@@ -8,13 +8,18 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, update
 from sqlalchemy.orm import Session
 
 from app.category_service import classification_categories, classification_rules
 from app.config import Settings
 from app.database import Database
-from app.models import Memo
+from app.model_settings_service import resolve_model_settings
+from app.models import Memo, User
+from app.resource_classification_policy import (
+    apply_classification_health_gate,
+    health_allows_ai_classification,
+)
 from app.resource_processing import (
     CategoryDecision,
     ResourceFetchError,
@@ -61,6 +66,7 @@ def fallback_metadata(memo: Memo) -> ResourceMetadata:
         favicon_url=memo.resource_favicon_url,
         http_status=0,
         image_url=memo.resource_image_url,
+        text_excerpt=memo.resource_text_excerpt,
     )
 
 
@@ -86,14 +92,40 @@ def safe_resource_image_url(value: str | None) -> str | None:
 def apply_category(memo: Memo, decision: CategoryDecision) -> None:
     """将自动分类结果写入条目。"""
 
-    if memo.resource_category_source == "manual":
+    if (
+        memo.resource_category_source == "manual"
+        or memo.resource_ai_confirmation is not None
+    ):
         return
-    memo.resource_category = decision.category
+    if (
+        decision.assessment is not None
+        and decision.assessment["status"] == "uncertain"
+        and memo.resource_category is not None
+    ):
+        # 单页刷新同样保留原分类，只保存新的未确定依据，不覆盖已有结果。
+        memo.resource_ai_assessment = decision.assessment
+        memo.resource_ai_confirmation_pending = True
+        memo.resource_ai_auto_pending = False
+        memo.resource_category_status = ResourceProcessStatus.READY
+        return
+    codes = list(dict.fromkeys([decision.category, *decision.extra_categories]))
+    memo.resource_category = codes[0]
     memo.resource_category_label = decision.category_label
+    memo.resource_categories = codes
     memo.resource_category_status = ResourceProcessStatus.READY
     memo.resource_category_confidence = decision.confidence
     memo.resource_category_source = decision.source
     memo.resource_auto_tags = list(decision.auto_tags)
+    if decision.assessment is not None:
+        memo.resource_ai_assessment = decision.assessment
+        memo.resource_ai_confirmation_pending = (
+            decision.assessment["status"] == "uncertain"
+        )
+    if decision.source in {"jev", "llm"}:
+        # 只标记真实成功的模型分类，规则回退和失败仍可批量重试。
+        if memo.resource_ai_classified_at is None:
+            memo.resource_ai_classified_at = datetime.now(UTC)
+        memo.resource_ai_auto_pending = False
 
 
 def mark_processing(session: Session, memo: Memo) -> None:
@@ -101,7 +133,10 @@ def mark_processing(session: Session, memo: Memo) -> None:
 
     now = datetime.now(UTC)
     memo.resource_metadata_status = ResourceProcessStatus.PROCESSING
-    if memo.resource_category_source != "manual":
+    if (
+        memo.resource_category_source != "manual"
+        and memo.resource_ai_confirmation is None
+    ):
         memo.resource_category_status = ResourceProcessStatus.PROCESSING
     memo.updated_at = now
     memo.version += 1
@@ -115,6 +150,7 @@ def enrich_resource(
     settings: Settings,
     metadata_fetcher: MetadataFetcher | None = None,
     classifier: ResourceClassifier | None = None,
+    review_confirmed: bool = False,
 ) -> Memo:
     """抓取公开元数据、自动分类并更新基础巡检状态。"""
 
@@ -122,6 +158,8 @@ def enrich_resource(
     if memo.type != MemoType.RESOURCE or memo.source_url is None:
         raise MemoTypeError("只有网页资料可以执行元数据处理")
     mark_processing(session, memo)
+    processing_version = memo.version
+    processing_url = memo.source_url
 
     fetch_error: ResourceFetchError | UnsafeResourceUrlError | None = None
     try:
@@ -130,6 +168,7 @@ def enrich_resource(
                 memo.source_url,
                 timeout_seconds=settings.resource_fetch_timeout_seconds,
                 max_bytes=settings.resource_fetch_max_bytes,
+                include_text_excerpt=True,
             )
         else:
             metadata = metadata_fetcher(memo.source_url)
@@ -137,22 +176,24 @@ def enrich_resource(
         fetch_error = error
         metadata = fallback_metadata(memo)
 
-    if classifier is None:
-        decision = classify_resource(
-            metadata,
-            llm_base_url=settings.llm_base_url,
-            llm_api_key=settings.llm_api_key,
-            llm_model=settings.llm_model,
-            user_rules=classification_rules(session, user_id),
-            category_options=classification_categories(session, user_id),
-        )
-    else:
-        decision = classifier(metadata)
+    # 抓取期间发生确认或编辑时，直接返回最新版本，不再请求分类模型。
+    session.rollback()
+    memo = get_memo(session, user_id, memo_id)
+    if memo.version != processing_version:
+        return memo
 
     now = datetime.now(UTC)
+    user = session.get(User, user_id)
+    health_interval_hours = max(
+        1,
+        user.link_health_interval_hours
+        if user is not None
+        else settings.resource_health_interval_hours,
+    )
     if fetch_error is None:
         memo.resource_page_title = metadata.page_title
         memo.resource_description = metadata.description
+        memo.resource_text_excerpt = metadata.text_excerpt or ""
         memo.resource_site_name = metadata.site_name
         memo.resource_favicon_url = safe_favicon_url(metadata.favicon_url)
         memo.resource_image_url = safe_resource_image_url(metadata.image_url)
@@ -172,7 +213,7 @@ def enrich_resource(
         memo.link_last_checked_at = now
         memo.link_last_success_at = now
         memo.link_next_check_at = now + timedelta(
-            hours=settings.resource_health_interval_hours,
+            hours=health_interval_hours,
         )
         memo.link_consecutive_failures = 0
         memo.link_effective_url = metadata.final_url
@@ -198,11 +239,79 @@ def enrich_resource(
             memo.link_health_status = "auth_required"
         else:
             memo.link_health_status = "temporary_failure"
-        memo.link_next_check_at = now + timedelta(hours=24)
+        memo.link_next_check_at = now + timedelta(hours=health_interval_hours)
 
+    # 先确定巡检结果，再决定是否允许模型调用，异常网页只保留规则结果。
+    apply_classification_health_gate(memo, review_confirmed)
+    if (
+        memo.resource_ai_classified_at is not None
+        and memo.resource_category_source in {"jev", "llm"}
+        and memo.resource_category is not None
+    ):
+        decision = CategoryDecision(
+            category=memo.resource_category,
+            category_label=memo.resource_category_label or memo.resource_category,
+            confidence=memo.resource_category_confidence or 0.0,
+            source=memo.resource_category_source,
+            auto_tags=tuple(memo.resource_auto_tags),
+            extra_categories=tuple(
+                code for code in memo.resource_categories
+                if code != memo.resource_category
+            ),
+        )
+    elif classifier is None:
+        # 读取配置和模板时禁止自动刷写，网络等待期间不持有写锁。
+        with session.no_autoflush:
+            settings = resolve_model_settings(session, user_id, settings)
+            user_rules = classification_rules(session, user_id)
+            category_options = classification_categories(session, user_id)
+        allow_model = (
+            health_allows_ai_classification(memo)
+            and memo.resource_category_source != "manual"
+            and memo.resource_ai_classified_at is None
+            and memo.resource_ai_confirmation is None
+            # 书签批次先抓取元数据，再由独立自动队列分类，避免导入被模型阻塞。
+            and memo.resource_import_batch_id is None
+        )
+        decision = classify_resource(
+            metadata,
+            llm_base_url=settings.llm_base_url if allow_model else None,
+            llm_api_key=settings.llm_api_key if allow_model else None,
+            llm_model=settings.llm_model if allow_model else "",
+            user_rules=user_rules,
+            category_options=category_options,
+            jev_api_key=settings.jev_api_key if allow_model else None,
+            jev_base_url=settings.jev_base_url,
+            jev_model=settings.jev_model,
+            jev_min_confidence=settings.jev_min_confidence,
+        )
+        if allow_model and settings.jev_api_key:
+            # 单次自动尝试后不无限重试低置信度；手动批量重试仍可执行。
+            memo.resource_ai_auto_pending = False
+    else:
+        decision = classifier(metadata)
     apply_category(memo, decision)
     memo.updated_at = now
     memo.version += 1
+    values = {
+        attribute.key: attribute.value
+        for attribute in inspect(memo).attrs
+        if attribute.history.has_changes()
+    }
+    # 丢弃 ORM 待写内容，再按处理前版本提交；晚到的抓取和模型响应不能覆盖确认。
+    session.rollback()
+    session.execute(
+        update(Memo)
+        .where(
+            Memo.id == memo_id,
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != "trashed",
+            Memo.source_url == processing_url,
+            Memo.version == processing_version,
+        )
+        .values(**values)
+    )
     session.commit()
     session.refresh(memo)
     return memo
@@ -348,6 +457,7 @@ def reclassify_user_rule_resources(
 ) -> int:
     """规则发生变化后重新判断曾由用户规则分类的资料。"""
 
+    settings = resolve_model_settings(session, user_id, settings)
     user_rules = classification_rules(session, user_id)
     categories = classification_categories(session, user_id)
     resources = session.scalars(
@@ -362,13 +472,22 @@ def reclassify_user_rule_resources(
     for memo in resources:
         if memo.resource_category_source == "manual":
             continue
+        # 删除或修改用户规则时，同样遵守巡检确认和模型完成标记。
+        allow_model = (
+            health_allows_ai_classification(memo)
+            and memo.resource_ai_classified_at is None
+        )
         decision = classify_resource(
             fallback_metadata(memo),
-            llm_base_url=settings.llm_base_url,
-            llm_api_key=settings.llm_api_key,
-            llm_model=settings.llm_model,
+            llm_base_url=settings.llm_base_url if allow_model else None,
+            llm_api_key=settings.llm_api_key if allow_model else None,
+            llm_model=settings.llm_model if allow_model else "",
             user_rules=user_rules,
             category_options=categories,
+            jev_api_key=settings.jev_api_key if allow_model else None,
+            jev_base_url=settings.jev_base_url,
+            jev_model=settings.jev_model,
+            jev_min_confidence=settings.jev_min_confidence,
         )
         previous_values = (
             memo.resource_category,

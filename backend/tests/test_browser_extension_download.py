@@ -26,6 +26,10 @@ def test_browser_extension_download_contains_runtime_files(
         assert file_names == {
             "memoisle-extension/README.md",
             "memoisle-extension/background.js",
+            "memoisle-extension/content.js",
+            "memoisle-extension/icons/icon128.png",
+            "memoisle-extension/install.cmd",
+            "memoisle-extension/install.ps1",
             "memoisle-extension/manifest.json",
         }
         manifest = json.loads(
@@ -33,4 +37,8 @@ def test_browser_extension_download_contains_runtime_files(
         )
     assert manifest["manifest_version"] == 3
     assert "tabs" in manifest["permissions"]
+    assert "activeTab" in manifest["permissions"]
+    assert "scripting" in manifest["permissions"]
     assert "bookmarks" in manifest["permissions"]
+    assert "notifications" in manifest["permissions"]
+    assert manifest["icons"]["128"] == "icons/icon128.png"

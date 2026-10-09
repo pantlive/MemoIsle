@@ -72,10 +72,40 @@ class Database:
         }
         existing_columns = inspect(self.engine).get_columns("memo")
         columns = {column["name"] for column in existing_columns}
+        with self.engine.begin() as connection:
+            for name, kind in {
+                "resource_text_excerpt": "TEXT",
+                "resource_ai_assessment": "JSON",
+            }.items():
+                if name not in columns:
+                    # 可空字段不修改旧分类与完成标记，支持原库直接升级。
+                    connection.execute(text(
+                        f"ALTER TABLE memo ADD COLUMN {name} {kind}",
+                    ))
+        browser_bookmark_columns = {
+            column["name"]
+            for column in inspect(self.engine).get_columns("browser_bookmark_snapshot")
+        }
         user_migrations = {
             "email_verified": (
                 "ALTER TABLE user ADD COLUMN email_verified BOOLEAN "
                 "NOT NULL DEFAULT 0"
+            ),
+            "link_health_enabled": (
+                "ALTER TABLE user ADD COLUMN link_health_enabled BOOLEAN "
+                "NOT NULL DEFAULT 1"
+            ),
+            "link_health_interval_hours": (
+                "ALTER TABLE user ADD COLUMN link_health_interval_hours INTEGER "
+                "NOT NULL DEFAULT 720"
+            ),
+            "review_daily_limit": (
+                "ALTER TABLE user ADD COLUMN review_daily_limit INTEGER "
+                "NOT NULL DEFAULT 10"
+            ),
+            "review_intervals_days": (
+                "ALTER TABLE user ADD COLUMN review_intervals_days JSON "
+                "NOT NULL DEFAULT '[1,3,7,14,30,60]'"
             ),
         }
         migrations = {
@@ -118,6 +148,24 @@ class Database:
             ),
             "resource_category_source": (
                 "ALTER TABLE memo ADD COLUMN resource_category_source VARCHAR(30)"
+            ),
+            "resource_ai_classified_at": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_classified_at DATETIME"
+            ),
+            "resource_ai_review_required": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_review_required "
+                "BOOLEAN NOT NULL DEFAULT 0"
+            ),
+            "resource_ai_auto_pending": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_auto_pending "
+                "BOOLEAN NOT NULL DEFAULT 0"
+            ),
+            "resource_ai_confirmation_pending": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_confirmation_pending "
+                "BOOLEAN NOT NULL DEFAULT 0"
+            ),
+            "resource_ai_confirmation": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_confirmation JSON"
             ),
             "resource_kind": (
                 "ALTER TABLE memo ADD COLUMN resource_kind VARCHAR(30)"
@@ -201,6 +249,38 @@ class Database:
             "audio_duration_ms": (
                 "ALTER TABLE memo ADD COLUMN audio_duration_ms INTEGER"
             ),
+            "image_storage_name": (
+                "ALTER TABLE memo ADD COLUMN image_storage_name VARCHAR(100)"
+            ),
+            "image_mime_type": (
+                "ALTER TABLE memo ADD COLUMN image_mime_type VARCHAR(100)"
+            ),
+            "image_size_bytes": (
+                "ALTER TABLE memo ADD COLUMN image_size_bytes INTEGER"
+            ),
+            "image_width": "ALTER TABLE memo ADD COLUMN image_width INTEGER",
+            "image_height": "ALTER TABLE memo ADD COLUMN image_height INTEGER",
+            "image_hash": "ALTER TABLE memo ADD COLUMN image_hash VARCHAR(64)",
+            "image_thumbnail_storage_name": (
+                "ALTER TABLE memo ADD COLUMN image_thumbnail_storage_name VARCHAR(100)"
+            ),
+            "image_ocr_text": "ALTER TABLE memo ADD COLUMN image_ocr_text TEXT",
+            "image_ocr_status": (
+                "ALTER TABLE memo ADD COLUMN image_ocr_status VARCHAR(30) "
+                "NOT NULL DEFAULT 'none'"
+            ),
+            "image_ocr_error": (
+                "ALTER TABLE memo ADD COLUMN image_ocr_error VARCHAR(500)"
+            ),
+            "image_ocr_source": (
+                "ALTER TABLE memo ADD COLUMN image_ocr_source VARCHAR(30)"
+            ),
+            "image_auto_tags": (
+                "ALTER TABLE memo ADD COLUMN image_auto_tags JSON NOT NULL DEFAULT '[]'"
+            ),
+            "image_ocr_updated_at": (
+                "ALTER TABLE memo ADD COLUMN image_ocr_updated_at DATETIME"
+            ),
             "transcript": "ALTER TABLE memo ADD COLUMN transcript TEXT",
             "transcript_status": (
                 "ALTER TABLE memo ADD COLUMN transcript_status VARCHAR(30) "
@@ -212,14 +292,131 @@ class Database:
             "starred": (
                 "ALTER TABLE memo ADD COLUMN starred BOOLEAN NOT NULL DEFAULT 0"
             ),
+            "deleted_at": "ALTER TABLE memo ADD COLUMN deleted_at DATETIME",
+            "status_before_trash": (
+                "ALTER TABLE memo ADD COLUMN status_before_trash VARCHAR(20)"
+            ),
+            "resource_categories": (
+                "ALTER TABLE memo ADD COLUMN resource_categories JSON "
+                "NOT NULL DEFAULT '[]'"
+            ),
+            "ebook_provider": (
+                "ALTER TABLE memo ADD COLUMN ebook_provider VARCHAR(20)"
+            ),
+            "ebook_file_id": (
+                "ALTER TABLE memo ADD COLUMN ebook_file_id VARCHAR(120)"
+            ),
+            "ebook_path": "ALTER TABLE memo ADD COLUMN ebook_path VARCHAR(1000)",
+            "ebook_share_url": (
+                "ALTER TABLE memo ADD COLUMN ebook_share_url VARCHAR(2048)"
+            ),
+            "ebook_format": "ALTER TABLE memo ADD COLUMN ebook_format VARCHAR(20)",
+            "ebook_size_bytes": (
+                "ALTER TABLE memo ADD COLUMN ebook_size_bytes INTEGER"
+            ),
+            "ebook_snapshot": "ALTER TABLE memo ADD COLUMN ebook_snapshot JSON",
+        }
+        browser_bookmark_migrations = {
+            "revision": (
+                "ALTER TABLE browser_bookmark_snapshot ADD COLUMN revision "
+                "INTEGER NOT NULL DEFAULT 0"
+            ),
+        }
+        ebook_job_columns = {
+            column["name"]
+            for column in inspect(self.engine).get_columns("ebook_transfer_job")
+        }
+        ebook_job_migrations = {
+            "tags": (
+                "ALTER TABLE ebook_transfer_job ADD COLUMN tags JSON "
+                "NOT NULL DEFAULT '[]'"
+            ),
+            "collections": (
+                "ALTER TABLE ebook_transfer_job ADD COLUMN collections JSON "
+                "NOT NULL DEFAULT '[]'"
+            ),
+            "note": "ALTER TABLE ebook_transfer_job ADD COLUMN note TEXT",
+        }
+        model_setting_columns = {
+            column["name"] for column in inspect(self.engine).get_columns(
+                "model_provider_setting",
+            )
+        }
+        classification_job_columns = {
+            column["name"]
+            for column in inspect(self.engine).get_columns(
+                "resource_classification_job",
+            )
         }
         with self.engine.begin() as connection:
+            if "automatic" not in classification_job_columns:
+                connection.execute(text(
+                    "ALTER TABLE resource_classification_job "
+                    "ADD COLUMN automatic BOOLEAN NOT NULL DEFAULT 0",
+                ))
+            classification_retry_migrations = {
+                "error_code": "ADD COLUMN error_code VARCHAR(40)",
+                "retry_count": "ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+                "next_retry_at": "ADD COLUMN next_retry_at DATETIME",
+            }
+            for name, statement in classification_retry_migrations.items():
+                if name not in classification_job_columns:
+                    # 只补字段，保留原队列、游标和全部成功或未确定计数。
+                    connection.execute(text(
+                        f"ALTER TABLE resource_classification_job {statement}",
+                    ))
+            if "base_url" not in model_setting_columns:
+                # 已有账号凭据保持原值，只补充可空的请求地址。
+                connection.execute(text(
+                    "ALTER TABLE model_provider_setting "
+                    "ADD COLUMN base_url VARCHAR(2048)",
+                ))
             for column_name, statement in user_migrations.items():
                 if column_name not in user_columns:
                     # 迁移语句来自固定映射，不拼接外部输入。
                     connection.execute(text(statement))
             for column_name, statement in migrations.items():
                 if column_name not in columns:
+                    # 迁移语句来自固定映射，不拼接外部输入。
+                    connection.execute(text(statement))
+            if "resource_ai_classified_at" not in columns:
+                # 旧版成功的 Jev/LLM 分类同样视为已处理，升级后不重复收费。
+                connection.execute(text(
+                    "UPDATE memo SET resource_ai_classified_at = updated_at "
+                    "WHERE resource_category_source IN ('jev', 'llm')",
+                ))
+            # 每次启动补齐全部异常的确认标记，也修复中断升级留下的默认值。
+            connection.execute(text(
+                "UPDATE memo SET resource_ai_review_required = 1 "
+                "WHERE resource_ai_review_required = 0 AND link_health_status IN "
+                "('failed', 'redirected', 'changed', 'auth_required', "
+                "'temporary_failure', 'ignored')",
+            ))
+            if "resource_ai_confirmation_pending" not in columns:
+                # 只恢复旧批次已经尝试过的未确定条目，不补造模型候选或改写进度。
+                connection.execute(text(
+                    "UPDATE memo SET resource_ai_confirmation_pending = 1 "
+                    "WHERE type = 'resource' AND status != 'trashed' "
+                    "AND source_url IS NOT NULL AND ebook_provider IS NULL "
+                    "AND resource_ai_classified_at IS NULL "
+                    "AND (resource_category_source IS NULL OR "
+                    "resource_category_source NOT IN "
+                    "('manual','user_rule','jev','llm')) "
+                    "AND link_health_status = 'healthy' "
+                    "AND resource_ai_review_required = 0 "
+                    "AND (json_extract(resource_ai_assessment, '$.status') "
+                    "= 'uncertain' "
+                    "OR EXISTS (SELECT 1 FROM resource_classification_job AS job, "
+                    "json_each(job.memo_ids) AS item WHERE job.user_id = memo.user_id "
+                    "AND item.value = memo.id "
+                    "AND CAST(item.key AS INTEGER) < job.processed_count))",
+                ))
+            for column_name, statement in browser_bookmark_migrations.items():
+                if column_name not in browser_bookmark_columns:
+                    # 迁移语句来自固定映射，不拼接外部输入。
+                    connection.execute(text(statement))
+            for column_name, statement in ebook_job_migrations.items():
+                if column_name not in ebook_job_columns:
                     # 迁移语句来自固定映射，不拼接外部输入。
                     connection.execute(text(statement))
             from app.word_service import normalize_word_lemma
@@ -245,6 +442,19 @@ class Database:
                     "resource_category_status = 'pending' "
                     "WHERE type = 'resource' "
                     "AND resource_metadata_status = 'none'"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE memo SET deleted_at = updated_at "
+                    "WHERE status = 'trashed' AND deleted_at IS NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE memo SET status_before_trash = "
+                    "CASE WHEN type = 'idea' THEN 'inbox' ELSE 'active' END "
+                    "WHERE status = 'trashed' AND status_before_trash IS NULL"
                 )
             )
             # 旧网页资料补齐内容形态与阅读进度默认值。
@@ -301,6 +511,65 @@ class Database:
                     "AND resource_metadata_status = 'processing'"
                 )
             )
+            table_names = set(inspect(self.engine).get_table_names())
+            if "resource_category_template" in table_names:
+                template_columns = {
+                    column["name"]
+                    for column in inspect(self.engine).get_columns(
+                        "resource_category_template",
+                    )
+                }
+                if "parent_code" not in template_columns:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE resource_category_template "
+                            "ADD COLUMN parent_code VARCHAR(50)"
+                        )
+                    )
+            if "resource_categories" in columns:
+                connection.execute(
+                    text(
+                        "UPDATE memo SET resource_categories = "
+                        "'[\"' || resource_category || '\"]' "
+                        "WHERE type = 'resource' "
+                        "AND resource_category IS NOT NULL "
+                        "AND resource_category != '' "
+                        "AND (resource_categories IS NULL "
+                        "OR resource_categories = '[]' "
+                        "OR resource_categories = 'null')"
+                    )
+                )
+            if "auth_verification_code" in table_names:
+                unconsumed = connection.execute(
+                    text(
+                        "SELECT id, email, sent_at FROM auth_verification_code "
+                        "WHERE consumed_at IS NULL"
+                    ),
+                ).all()
+                latest_by_email: dict[str, tuple[str, Any]] = {}
+                for code_id, email, sent_at in unconsumed:
+                    current = latest_by_email.get(email)
+                    if current is None or sent_at > current[1]:
+                        latest_by_email[email] = (code_id, sent_at)
+                keep_ids = {code_id for code_id, _ in latest_by_email.values()}
+                for code_id, _email, _sent_at in unconsumed:
+                    if code_id not in keep_ids:
+                        connection.execute(
+                            text(
+                                "UPDATE auth_verification_code "
+                                "SET consumed_at = CURRENT_TIMESTAMP "
+                                "WHERE id = :id"
+                            ),
+                            {"id": code_id},
+                        )
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_auth_verification_code_email_unconsumed "
+                        "ON auth_verification_code (email) "
+                        "WHERE consumed_at IS NULL"
+                    ),
+                )
 
     def session(self) -> Iterator[Session]:
         """提供请求级数据库会话。"""

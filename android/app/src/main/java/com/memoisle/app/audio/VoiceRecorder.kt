@@ -17,6 +17,8 @@ class VoiceRecorder(private val context: Context) {
     private var recorder: MediaRecorder? = null
     private var outputPath: Path? = null
     private var startedAtMs: Long = 0
+    private var pausedAtMs: Long? = null
+    private var pausedTotalMs: Long = 0
 
     fun start(): Boolean {
         if (recorder != null) {
@@ -42,6 +44,8 @@ class VoiceRecorder(private val context: Context) {
             recorder = newRecorder
             outputPath = path
             startedAtMs = SystemClock.elapsedRealtime()
+            pausedAtMs = null
+            pausedTotalMs = 0
             true
         }.getOrElse {
             newRecorder.release()
@@ -53,22 +57,62 @@ class VoiceRecorder(private val context: Context) {
     fun stop(): VoiceRecording? {
         val activeRecorder = recorder ?: return null
         val activePath = outputPath ?: return null
-        val durationMs = (SystemClock.elapsedRealtime() - startedAtMs)
-            .coerceAtMost(Int.MAX_VALUE.toLong())
-            .toInt()
+        val durationMs = elapsedMs()
         return runCatching {
             activeRecorder.stop()
             activeRecorder.release()
-            recorder = null
-            outputPath = null
+            clearState()
             VoiceRecording(path = activePath.toString(), durationMs = durationMs)
         }.getOrElse {
             activeRecorder.release()
-            recorder = null
-            outputPath = null
+            clearState()
             Files.deleteIfExists(activePath)
             null
         }
+    }
+
+    fun pause(): Boolean {
+        val activeRecorder = recorder ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false
+        }
+        if (pausedAtMs != null) {
+            return true
+        }
+        return runCatching {
+            // 暂停计时从 MediaRecorder 成功暂停后开始，避免把失败调用算入时长。
+            activeRecorder.pause()
+            pausedAtMs = SystemClock.elapsedRealtime()
+            true
+        }.getOrDefault(false)
+    }
+
+    fun resume(): Boolean {
+        val activeRecorder = recorder ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false
+        }
+        val pausedAt = pausedAtMs ?: return false
+        return runCatching {
+            activeRecorder.resume()
+            pausedTotalMs += SystemClock.elapsedRealtime() - pausedAt
+            pausedAtMs = null
+            true
+        }.getOrDefault(false)
+    }
+
+    fun amplitudePercent(): Int {
+        val activeRecorder = recorder ?: return 0
+        // maxAmplitude 是当前采样窗口峰值，用于界面反馈而不是录音质量判断。
+        val amplitude = runCatching { activeRecorder.maxAmplitude }.getOrDefault(0)
+        return (amplitude.toLong() * 100L / 32_767L).toInt().coerceIn(0, 100)
+    }
+
+    fun elapsedMs(): Int {
+        // 公开有效录音时长，暂停期间不会累加。
+        return elapsedDurationMs()
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
     }
 
     fun cancel() {
@@ -78,11 +122,24 @@ class VoiceRecorder(private val context: Context) {
             runCatching { activeRecorder.stop() }
             activeRecorder.release()
         }
-        recorder = null
-        outputPath = null
+        clearState()
         if (activePath != null) {
             Files.deleteIfExists(activePath)
         }
+    }
+
+    private fun elapsedDurationMs(): Long {
+        val now = SystemClock.elapsedRealtime()
+        val activePausedMs = pausedAtMs?.let { now - it } ?: 0
+        return (now - startedAtMs - pausedTotalMs - activePausedMs).coerceAtLeast(0)
+    }
+
+    private fun clearState() {
+        recorder = null
+        outputPath = null
+        startedAtMs = 0
+        pausedAtMs = null
+        pausedTotalMs = 0
     }
 
     @Suppress("DEPRECATION")

@@ -5,11 +5,16 @@ export interface ClipboardWordDraft {
   example: string | null;
 }
 
-const HTTP_URL = /^(https?:\/\/|www\.)/i;
+const HTTP_URL = /^(https?:\/\/|www\.|file:)/i;
 const BARE_URL = /^[a-z0-9.-]+\.[a-z]{2,}([/:?#].*)?$/i;
+const FILE_PATH = /[\\/]|^[a-zA-Z]:\\/;
+const FILE_EXTENSION = /\.[a-z0-9]{1,8}$/i;
+const IDENTIFIER = /[_:]/;
+const LEMMA_SHAPE =
+  /^[A-Za-z][A-Za-z0-9'’.\-]*(?:[ \-][A-Za-z][A-Za-z0-9'’.\-]*){0,5}$/;
 const PHONETIC = /([\/\[])([^\/\[\]]{1,80})\1/;
 const MIXED_LEMMA_MEANING =
-  /^([A-Za-z][A-Za-z0-9'’.\-]*(?:[\s-][A-Za-z][A-Za-z0-9'’.\-]*){0,7})\s+([^\s].*)$/u;
+  /^([A-Za-z][A-Za-z0-9'’.\-]*(?:[\s-][A-Za-z][A-Za-z0-9'’.\-]*){0,5})\s+([^\s].*)$/u;
 const CJK = /[\u3400-\u9fff]/;
 
 export function parseClipboardWord(raw: string): ClipboardWordDraft | null {
@@ -74,11 +79,14 @@ function isPlausibleLemma(lemma: string): boolean {
   if (!lemma || lemma.length > 80) {
     return false;
   }
-  if (/[.!?。！？]$/.test(lemma) || isClipboardUrl(lemma)) {
+  if (CJK.test(lemma) || FILE_PATH.test(lemma) || IDENTIFIER.test(lemma)) {
     return false;
   }
-  if (!/[A-Za-z]/.test(lemma)) {
+  if (FILE_EXTENSION.test(lemma) || isClipboardUrl(lemma)) {
     return false;
   }
-  return lemma.split(/\s+/).filter(Boolean).length <= 8;
+  if (/[.!?。！？]$/.test(lemma) || !LEMMA_SHAPE.test(lemma)) {
+    return false;
+  }
+  return lemma.split(/\s+/).filter(Boolean).length <= 6;
 }

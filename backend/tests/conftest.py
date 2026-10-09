@@ -24,6 +24,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         auth_dev_mode=True,
         auth_token_secret="test-auth-token-secret",
         audio_directory=tmp_path / "audio",
+        image_directory=tmp_path / "images",
         resource_enrichment_enabled=False,
         resource_health_monitor_enabled=False,
         word_dictionary_enabled=False,

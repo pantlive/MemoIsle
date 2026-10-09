@@ -11,7 +11,11 @@ EXTENSION_DIRECTORY = PROJECT_ROOT / "extension"
 EXTENSION_RUNTIME_FILES = (
     "manifest.json",
     "background.js",
+    "content.js",
     "README.md",
+    "icons/icon128.png",
+    "install.cmd",
+    "install.ps1",
 )
 EXTENSION_ARCHIVE_DIRECTORY = "memoisle-extension"
 

@@ -23,7 +23,7 @@ object MemoSyncScheduler {
             PERIODIC_INTERVAL_MINUTES,
             TimeUnit.MINUTES,
         )
-            .setConstraints(networkConstraints())
+            .setConstraints(periodicConstraints())
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
                 RETRY_DELAY_SECONDS,
@@ -32,7 +32,8 @@ object MemoSyncScheduler {
             .build()
         workManager.enqueueUniquePeriodicWork(
             PERIODIC_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            // 更新约束时替换已有持久化任务，避免旧版本策略一直残留。
+            ExistingPeriodicWorkPolicy.UPDATE,
             periodicRequest,
         )
         enqueueNow(context)
@@ -40,7 +41,7 @@ object MemoSyncScheduler {
 
     fun enqueueNow(context: Context): Unit {
         val request = OneTimeWorkRequestBuilder<MemoSyncWorker>()
-            .setConstraints(networkConstraints())
+            .setConstraints(immediateConstraints())
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
                 RETRY_DELAY_SECONDS,
@@ -60,9 +61,20 @@ object MemoSyncScheduler {
         workManager.cancelUniqueWork(IMMEDIATE_WORK_NAME)
     }
 
-    private fun networkConstraints(): Constraints {
+    private fun periodicConstraints(): Constraints {
         return Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
+            // 后台周期同步避开低电量和存储不足场景，减少系统资源压力。
+            .setRequiresBatteryNotLow(true)
+            .setRequiresStorageNotLow(true)
+            .build()
+    }
+
+    private fun immediateConstraints(): Constraints {
+        return Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            // 用户刚完成编辑时优先同步，只在存储不足时主动等待。
+            .setRequiresStorageNotLow(true)
             .build()
     }
 }

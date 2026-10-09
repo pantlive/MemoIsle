@@ -44,7 +44,7 @@ Android Client ───┘                       │
 ### 3.2 Android
 
 - 使用本地数据库作为界面读取来源，可编辑内容先落本地再同步。
-- 通过后台任务上传录音和执行增量同步。
+- 通过后台任务上传录音和执行增量同步；Android 本地 SQLite 持久化 `updated_at + id` 游标，首次同步做远端快照校准，后续只拉取服务端变更。
 - 注册系统分享目标，接收 `text/plain` 及常见链接并执行最小资料保存。
 - 网页资料列表和详情保持只读，不调用资料更新 API；整理与编辑跳转 Web 完成。
 - 使用临时文件安全保存录音，条目落库后再进入上传队列。
@@ -52,9 +52,10 @@ Android Client ───┘                       │
 
 ### 3.3 账号认证
 
-- Web 与 Android 均通过服务端发起微信、Google 和 Apple ID OAuth 授权码登录。
-- Web 与 Android 支持邮箱密码注册和登录，凭据使用 PBKDF2-SHA256 加盐哈希保存。
-- 邮箱注册先创建待验证账号；一次性验证链接和密码重置令牌只保存 SHA-256 哈希。
+- Web 与 Android 当前只开放邮箱密码注册和登录，凭据使用 PBKDF2-SHA256 加盐哈希保存。
+- 微信、Google 和 Apple ID OAuth 授权码登录代码保留，但默认关闭；仅当 `MEMOISLE_OAUTH_LOGIN_ENABLED=true` 且对应凭据配置完整时才对外授权。
+- 邮箱注册先发送六位验证码，验证码只保存基于应用密钥的哈希；发送成功后再创建已验证账号。旧版验证链接和密码重置令牌仍只保存 SHA-256 哈希。
+- 认证邮件优先由后端通过 `agently-cli message +send` 发送并自动完成确认令牌流程，CLI 不可用时回退 SMTP。
 - 同一邮箱连续登录失败触发账号维度限流；密码重置成功后撤销既有 Bearer 会话。
 - 服务端保存 `user`、`auth_identity` 和 `auth_session`；第三方主体可绑定到同一账号，已验证邮箱可用于跨提供方归并。
 - OAuth `state` 使用服务端密钥 HMAC 签名并设置短时效；回调后的跳转地址必须来自 Web CORS 白名单或显式配置的 Android 深链。
@@ -70,7 +71,7 @@ Android Client ───┘                       │
 | id | UUID | 服务端主键 |
 | user_id | UUID | 所有者 |
 | client_id | UUID | 离线创建幂等键 |
-| type | enum | word/resource/idea |
+| type | enum | word/resource/idea/image |
 | title | text | 标题 |
 | body | text | 正文或备注 |
 | source_url | text nullable | 来源链接 |
@@ -81,6 +82,7 @@ Android Client ───┘                       │
 | created_at | timestamptz | 创建时间 |
 | updated_at | timestamptz | 更新时间 |
 | deleted_at | timestamptz nullable | 回收站时间 |
+| status_before_trash | text nullable | 进入回收站前的状态，用于恢复 |
 
 ### 4.2 类型扩展表
 
@@ -88,6 +90,10 @@ Android Client ───┘                       │
 - `resource_detail`：`memo_id`、`site_name`、`resource_type`、`auto_category`、`category_status`、`category_confidence`、`classifier_version`、`cover_object_key`、`reading_status`、`estimated_minutes`、`metadata_status`、`link_health_status`、`last_checked_at`、`last_success_at`、`next_check_at`、`consecutive_failures`、`effective_url`、`metadata_fingerprint`。
 - `idea_detail`：`memo_id`、`idea_stage`、`transcript`、`transcript_status`。
 - `audio_asset`：`id`、`memo_id`、`object_key`、`duration_ms`、`mime_type`、`size_bytes`、`upload_status`、`checksum`。
+- `image_asset`：`memo_id`、`object_key`、`thumbnail_object_key`、`mime_type`、`size_bytes`、`width`、`height`、`hash`；当前每条图片收藏一张，文件名由服务端条目 ID 生成。
+- 图片压缩在客户端完成：超过 20 MB、单边 12000 像素或 5000 万像素时，各端先按尺寸/像素上限缩放并重新编码（Web 优先 WebP，桌面端与 Android 用 JPEG/PNG），迭代降低质量/尺寸到 20 MB 以内，再按正常上传流程提交，并用提示告知用户压缩前后的大小与变化。服务端只保留上限校验，不做二次编码。
+- 图片 OCR 结果直接落在 memo 上：`image_ocr_text`、`image_ocr_status`（none/pending/processing/ready/failed/disabled）、`image_ocr_error`、`image_ocr_source`（local/llm）、`image_auto_tags`、`image_ocr_updated_at`，跨端同步与搜索共用这些字段。
+- OCR 采用可插拔渠道：`local` 用本地引擎（rapidocr-onnxruntime 优先、pytesseract 兜底，图片不出本机），`llm` 用 OpenAI 兼容视觉模型（图片转 data URL，按最大边 1600 预览压缩后发送），`auto` 本地优先、不可用时回退；默认 `none` 关闭。自动标签为“模型标签 + 本地关键词（英文词频、中文 4 字窗口）”合并去重。
 
 数组型释义在 MVP 可使用 JSONB，但需要为常用搜索文本维护扁平化索引字段。
 
@@ -133,13 +139,16 @@ Android Client ───┘                       │
 
 ### 4.6 `@网页` 浏览器扩展
 
-- 扩展使用 Manifest V3 的 `tabs` 权限，读取当前浏览器各窗口中已打开标签页的 URL、标题和可用图标，供 Web 的 `@网页` 菜单选择；`activeTab` 继续用于当前页快捷捕获。
+- 扩展使用 Manifest V3 的 `tabs` 权限，读取当前浏览器各窗口中已打开标签页的 URL、标题和可用图标，供 Web 的 `@网页` 菜单选择；`activeTab`/`scripting` 仅在用户触发当前页动作时用于读取选中文本。
 - 扩展在安装、浏览器启动以及标签页创建、URL/标题/图标更新、切换、关闭时提交完整打开网页快照；服务端将快照中缺失的标签页标记为关闭，超过 10 分钟未同步的过期快照不展示。
-- 扩展只同步 HTTP(S) 公网页面的基础信息，不读取浏览历史、Cookie、表单内容、页面正文或用户登录态；`chrome://`、`file://`、扩展页和本地/内网目标在客户端与服务端双重过滤。
+- 扩展只同步 HTTP(S) 公网页面的基础信息，不读取浏览历史、Cookie、表单内容、未选中的页面正文或用户登录态；用户明确触发动作时最多读取 10000 字选中文本。`chrome://`、`file://`、扩展页和本地/内网目标在客户端与服务端双重过滤。
 - 用户触发扩展动作时，当前页仍保存为短时一次性记录并打开 Web 快速捕获；在 Web 输入 `@` 时可选择当前浏览器其他已打开网页，切换标签页不得改变已生成附件。
 - Web 与扩展的外部消息连接只允许生产和本地开发的 MemoIsle 来源；消息校验来源、扩展标识、随机 nonce、过期时间和一次性消费状态。
 - 页面上下文只接受 HTTP(S) URL，并再次通过服务端 URL 校验；拒绝 `chrome://`、`file://`、扩展页和本地/内网目标。
-- 扩展只提供页面基础信息，公开元数据仍由服务端 SSRF 防护任务抓取，扩展不得上传页面正文。
+- 扩展默认只提供页面基础信息，公开元数据仍由服务端 SSRF 防护任务抓取；只有用户明确选择的文本才作为网页正文上传。
+- 扩展提供图片右键菜单：用户右键网页图片时，后台仅在用户点中的那张图片地址上读取二进制，按服务端限制（20 MB / 12000 px / 5000 万像素）判断是否需要压缩，再创建 `type=image` 条目并上传原图；`blob:` 临时地址和不支持的格式（如 SVG）会给出明确提示而不静默失败。
+- 为支持任意站点取图，清单新增 `<all_urls>` 主机权限；该权限只扩大后台 `fetch` 的可访问范围，不向网页注入内容脚本，内容脚本仍只匹配本地 MemoIsle 页面用于凭证桥接，也不读取历史、Cookie、表单或未选中的页面正文。
+- 扩展不写死 Web 与 API 端口：内容脚本在 MemoIsle 页面登记本页源，页面回答自己的 API 地址；后台只在来源通过信任校验（显式配置的 Web 源或本地开发端口 5173–5178）且登记的是发送者自身源时写入 `chrome.storage.local`，本地开发来源只接受同源 API 地址。地址优先级为显式配置 > 页面登记 > 内置默认，连接失败时把实际尝试的 API 地址通过 `memoisle_capture_api` 交给 Web 展示。
 - 扩展授权或通信失败不能清空用户已输入的备注；Web 回退到粘贴网址流程。
 - 身份认证使用可撤销、短期且仅具收藏权限的扩展令牌，不把 Web 会话 Cookie 或长期访问令牌写入页面 URL。
 - 后端按请求将 `manifest.json`、后台脚本和安装说明打包为 ZIP；下载包不包含测试、依赖、数据或密钥，Web 顶栏与未连接状态均指向该接口。
@@ -164,6 +173,7 @@ Android Client ───┘                       │
 | --- | --- |
 | `GET /v1/auth/providers` | 读取可用登录方式 |
 | `POST /v1/auth/register` | 使用邮箱和密码注册 |
+| `POST /v1/auth/verification-code` | 发送六位邮箱注册验证码 |
 | `POST /v1/auth/login` | 使用邮箱和密码登录 |
 | `POST /v1/auth/verify-email/request` | 重新发送邮箱验证链接 |
 | `POST /v1/auth/verify-email` | 验证邮箱所有权 |
@@ -173,6 +183,9 @@ Android Client ───┘                       │
 | `GET/POST /v1/auth/{provider}/callback` | 处理 OAuth 回调并回跳客户端 |
 | `GET /v1/auth/me` | 读取当前登录用户 |
 | `POST /v1/auth/logout` | 撤销当前 Bearer 会话 |
+| `GET /v1/exports/json` | 导出 JSON 数据副本 |
+| `GET /v1/exports/csv` | 导出 CSV 数据副本 |
+| `GET /v1/exports/markdown` | 导出 Markdown 数据副本 |
 | `POST /v1/memos` | 幂等创建条目 |
 | `GET /v1/memos` | 分页、搜索、筛选和增量拉取；网页资料默认由 Web 每页读取 10 条 |
 | `GET /v1/memos/counts` | 返回未删除条目的类型数量，用于导航和列表摘要 |
@@ -180,14 +193,23 @@ Android Client ───┘                       │
 | `PATCH /v1/memos/{id}` | 带版本号更新条目 |
 | `DELETE /v1/memos/{id}` | 移入回收站 |
 | `POST /v1/memos/{id}/restore` | 从回收站恢复 |
+| `DELETE /v1/memos/{id}/permanent` | 永久删除回收站条目 |
 | `POST /v1/memos/{id}/audio-upload` | 获取录音上传凭证 |
 | `POST /v1/memos/{id}/transcriptions` | 创建或重试转写任务 |
+| `POST /v1/memos/{id}/image` | 上传或替换图片原图（受限格式/大小，服务端生成缩略图） |
+| `GET /v1/memos/{id}/image` | 按所有者读取图片原图 |
+| `GET /v1/memos/{id}/image/thumbnail` | 按所有者读取 WebP 缩略图 |
+| `POST /v1/memos/{id}/image/ocr` | 手动重试图片文字识别与自动标签；未启用时返回 503 |
+| `POST /v1/speech/tts` | 使用可选 sanoTTS 生成 WAV 语音 |
+| `POST /v1/words/lookup` | 查词预览并返回可选择的词义、例句、音标和音频 |
+| `POST /v1/words/import` | 导入 MemoIsle JSON 或常见 CSV 单词，按词形去重并返回逐行结果 |
 | `POST /v1/words/{id}/merge` | 合并已有单词的新语境 |
 | `POST /v1/words/{id}/reviews` | 提交单词复习反馈 |
+| `GET/PATCH /v1/review-settings` | 读取或更新账号级每日队列上限与复习间隔 |
 | `GET /v1/review-queue` | 获取今日回顾混合队列 |
 | `POST /v1/review-queue/{id}/skip` | 跳过当前回顾条目 |
-| `GET /v1/sync/changes` | 按游标增量同步 |
-| `POST /v1/exports` | 创建数据导出任务 |
+| `GET /v1/sync/changes` | 按 `updated_at + id` 游标增量同步，包含回收站变更 |
+| `GET /v1/exports/json` | 下载当前用户的 JSON 数据副本；包含保留期内的回收站条目，不含令牌和录音二进制 |
 | `POST /v1/bookmark-imports/preview` | 校验结构化书签并返回去重预览 |
 | `POST /v1/bookmark-imports` | 创建并执行确认后的导入批次 |
 | `GET /v1/bookmark-imports/{id}` | 获取导入进度与失败摘要 |
@@ -232,23 +254,30 @@ Android Client ───┘                       │
 ## 7. 语音处理
 
 ```text
-本地录音完成
-  → 计算 checksum 并保存草稿
-  → 获取上传凭证
-  → 分片或断点上传
-  → 服务端校验文件
-  → 创建转写任务
-  → PyTorch 转写服务或合规云服务处理
-  → 保存转写结果
-  → 客户端通过增量同步获取状态
+Android 本地录音完成
+  → MediaCodec 解码 AAC/M4A 为 16 kHz 单声道 PCM
+  → sherpa-onnx SenseVoiceSmall INT8 设备端推理
+  → 转写结果填入可编辑草稿
+  → 原始录音独立保存并按原流程上传
+
+Web 浏览器录音完成
+  → 浏览器支持时用 SpeechRecognition 实时转写
+  → 转写结果填入可编辑草稿
+  → MediaRecorder 原始 Blob 按原流程上传
+
+单词/句子/正文播放
+  → 请求 `POST /speech/tts`
+  → 服务端 sanoTTS 生成并缓存 WAV
+  → Web/Android 播放
+  → 服务不可用时回退词典音频或系统/浏览器 TTS
 ```
 
 要求：
 
-- 录音与转写是两个独立状态，转写失败不能影响录音播放。
-- 推理代码最外层必须使用 `@torch.inference_mode()` 或 `with torch.no_grad():`。
-- 模型和 Tensor 的设备由运行时配置决定，禁止硬编码 `.cuda()`。
-- 若训练或微调转写模型，统一设置 `random`、NumPy、PyTorch 与 CUDA 随机种子，并使用 Weights & Biases 或 TensorBoard 记录指标。
+- 录音与转写是两个独立状态，转写失败不能影响录音保存和播放。
+- Android sherpa-onnx 只使用 CPU provider，应用层不硬编码具体硬件；Release 首次使用时按需下载固定版本模型，校验 SHA-256 后原子安装到 `noBackupFilesDir`，模型文件不提交到 Git。
+- Web SpeechRecognition 为可选浏览器能力，可能由浏览器语音服务处理，界面必须告知用户并保留手工输入。
+- sanoTTS 依赖与音色包按其 GPL-3.0-or-later 许可单独审核；服务端合成结果使用内容哈希缓存，避免重复推理。
 - 日志只记录任务标识、时长、模型版本、错误码和耗时，不记录音频或转写正文。
 
 ## 8. 搜索方案

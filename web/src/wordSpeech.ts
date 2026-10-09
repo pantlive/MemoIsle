@@ -25,8 +25,12 @@ export function speechLocaleAvailable(locale: SpeechLocale): boolean {
   return findSpeechVoice(locale) !== null;
 }
 
-export function speakLemma(lemma: string, locale: SpeechLocale): boolean {
-  const cleaned = lemma.trim();
+export function speakText(
+  text: string,
+  locale: SpeechLocale,
+  onDone?: () => void,
+): boolean {
+  const cleaned = text.trim();
   if (!cleaned || typeof window === "undefined" || !("speechSynthesis" in window)) {
     return false;
   }
@@ -38,6 +42,14 @@ export function speakLemma(lemma: string, locale: SpeechLocale): boolean {
   const utterance = new SpeechSynthesisUtterance(cleaned);
   utterance.lang = locale;
   utterance.voice = voice;
+  if (onDone) {
+    utterance.onend = onDone;
+    utterance.onerror = onDone;
+  }
   window.speechSynthesis.speak(utterance);
   return true;
+}
+
+export function speakLemma(lemma: string, locale: SpeechLocale): boolean {
+  return speakText(lemma, locale);
 }

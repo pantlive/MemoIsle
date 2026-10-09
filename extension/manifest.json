@@ -1,18 +1,55 @@
 {
   "manifest_version": 3,
   "name": "MemoIsle 网页收藏",
-  "description": "同步当前浏览器打开的网页和书签，并在 MemoIsle 中快速收藏与批量导入。",
-  "version": "0.2.0",
-  "permissions": ["activeTab", "tabs", "bookmarks", "contextMenus", "storage"],
+  "description": "同步当前浏览器打开的网页和书签，支持一键收藏网页、选中文本和任意页面图片，并在 MemoIsle 中快速收藏与批量导入。",
+  "version": "0.4.2",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "bookmarks",
+    "contextMenus",
+    "storage",
+    "notifications"
+  ],
+  "icons": {
+    "128": "icons/icon128.png"
+  },
   "host_permissions": [
+    "<all_urls>",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:5173/*",
+        "http://localhost:5174/*",
+        "http://localhost:5175/*",
+        "http://localhost:5176/*",
+        "http://localhost:5177/*",
+        "http://localhost:5178/*",
+        "http://127.0.0.1:5173/*",
+        "http://127.0.0.1:5174/*",
+        "http://127.0.0.1:5175/*",
+        "http://127.0.0.1:5176/*",
+        "http://127.0.0.1:5177/*",
+        "http://127.0.0.1:5178/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "收藏当前网页到 MemoIsle"
+    "default_title": "一键收藏当前网页到 MemoIsle",
+    "default_icon": {
+      "128": "icons/icon128.png"
+    }
   },
   "commands": {
     "capture-current-page": {

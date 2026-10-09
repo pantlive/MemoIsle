@@ -218,10 +218,19 @@ __marimo__/
 .streamlit/secrets.toml
 # MemoIsle 本地数据与前端/Android 构建产物
 /data/
+# 设置页凭据的本地加密密钥与原子写入临时文件。
+.memoisle-model.key
+..memoisle-model.key.*.tmp
 /web/node_modules/
 /web/dist/
 /android/.gradle/
 /android/local.properties
 /android/**/build/
+/android/app/src/main/assets/models/sensevoice/model.int8.onnx
+/android/app/src/main/assets/models/sensevoice/tokens.txt
+/android/app/src/debug/assets/models/sensevoice/model.int8.onnx
+/android/app/src/debug/assets/models/sensevoice/tokens.txt
+.npm-cache/
+.commandcode/
 *.iml
 .idea/

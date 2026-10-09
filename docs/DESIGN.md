@@ -6,6 +6,10 @@ MemoIsle is a calm, private place for useful fragments: words, resources, and id
 
 Design keywords: calm, trustworthy, focused, personal, tactile, clear.
 
+### Web Brand Mark
+
+Use the Stitch-designed rounded M / book-fold mark from `web/public/favicon.svg`. The browser tab, workspace sidebar, and sign-in screen share this exact SVG, with deep teal `#177A72` strokes on a pale mint `#E2F2EE` tile. The symbol uses vector paths instead of font glyphs to stay consistent at small sizes. Keep its proportions and colors unchanged across placements; ICO and Apple touch PNG assets are rendered from the same source. See [brand specifications and Stitch source](design/memoisle-brand-logo.md).
+
 ## 2. Color
 
 Light mode is the MVP default.

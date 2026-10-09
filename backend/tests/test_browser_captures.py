@@ -232,7 +232,12 @@ def test_browser_extension_syncs_bookmarks_for_direct_web_import(
         },
     )
     assert sync_response.status_code == 200
-    assert sync_response.json() == {"synced_count": 2, "truncated": False}
+    assert sync_response.json() == {
+        "synced_count": 2,
+        "truncated": False,
+        "revision": 1,
+        "total_count": 2,
+    }
 
     current = client.get("/api/v1/browser-bookmarks/current").json()
     assert current["extension_connected"] is True
@@ -269,7 +274,12 @@ def test_browser_extension_syncs_bookmarks_for_direct_web_import(
             ],
         },
     )
-    assert replacement_response.json() == {"synced_count": 1, "truncated": True}
+    assert replacement_response.json() == {
+        "synced_count": 1,
+        "truncated": True,
+        "revision": 2,
+        "total_count": 5_001,
+    }
     latest = client.get("/api/v1/browser-bookmarks/current").json()
     assert latest["items"][0]["client_item_id"] == "chrome:99"
     assert latest["truncated"] is True

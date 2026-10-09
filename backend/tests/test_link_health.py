@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,12 +12,14 @@ from app.link_health_service import (
     apply_link_health_action,
     check_resource_link,
     run_due_link_checks,
+    update_link_health_settings,
 )
-from app.models import Memo
+from app.models import LinkHealthSitePause, Memo, User
 from app.resource_processing import ResourceFetchError, ResourceMetadata
 from app.schemas import (
     LinkHealthAction,
     LinkHealthActionRequest,
+    LinkHealthSettingsUpdate,
     MemoCreate,
     MemoType,
 )
@@ -236,6 +239,145 @@ def test_link_health_center_and_ignore_action(client: TestClient) -> None:
     refreshed_center = client.get("/api/v1/resources/link-health").json()
     assert refreshed_center["items"] == []
     assert refreshed_center["counts"]["ignored"] == 1
+
+
+def test_link_health_settings_and_site_pause(client: TestClient) -> None:
+    """巡检中心支持保存账号配置，并规范化网站暂停设置。"""
+
+    default_settings = client.get("/api/v1/resources/link-health").json()["settings"]
+    assert default_settings == {
+        "enabled": True,
+        "interval_hours": 720,
+        "paused_sites": [],
+    }
+
+    updated = client.patch(
+        "/api/v1/resources/link-health/settings",
+        json={"enabled": False, "interval_hours": 24},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["settings"] == {
+        "enabled": False,
+        "interval_hours": 24,
+        "paused_sites": [],
+    }
+
+    paused = client.post(
+        "/api/v1/resources/link-health/site-pauses",
+        json={"hostname": "WWW.Example.com."},
+    )
+    assert paused.status_code == 200
+    assert paused.json()["settings"]["paused_sites"] == ["www.example.com"]
+
+    resumed = client.post(
+        "/api/v1/resources/link-health/site-pauses",
+        json={"hostname": "www.example.com", "paused": False},
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["settings"]["paused_sites"] == []
+
+
+def test_due_scheduler_skips_disabled_accounts_and_paused_sites(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """调度器会跳过关闭巡检的账号和已暂停的网站。"""
+
+    database = Database(f"sqlite+pysqlite:///{tmp_path / 'scheduler-settings.db'}")
+    database.create_schema()
+    settings = health_settings(tmp_path, database)
+    enabled_user_id = str(uuid4())
+    disabled_user_id = str(uuid4())
+    with database.session_factory() as session:
+        session.add_all(
+            [
+                User(
+                    id=enabled_user_id,
+                    display_name="启用巡检",
+                    link_health_interval_hours=1,
+                ),
+                User(
+                    id=disabled_user_id,
+                    display_name="关闭巡检",
+                    link_health_enabled=False,
+                ),
+                LinkHealthSitePause(
+                    id=str(uuid4()),
+                    user_id=enabled_user_id,
+                    hostname="paused.example",
+                ),
+            ]
+        )
+        for user_id, host in (
+            (enabled_user_id, "ok.example"),
+            (disabled_user_id, "disabled.example"),
+            (enabled_user_id, "paused.example"),
+        ):
+            create_memo(
+                session,
+                user_id,
+                MemoCreate(
+                    client_id=uuid4(),
+                    type=MemoType.RESOURCE,
+                    body="等待巡检",
+                    source_url=f"https://{host}/page",
+                    tags=[],
+                ),
+            )
+        session.commit()
+
+    fetched_urls: list[str] = []
+
+    def successful_fetcher(url: str, **_kwargs: object) -> ResourceMetadata:
+        fetched_urls.append(url)
+        return ResourceMetadata(
+            final_url=url,
+            page_title="正常网页",
+            description=None,
+            site_name="Example",
+            favicon_url=None,
+            http_status=200,
+        )
+
+    monkeypatch.setattr(
+        "app.link_health_service.fetch_resource_metadata",
+        successful_fetcher,
+    )
+    with database.session_factory() as session:
+        for memo in session.query(Memo).all():
+            memo.link_next_check_at = memo.created_at
+        session.commit()
+
+    assert run_due_link_checks(database.database_url, settings) == 1
+    assert fetched_urls == ["https://ok.example/page"]
+    with database.session_factory() as session:
+        memos = {
+            memo.source_url: memo
+            for memo in session.query(Memo).all()
+        }
+        assert memos["https://ok.example/page"].link_health_status == "healthy"
+        assert memos["https://disabled.example/page"].link_health_status == "unchecked"
+        assert memos["https://paused.example/page"].link_health_status == "unchecked"
+        checked = memos["https://ok.example/page"]
+        assert checked.link_last_checked_at is not None
+        assert checked.link_next_check_at is not None
+        assert checked.link_next_check_at - checked.link_last_checked_at <= timedelta(
+            hours=4
+        )
+
+        update_link_health_settings(
+            session,
+            enabled_user_id,
+            LinkHealthSettingsUpdate(interval_hours=24),
+            settings,
+        )
+        rescheduled = session.get(Memo, checked.id)
+        assert rescheduled is not None
+        assert rescheduled.link_last_checked_at is not None
+        assert rescheduled.link_next_check_at == (
+            rescheduled.link_last_checked_at + timedelta(hours=24)
+        )
+    database.dispose()
 
 
 def test_due_scheduler_limits_each_host_per_round(

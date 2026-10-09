@@ -1,8 +1,14 @@
 package com.memoisle.app.network
 
 import com.memoisle.app.data.Memo
+import com.memoisle.app.data.MemoDeletion
+import com.memoisle.app.data.MemoSyncCursor
 import com.memoisle.app.data.SyncState
+import com.memoisle.app.data.TYPE_IMAGE
+import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
+import com.memoisle.app.data.normalizeImageMimeType
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -16,6 +22,10 @@ class DuplicateLemmaException(
     val existing: Memo,
 ) : RuntimeException("已收藏相同词形")
 
+class DuplicateResourceException(
+    val existing: Memo,
+) : RuntimeException("已收藏相同网址")
+
 class ApiException(
     val statusCode: Int,
     responseBody: String,
@@ -23,10 +33,19 @@ class ApiException(
     val code: String?
     val current: Memo?
 
+    /** 服务端返回的可读错误说明，用于展示图片上传等具体失败原因。 */
+    val detailMessage: String?
+
     init {
-        val detail = runCatching { JSONObject(responseBody).optJSONObject("detail") }.getOrNull()
-        code = detail?.optString("code")?.takeIf { it.isNotBlank() }
-        current = runCatching { detail?.optJSONObject("current")?.toMemo() }.getOrNull()
+        val detail = runCatching { JSONObject(responseBody).opt("detail") }.getOrNull()
+        val detailObject = detail as? JSONObject
+        code = detailObject?.optString("code")?.takeIf { it.isNotBlank() }
+        current = runCatching { detailObject?.optJSONObject("current")?.toMemo() }.getOrNull()
+        detailMessage = when (detail) {
+            is String -> detail.takeIf { it.isNotBlank() }
+            is JSONObject -> detail.optString("message").takeIf { it.isNotBlank() }
+            else -> null
+        }
     }
 }
 
@@ -54,9 +73,36 @@ data class AuthSession(
     val user: AuthUser,
 )
 
+data class WordLookupSense(
+    val index: Int,
+    val partOfSpeech: String?,
+    val definition: String,
+    val example: String?,
+)
+
+data class WordLookupResponse(
+    val word: String,
+    val lemma: String,
+    val phonetic: String?,
+    val usAudioUrl: String?,
+    val ukAudioUrl: String?,
+    val senses: List<WordLookupSense>,
+)
+
+data class ReviewSettings(
+    val dailyLimit: Int,
+    val intervalsDays: List<Int>,
+)
+
+data class SyncChangesResponse(
+    val items: List<Memo>,
+    val cursor: MemoSyncCursor,
+    val deletedItems: List<MemoDeletion> = emptyList(),
+    val hasMore: Boolean? = null,
+)
+
 data class EmailRegisterResponse(
     val user: AuthUser,
-    val verificationEmailSent: Boolean,
 )
 
 class MemoApiClient(baseUrl: String) {
@@ -109,26 +155,66 @@ class MemoApiClient(baseUrl: String) {
         return emailSession(execute("POST", "auth/login", body))
     }
 
+    fun requestVerificationCode(email: String): Unit {
+        val body = JSONObject().apply {
+            put("email", email)
+        }
+        execute("POST", "auth/verification-code", body)
+    }
+
+    fun requestPasswordReset(email: String): Unit {
+        val body = JSONObject().apply {
+            put("email", email)
+        }
+        execute("POST", "auth/password-reset/request", body)
+    }
+
     fun registerWithEmail(
         email: String,
         password: String,
         confirmPassword: String,
+        verificationCode: String,
         displayName: String?,
     ): EmailRegisterResponse {
         val body = JSONObject().apply {
             put("email", email)
             put("password", password)
             put("confirm_password", confirmPassword)
+            put("verification_code", verificationCode)
             displayName?.takeIf { it.isNotBlank() }?.let { put("display_name", it) }
         }
         val response = execute("POST", "auth/register", body)
         return EmailRegisterResponse(
             user = response.getJSONObject("user").toAuthUser(),
-            verificationEmailSent = response.getBoolean("verification_email_sent"),
         )
     }
 
     fun logout(): Boolean = execute("POST", "auth/logout").getBoolean("revoked")
+
+    fun downloadUserData(output: OutputStream): Unit {
+        val connection = URL(normalizedBaseUrl + "exports/json")
+            .openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("Accept", "application/json")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            connection.inputStream.use { input -> input.copyTo(output) }
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     private fun emailSession(response: JSONObject): AuthSession {
         accessToken = response.getString("access_token")
@@ -139,18 +225,76 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun listMemos(status: String? = null): List<Memo> {
-        val query = if (status == null) {
-            "memos?limit=200"
-        } else {
-            "memos?limit=200&status=$status"
+        val pageSize = 200
+        val items = mutableListOf<Memo>()
+        var offset = 0
+        while (offset < 10_000) {
+            val query = buildString {
+                append("memos?limit=$pageSize&offset=$offset")
+                if (status != null) {
+                    append("&status=$status")
+                }
+            }
+            val response = execute("GET", query)
+            val page = response.getJSONArray("items")
+            for (index in 0 until page.length()) {
+                items.add(page.getJSONObject(index).toMemo())
+            }
+            if (page.length() < pageSize) {
+                break
+            }
+            offset += pageSize
         }
-        val response = execute("GET", query)
-        val items = response.getJSONArray("items")
-        return buildList {
-            for (index in 0 until items.length()) {
-                add(items.getJSONObject(index).toMemo())
+        return items
+    }
+
+    fun syncChanges(
+        cursor: MemoSyncCursor? = null,
+        limit: Int = 100,
+    ): SyncChangesResponse {
+        val query = buildString {
+            append("sync/changes?limit=$limit")
+            cursor?.let { savedCursor ->
+                append("&cursor=")
+                append(URLEncoder.encode(savedCursor.timestamp, Charsets.UTF_8.name()))
+                savedCursor.memoId?.let { memoId ->
+                    append("&cursor_id=")
+                    append(URLEncoder.encode(memoId, Charsets.UTF_8.name()))
+                }
             }
         }
+        val response = execute("GET", query)
+        val page = response.getJSONArray("items")
+        val items = buildList {
+            for (index in 0 until page.length()) {
+                add(page.getJSONObject(index).toMemo())
+            }
+        }
+        val responseCursorId = if (response.isNull("cursor_id")) {
+            null
+        } else {
+            response.optString("cursor_id").ifBlank { null }
+        }
+        return SyncChangesResponse(
+            items = items,
+            deletedItems = buildList {
+                val deleted = response.optJSONArray("deleted_items") ?: JSONArray()
+                for (index in 0 until deleted.length()) {
+                    val item = deleted.getJSONObject(index)
+                    add(MemoDeletion(item.getString("memo_id"), item.getString("client_id")))
+                }
+            },
+            hasMore = if (response.has("has_more")) response.getBoolean("has_more") else null,
+            cursor = MemoSyncCursor(
+                timestamp = response.getString("cursor"),
+                // 兼容尚未返回 cursor_id 的旧服务端；新服务端会返回权威值。
+                memoId = responseCursorId ?: items.lastOrNull()?.id,
+            ),
+        )
+    }
+
+    fun getMemo(remoteId: String): Memo {
+        return execute("GET", "memos/$remoteId").toMemo()
     }
 
     fun createMemo(memo: Memo, allowDuplicate: Boolean = false): Memo {
@@ -164,7 +308,7 @@ class MemoApiClient(baseUrl: String) {
             memo.wordPhonetic?.let { put("word_phonetic", it) }
             memo.wordMeaning?.let { put("word_meaning", it) }
             memo.wordExample?.let { put("word_example", it) }
-            if (allowDuplicate && memo.type == TYPE_WORD) {
+            if (allowDuplicate && memo.type in setOf(TYPE_WORD, TYPE_RESOURCE)) {
                 put("allow_duplicate", true)
             }
             put("tags", JSONArray(memo.tags))
@@ -174,6 +318,52 @@ class MemoApiClient(baseUrl: String) {
             put("starred", memo.starred)
         }
         return execute("POST", "memos", body).toMemo()
+    }
+
+    fun lookupWord(word: String): WordLookupResponse {
+        val response = execute(
+            "POST",
+            "words/lookup",
+            JSONObject().put("word", word),
+        )
+        val sensesArray = response.optJSONArray("senses") ?: JSONArray()
+        val senses = buildList {
+            for (index in 0 until sensesArray.length()) {
+                val item = sensesArray.getJSONObject(index)
+                add(
+                    WordLookupSense(
+                        index = item.getInt("index"),
+                        partOfSpeech = if (item.isNull("part_of_speech")) {
+                            null
+                        } else {
+                            item.getString("part_of_speech")
+                        },
+                        definition = item.getString("definition"),
+                        example = if (item.isNull("example")) {
+                            null
+                        } else {
+                            item.getString("example")
+                        },
+                    ),
+                )
+            }
+        }
+        return WordLookupResponse(
+            word = response.getString("word"),
+            lemma = response.getString("lemma"),
+            phonetic = if (response.isNull("phonetic")) null else response.getString("phonetic"),
+            usAudioUrl = if (response.isNull("us_audio_url")) {
+                null
+            } else {
+                response.getString("us_audio_url")
+            },
+            ukAudioUrl = if (response.isNull("uk_audio_url")) {
+                null
+            } else {
+                response.getString("uk_audio_url")
+            },
+            senses = senses,
+        )
     }
 
     fun mergeWord(memo: Memo, incoming: Memo): Memo {
@@ -209,6 +399,22 @@ class MemoApiClient(baseUrl: String) {
         return execute("PATCH", "memos/$remoteId", body).toMemo()
     }
 
+    fun restoreMemo(memo: Memo): Memo {
+        val remoteId = requireNotNull(memo.id) { "恢复前必须先完成同步" }
+        return execute(
+            "POST",
+            "memos/$remoteId/restore?expected_version=${memo.version}",
+        ).toMemo()
+    }
+
+    fun permanentlyDeleteMemo(memo: Memo) {
+        val remoteId = requireNotNull(memo.id) { "永久删除前必须先完成同步" }
+        execute(
+            "DELETE",
+            "memos/$remoteId/permanent?expected_version=${memo.version}",
+        )
+    }
+
     fun reviewWord(memo: Memo, feedback: String): Memo {
         val remoteId = requireNotNull(memo.id) { "复习前必须先完成单词同步" }
         val body = JSONObject().apply {
@@ -218,12 +424,61 @@ class MemoApiClient(baseUrl: String) {
         return execute("POST", "words/$remoteId/reviews", body).toMemo()
     }
 
+    fun getReviewSettings(): ReviewSettings {
+        return execute("GET", "review-settings").toReviewSettings()
+    }
+
+    fun updateReviewSettings(
+        dailyLimit: Int,
+        intervalsDays: List<Int>,
+    ): ReviewSettings {
+        val body = JSONObject().apply {
+            put("daily_limit", dailyLimit)
+            put("intervals_days", JSONArray(intervalsDays))
+        }
+        return execute("PATCH", "review-settings", body).toReviewSettings()
+    }
+
     fun skipReview(memo: Memo): Memo {
         val remoteId = requireNotNull(memo.id) { "跳过回顾前必须先完成同步" }
         val body = JSONObject().apply {
             put("expected_version", memo.version)
         }
         return execute("POST", "review-queue/$remoteId/skip", body).toMemo()
+    }
+
+    fun synthesizeSpeech(text: String, voice: String? = null): ByteArray {
+        val body = JSONObject().apply {
+            put("text", text)
+            voice?.takeIf { it.isNotBlank() }?.let { put("voice", it) }
+        }
+        val connection = URL(normalizedBaseUrl + "speech/tts")
+            .openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 60_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "audio/wav")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            connection.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.write(body.toString())
+            }
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            connection.inputStream.use { it.readBytes() }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     fun uploadAudio(memo: Memo, audioPath: Path, durationMs: Int): Memo {
@@ -297,6 +552,94 @@ class MemoApiClient(baseUrl: String) {
         }
     }
 
+    /**
+     * 创建图片收藏条目；图片字节随后通过 [uploadMemoImage] 以原始请求体上传。
+     */
+    fun createImageMemo(memo: Memo): Memo {
+        require(memo.type == TYPE_IMAGE) { "创建图片收藏时类型必须为 image" }
+        return createMemo(memo)
+    }
+
+    /**
+     * 上传原始图片字节（非 multipart），成功时返回带图片元数据和递增版本号的条目。
+     *
+     * 服务端错误：413 图片超过 20 MB、422 格式或版本非法、409 并发版本冲突。
+     */
+    fun uploadMemoImage(
+        memo: Memo,
+        bytes: ByteArray,
+        mimeType: String,
+        expectedVersion: Int,
+    ): Memo {
+        val remoteId = requireNotNull(memo.id) { "上传图片前必须先创建图片收藏" }
+        val normalizedMimeType = normalizeImageMimeType(mimeType)
+        require(normalizedMimeType != null) { "仅支持 PNG/JPEG/WebP/GIF 图片" }
+        require(bytes.isNotEmpty()) { "图片内容不能为空" }
+        val connection = URL(
+            normalizedBaseUrl + "memos/$remoteId/image?expected_version=$expectedVersion",
+        ).openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            connection.setRequestProperty("Content-Type", normalizedMimeType)
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.outputStream.use { output -> output.write(bytes) }
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+            val responseBody = stream?.bufferedReader(Charsets.UTF_8)
+                ?.use { it.readText() }
+                .orEmpty()
+            if (statusCode !in 200..299) {
+                throw ApiException(statusCode, responseBody)
+            }
+            JSONObject(responseBody).toMemo()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * 读取原图或缩略图字节；两个接口都需要 Bearer 鉴权，不能直接把 URL 交给图片库。
+     */
+    fun fetchMemoImage(memoId: String, thumbnail: Boolean): ByteArray {
+        val path = if (thumbnail) {
+            "memos/$memoId/image/thumbnail"
+        } else {
+            "memos/$memoId/image"
+        }
+        val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("Accept", "image/*")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            connection.inputStream.use { it.readBytes() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun execute(method: String, path: String, body: JSONObject? = null): JSONObject {
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
         return try {
@@ -341,6 +684,19 @@ private fun JSONObject.toAuthUser(): AuthUser {
     )
 }
 
+private fun JSONObject.toReviewSettings(): ReviewSettings {
+    val intervalsArray = getJSONArray("intervals_days")
+    val intervals = buildList {
+        for (index in 0 until intervalsArray.length()) {
+            add(intervalsArray.getInt(index))
+        }
+    }
+    return ReviewSettings(
+        dailyLimit = getInt("daily_limit"),
+        intervalsDays = intervals,
+    )
+}
+
 private fun JSONObject.toMemo(): Memo {
     val tagsArray = getJSONArray("tags")
     val tags = buildList {
@@ -358,6 +714,28 @@ private fun JSONObject.toMemo(): Memo {
     val collections = buildList {
         for (index in 0 until collectionsArray.length()) {
             add(collectionsArray.getString(index))
+        }
+    }
+    val resourceCategories = optJSONArray("resource_categories").let { values ->
+        if (values == null) {
+            emptyList()
+        } else {
+            buildList {
+                for (index in 0 until values.length()) {
+                    add(values.getString(index))
+                }
+            }
+        }
+    }
+    val imageAutoTags = optJSONArray("image_auto_tags").let { values ->
+        if (values == null) {
+            emptyList()
+        } else {
+            buildList {
+                for (index in 0 until values.length()) {
+                    add(values.getString(index))
+                }
+            }
         }
     }
     return Memo(
@@ -393,6 +771,7 @@ private fun JSONObject.toMemo(): Memo {
         } else {
             getString("resource_category_label")
         },
+        resourceCategories = resourceCategories,
         resourceKind = if (isNull("resource_kind")) null else getString("resource_kind"),
         resourceReadingStatus = if (isNull("resource_reading_status")) {
             null
@@ -445,6 +824,25 @@ private fun JSONObject.toMemo(): Memo {
         transcript = if (isNull("transcript")) null else getString("transcript"),
         transcriptStatus = getString("transcript_status"),
         localAudioPath = null,
+        imageMimeType = if (isNull("image_mime_type")) null else getString("image_mime_type"),
+        imageSizeBytes = if (isNull("image_size_bytes")) null else getInt("image_size_bytes"),
+        imageWidth = if (isNull("image_width")) null else getInt("image_width"),
+        imageHeight = if (isNull("image_height")) null else getInt("image_height"),
+        imageHash = if (isNull("image_hash")) null else getString("image_hash"),
+        imageOcrText = if (isNull("image_ocr_text")) null else getString("image_ocr_text"),
+        imageOcrStatus = if (isNull("image_ocr_status")) {
+            "none"
+        } else {
+            optString("image_ocr_status", "none").ifBlank { "none" }
+        },
+        imageOcrError = if (isNull("image_ocr_error")) null else getString("image_ocr_error"),
+        imageOcrSource = if (isNull("image_ocr_source")) null else getString("image_ocr_source"),
+        imageAutoTags = imageAutoTags,
+        imageOcrUpdatedAt = if (isNull("image_ocr_updated_at")) {
+            null
+        } else {
+            getString("image_ocr_updated_at")
+        },
         tags = tags,
         collections = collections,
         starred = optBoolean("starred", false),
@@ -453,5 +851,6 @@ private fun JSONObject.toMemo(): Memo {
         createdAt = getString("created_at"),
         updatedAt = getString("updated_at"),
         syncState = SyncState.SYNCED,
+        deletedAt = if (isNull("deleted_at")) null else optString("deleted_at").ifBlank { null },
     )
 }

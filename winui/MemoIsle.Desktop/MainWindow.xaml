@@ -1,0 +1,1002 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="MemoIsle.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:MemoIsle.Desktop.Models"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="MemoIsle">
+
+    <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator x:Name="AccelNewGeneral" Key="N" Modifiers="Control" Invoked="OnNewAccelerator" />
+            <KeyboardAccelerator x:Name="AccelNewIdea" Key="I" Modifiers="Control" Invoked="OnIdeaAccelerator" />
+            <KeyboardAccelerator x:Name="AccelNewWord" Key="W" Modifiers="Control" Invoked="OnWordAccelerator" />
+            <KeyboardAccelerator x:Name="AccelNewResource" Key="L" Modifiers="Control" Invoked="OnResourceAccelerator" />
+            <KeyboardAccelerator x:Name="AccelFocusSearch" Key="F" Modifiers="Control" Invoked="OnFocusSearchAccelerator" />
+            <KeyboardAccelerator x:Name="AccelRefresh" Key="R" Modifiers="Control" Invoked="OnRefreshAccelerator" />
+        </Grid.KeyboardAccelerators>
+
+        <!-- 登录 / 注册 -->
+        <StackPanel
+            x:Name="LoginPanel"
+            Width="380"
+            Spacing="10"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center">
+            <TextBlock Text="MemoIsle" FontSize="30" FontWeight="SemiBold" />
+            <TextBlock
+                Text="收藏灵感、单词与网页资料"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBox x:Name="EmailBox" Header="邮箱" KeyDown="OnLoginFieldKeyDown" />
+            <PasswordBox x:Name="PasswordBox" Header="密码" KeyDown="OnLoginFieldKeyDown" />
+            <PasswordBox x:Name="ConfirmBox" Header="确认密码" Visibility="Collapsed" />
+            <TextBox x:Name="DisplayNameBox" Header="昵称（可选）" Visibility="Collapsed" />
+            <Grid ColumnSpacing="8" Visibility="Collapsed" x:Name="CodeRow">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="CodeBox" Header="邮箱验证码" />
+                <Button
+                    x:Name="SendCodeButton"
+                    Grid.Column="1"
+                    Content="发送验证码"
+                    Click="OnSendCodeClick"
+                    VerticalAlignment="Bottom" />
+            </Grid>
+            <Button
+                x:Name="SubmitButton"
+                Content="登录"
+                Style="{StaticResource AccentButtonStyle}"
+                HorizontalAlignment="Stretch"
+                Click="OnSubmitClick" />
+            <Button
+                x:Name="DevLoginButton"
+                Content="开发者一键登录"
+                HorizontalAlignment="Stretch"
+                Visibility="Collapsed"
+                Click="OnDevLoginClick" />
+            <HyperlinkButton
+                x:Name="SwitchModeButton"
+                Content="没有账号？注册一个"
+                Click="OnSwitchModeClick" />
+            <StackPanel x:Name="AuthHelpRow" Orientation="Horizontal" Spacing="8">
+                <HyperlinkButton Content="忘记密码" Click="OnForgotPasswordClick" />
+                <HyperlinkButton
+                    x:Name="ResendVerificationButton"
+                    Content="重新发送验证邮件"
+                    Visibility="Collapsed"
+                    Click="OnResendVerificationClick" />
+            </StackPanel>
+            <TextBlock
+                x:Name="LoginMessage"
+                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- 资料库 -->
+        <Grid
+            x:Name="LibraryPanel"
+            Visibility="Collapsed"
+            AllowDrop="True"
+            DragOver="OnDragOver"
+            Drop="OnDrop">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Padding="20,12" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    Text="MemoIsle"
+                    FontSize="18"
+                    FontWeight="SemiBold"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <AutoSuggestBox
+                    x:Name="SearchBox"
+                    Grid.Column="1"
+                    MaxWidth="420"
+                    HorizontalAlignment="Left"
+                    PlaceholderText="搜索备忘、单词、链接（Ctrl+F）"
+                    TextChanged="OnSearchChanged" />
+                <StackPanel
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    Spacing="2"
+                    VerticalAlignment="Center">
+                    <Button
+                        Click="OnCreateClick"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Width="36"
+                        Height="36"
+                        Padding="0"
+                        ToolTipService.ToolTip="新建（Ctrl+N）">
+                        <FontIcon Glyph="&#xE710;" FontSize="16" />
+                    </Button>
+                    <Button
+                        Click="OnRefreshClick"
+                        Style="{StaticResource IconActionButtonStyle}"
+                        ToolTipService.ToolTip="刷新（Ctrl+R）">
+                        <FontIcon Glyph="&#xE72C;" FontSize="16" />
+                    </Button>
+                    <Button
+                        Click="OnLogoutClick"
+                        Style="{StaticResource IconActionButtonStyle}"
+                        ToolTipService.ToolTip="退出登录">
+                        <FontIcon Glyph="&#xE7E8;" FontSize="16" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Grid Width="196">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <ListView
+                        x:Name="NavList"
+                        SelectedIndex="0"
+                        SelectionMode="Single"
+                        SelectionChanged="OnNavSelectionChanged">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="12,8" />
+                            <Setter Property="Margin" Value="6,2" />
+                            <Setter Property="MinHeight" Value="40" />
+                            <Setter Property="CornerRadius" Value="8" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListViewItem Tag="all">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8FD;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="全部" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount0" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="idea">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE82F;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="灵感" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount1" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <StackPanel
+                                Grid.Column="3"
+                                Orientation="Horizontal"
+                                Spacing="4">
+                                <Button
+                                    Style="{StaticResource IconActionButtonStyle}"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="28"
+                                    Click="OnVoiceCaptureClick"
+                                    ToolTipService.ToolTip="语音灵感：快速录一段灵感">
+                                    <FontIcon Glyph="&#xE720;" FontSize="14" />
+                                </Button>
+                                <Button
+                                    Style="{StaticResource IconActionButtonStyle}"
+                                    Width="28"
+                                    Height="28"
+                                    MinWidth="28"
+                                    Click="OnMeetingCaptureClick"
+                                    ToolTipService.ToolTip="会议录音与总结">
+                                    <FontIcon Glyph="&#xE8BD;" FontSize="14" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="word">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8C1;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="单词" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount2" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="resource">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8B7;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="资料" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount3" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <Button
+                                Grid.Column="3"
+                                Style="{StaticResource IconActionButtonStyle}"
+                                Width="28"
+                                Height="28"
+                                MinWidth="28"
+                                Click="OnImportBookmarksClick"
+                                ToolTipService.ToolTip="导入浏览器书签">
+                                <FontIcon Glyph="&#xE896;" FontSize="14" />
+                            </Button>
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="image">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xEB9F;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="图片" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount4" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="review">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE7BE;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="复习" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount5" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="trash">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE74D;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="回收站" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount6" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                    </ListViewItem>
+                    <ListViewItem Tag="health">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE783;" FontSize="16" />
+                            <TextBlock Grid.Column="1" Text="巡检" VerticalAlignment="Center" />
+                            <TextBlock x:Name="NavCount7" Grid.Column="2" Text="0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </Grid>
+                    </ListViewItem>
+                </ListView>
+
+                    <StackPanel
+                        Grid.Row="1"
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        Padding="12,8">
+                        <Button
+                            Style="{StaticResource IconActionButtonStyle}"
+                            Click="OnCategorySettingsClick"
+                            ToolTipService.ToolTip="分类模板与规则（设置）">
+                            <FontIcon Glyph="&#xE713;" FontSize="16" />
+                        </Button>
+                        <TextBlock
+                            x:Name="SideUserLabel"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            MaxWidth="130"
+                            TextTrimming="CharacterEllipsis"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Column="1" Padding="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel x:Name="QuickCapturePanel" Spacing="8" Margin="0,0,0,10">
+                        <Border
+                            Padding="10,8"
+                            CornerRadius="{StaticResource MemoCardCornerRadius}"
+                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                            BorderThickness="1"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon
+                                    Glyph="&#xE945;"
+                                    FontSize="16"
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                <TextBox
+                                    x:Name="QuickCaptureBox"
+                                    Grid.Column="1"
+                                    PlaceholderText="记录一条灵感…（Ctrl+Enter 保存，Ctrl+I 灵感 / Ctrl+W 单词 / Ctrl+L 资料）"
+                                    BorderThickness="0"
+                                    Background="Transparent"
+                                    KeyDown="OnQuickCaptureKeyDown" />
+                                <Button
+                                    x:Name="QuickWordChip"
+                                    Grid.Column="2"
+                                    Content="单词"
+                                    Style="{StaticResource FilterChipStyle}"
+                                    Click="OnQuickWordClick"
+                                    ToolTipService.ToolTip="收藏单词" />
+                                <Button
+                                    x:Name="QuickResourceChip"
+                                    Grid.Column="3"
+                                    Content="资料"
+                                    Style="{StaticResource FilterChipStyle}"
+                                    Click="OnQuickResourceClick"
+                                    ToolTipService.ToolTip="收藏网页资料" />
+                                <Button
+                                    x:Name="QuickImageChip"
+                                    Grid.Column="4"
+                                    Content="收藏图片"
+                                    Style="{StaticResource FilterChipStyle}"
+                                    Click="OnQuickImageClick"
+                                    ToolTipService.ToolTip="从本地选择一张图片收藏（支持 PNG / JPG / WebP / GIF）" />
+                                <Button
+                                    Grid.Column="5"
+                                    Content="保存"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Click="OnQuickSaveClick" />
+                            </Grid>
+                        </Border>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                x:Name="ListHeader"
+                                FontSize="13"
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <StackPanel
+                                Grid.Column="2"
+                                Orientation="Horizontal"
+                                Spacing="6"
+                                VerticalAlignment="Center">
+                                <ComboBox
+                                    x:Name="CategoryFilter"
+                                    PlaceholderText="全部分类"
+                                    FontSize="12"
+                                    MinHeight="30"
+                                    Visibility="Collapsed"
+                                    SelectionChanged="OnCategoryFilterChanged" />
+                                <ComboBox
+                                    x:Name="SortBox"
+                                    FontSize="12"
+                                    MinHeight="30"
+                                    SelectionChanged="OnSortChanged">
+                                    <ComboBoxItem Content="最近更新" Tag="updated_desc" IsSelected="True" />
+                                    <ComboBoxItem Content="最早更新" Tag="updated_asc" />
+                                    <ComboBoxItem Content="最近创建" Tag="created_desc" />
+                                    <ComboBoxItem Content="最早创建" Tag="created_asc" />
+                                    <ComboBoxItem Content="标题 A→Z" Tag="title_asc" />
+                                    <ComboBoxItem Content="标题 Z→A" Tag="title_desc" />
+                                </ComboBox>
+                                <ToggleButton
+                                    x:Name="StarFilterToggle"
+                                    Content="☆ 仅星标"
+                                    FontSize="12"
+                                    MinHeight="30"
+                                    Click="OnStarFilterClick" />
+                                <ToggleButton
+                                    x:Name="CardViewToggle"
+                                    Content="▦ 卡片"
+                                    FontSize="12"
+                                    MinHeight="30"
+                                    Visibility="Collapsed"
+                                    Click="OnCardViewClick" />
+                                <ToggleButton
+                                    x:Name="MultiSelectToggle"
+                                    Content="☑ 批量"
+                                    FontSize="12"
+                                    MinHeight="30"
+                                    Click="OnMultiSelectClick" />
+                                <Button
+                                    x:Name="EmptyTrashButton"
+                                    Content="清空回收站"
+                                    FontSize="12"
+                                    MinHeight="30"
+                                    Visibility="Collapsed"
+                                    Click="OnEmptyTrashClick" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel
+                        x:Name="ReviewToolbar"
+                        Spacing="8"
+                        Margin="0,0,0,10"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="ReviewSummary"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <ToggleButton x:Name="ReviewFilterAll" Content="混合" IsChecked="True" Tag="all" Click="OnReviewFilterClick" />
+                            <ToggleButton x:Name="ReviewFilterWord" Content="单词" Tag="word" Click="OnReviewFilterClick" />
+                            <ToggleButton x:Name="ReviewFilterResource" Content="待读" Tag="resource" Click="OnReviewFilterClick" />
+                            <ToggleButton x:Name="ReviewFilterIdea" Content="待整理" Tag="idea" Click="OnReviewFilterClick" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel
+                        x:Name="LinkHealthToolbar"
+                        Spacing="8"
+                        Margin="0,0,0,10"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="LinkHealthSummary"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <ToggleButton x:Name="HealthFilterPending" Content="待处理" IsChecked="True" Tag="" Click="OnHealthFilterClick" />
+                            <ToggleButton x:Name="HealthFilterFailed" Content="确认失效" Tag="failed" Click="OnHealthFilterClick" />
+                            <ToggleButton x:Name="HealthFilterRedirected" Content="网址跳转" Tag="redirected" Click="OnHealthFilterClick" />
+                            <ToggleButton x:Name="HealthFilterChanged" Content="信息变化" Tag="changed" Click="OnHealthFilterClick" />
+                            <ToggleButton x:Name="HealthFilterTemporary" Content="暂时失败" Tag="temporary_failure" Click="OnHealthFilterClick" />
+                            <ToggleButton x:Name="HealthFilterAuth" Content="需要登录" Tag="auth_required" Click="OnHealthFilterClick" />
+                            <ToggleButton x:Name="HealthFilterIgnored" Content="已忽略" Tag="ignored" Click="OnHealthFilterClick" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1">
+                    <ListView
+                        x:Name="MemoList"
+                        SelectionMode="None"
+                        IsTabStop="True"
+                        SelectionChanged="OnListSelectionChanged"
+                        KeyDown="OnMemoListKeyDown"
+                        ItemContainerStyle="{StaticResource MemoListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:Memo">
+                                <Border
+                                    Padding="{StaticResource MemoCardPadding}"
+                                    Margin="0,0,0,12"
+                                    Height="116"
+                                    CornerRadius="{StaticResource MemoCardCornerRadius}"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <StackPanel Spacing="6">
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border
+                                                Width="34"
+                                                Height="34"
+                                                CornerRadius="8"
+                                                Background="{x:Bind TypeSoftBrush}">
+                                                <Grid>
+                                                    <FontIcon
+                                                        Glyph="{x:Bind TypeGlyph}"
+                                                        FontSize="16"
+                                                        Foreground="{x:Bind TypeAccentBrush}"
+                                                        Visibility="{x:Bind ShowTypeGlyph}" />
+                                                    <Image
+                                                        Source="{x:Bind MemoImageSource}"
+                                                        Stretch="UniformToFill"
+                                                        Visibility="{x:Bind HasMemoImageSource}" />
+                                                </Grid>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                                <HyperlinkButton
+                                                    Content="{x:Bind Title}"
+                                                    NavigateUri="{x:Bind SourceUri}"
+                                                    Visibility="{x:Bind IsResource}"
+                                                    Padding="0"
+                                                    Margin="0"
+                                                    FontWeight="SemiBold"
+                                                    ToolTipService.ToolTip="打开网页" />
+                                                <TextBlock
+                                                    Text="{x:Bind Title}"
+                                                    FontWeight="SemiBold"
+                                                    MaxLines="1"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    Visibility="{x:Bind IsNotResource}" />
+                                                <TextBlock
+                                                    Text="{x:Bind Summary}"
+                                                    MaxLines="1"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    FontSize="13"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                Text="{x:Bind MetaLine}"
+                                                FontSize="12"
+                                                MaxLines="1"
+                                                TextTrimming="CharacterEllipsis"
+                                                VerticalAlignment="Top"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        </Grid>
+                                        <StackPanel Orientation="Horizontal" Spacing="2" Padding="44,0,0,0">
+                                            <TextBlock
+                                                Text="{x:Bind TypeLabel}"
+                                                FontSize="12"
+                                                Foreground="{x:Bind TypeAccentBrush}"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,6,0" />
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnPronounceClick"
+                                                Visibility="{x:Bind IsWord}"
+                                                ToolTipService.ToolTip="朗读发音">
+                                                <FontIcon Glyph="&#xE767;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnPlayAudioClick"
+                                                Visibility="{x:Bind HasAudio}"
+                                                ToolTipService.ToolTip="播放录音">
+                                                <FontIcon Glyph="&#xE768;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnTranscriptClick"
+                                                Visibility="{x:Bind HasTranscript}"
+                                                ToolTipService.ToolTip="查看会议转写">
+                                                <FontIcon Glyph="&#xE90F;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnOpenResourceClick"
+                                                Visibility="{x:Bind HasUrl}"
+                                                ToolTipService.ToolTip="打开网页">
+                                                <FontIcon Glyph="&#xE8A7;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnStarClick"
+                                                ToolTipService.ToolTip="星标">
+                                                <TextBlock Text="{x:Bind StarLabel}" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                x:Name="EditButton"
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnEditClick"
+                                                ToolTipService.ToolTip="编辑">
+                                                <FontIcon Glyph="&#xE70F;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnMemoMenuClick"
+                                                ToolTipService.ToolTip="更多操作（分类 / 阅读状态）">
+                                                <FontIcon Glyph="&#xE712;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnDeleteClick"
+                                                ToolTipService.ToolTip="删除">
+                                                <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                                            </Button>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <ListView
+                        x:Name="MemoCardList"
+                        Visibility="Collapsed"
+                        SelectionMode="None"
+                        ItemContainerStyle="{StaticResource MemoCardItemStyle}">
+                        <ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="4" />
+                            </ItemsPanelTemplate>
+                        </ListView.ItemsPanel>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:Memo">
+                                <Border
+                                    Padding="12"
+                                    Height="224"
+                                    CornerRadius="{StaticResource MemoCardCornerRadius}"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Image
+                                            Source="{x:Bind ThumbnailSource}"
+                                            Height="86"
+                                            Stretch="UniformToFill"
+                                            Visibility="{x:Bind HasThumbnail}"
+                                            Margin="0,0,0,8" />
+                                        <StackPanel Grid.Row="1" Spacing="6">
+                                            <Border
+                                                Width="30"
+                                                Height="30"
+                                                CornerRadius="8"
+                                                Background="{x:Bind TypeSoftBrush}">
+                                                <FontIcon
+                                                    Glyph="{x:Bind TypeGlyph}"
+                                                    FontSize="14"
+                                                    Foreground="{x:Bind TypeAccentBrush}" />
+                                            </Border>
+                                            <HyperlinkButton
+                                                Content="{x:Bind Title}"
+                                                NavigateUri="{x:Bind SourceUri}"
+                                                Visibility="{x:Bind IsResource}"
+                                                Padding="0"
+                                                Margin="0"
+                                                FontWeight="SemiBold"
+                                                ToolTipService.ToolTip="打开网页" />
+                                            <TextBlock
+                                                Text="{x:Bind Title}"
+                                                FontWeight="SemiBold"
+                                                TextWrapping="Wrap"
+                                                MaxLines="2"
+                                                TextTrimming="CharacterEllipsis"
+                                                Visibility="{x:Bind IsNotResource}" />
+                                            <TextBlock
+                                                Text="{x:Bind Summary}"
+                                                TextWrapping="Wrap"
+                                                MaxLines="3"
+                                                TextTrimming="CharacterEllipsis"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock
+                                                Text="{x:Bind MetaLine}"
+                                                FontSize="11"
+                                                MaxLines="1"
+                                                TextTrimming="CharacterEllipsis"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        </StackPanel>
+                                        <StackPanel
+                                            Grid.Row="2"
+                                            Orientation="Horizontal"
+                                            Spacing="2"
+                                            Margin="0,8,0,0">
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnPlayAudioClick"
+                                                Visibility="{x:Bind HasAudio}"
+                                                ToolTipService.ToolTip="播放录音">
+                                                <FontIcon Glyph="&#xE768;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnTranscriptClick"
+                                                Visibility="{x:Bind HasTranscript}"
+                                                ToolTipService.ToolTip="查看会议转写">
+                                                <FontIcon Glyph="&#xE90F;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnOpenResourceClick"
+                                                Visibility="{x:Bind HasUrl}"
+                                                ToolTipService.ToolTip="打开网页">
+                                                <FontIcon Glyph="&#xE8A7;" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnStarClick"
+                                                ToolTipService.ToolTip="星标">
+                                                <TextBlock Text="{x:Bind StarLabel}" FontSize="14" />
+                                            </Button>
+                                            <Button
+                                                Style="{StaticResource IconActionButtonStyle}"
+                                                Click="OnEditClick"
+                                                ToolTipService.ToolTip="编辑">
+                                                <FontIcon Glyph="&#xE70F;" FontSize="14" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <ListView
+                        x:Name="ReviewList"
+                        Visibility="Collapsed"
+                        SelectionMode="None"
+                        ItemContainerStyle="{StaticResource MemoListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:Memo">
+                                <Border
+                                    Padding="{StaticResource MemoCardPadding}"
+                                    Margin="0,0,0,12"
+                                    CornerRadius="{StaticResource MemoCardCornerRadius}"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" />
+                                        <TextBlock
+                                            Text="{x:Bind ReviewDetail}"
+                                            TextWrapping="Wrap"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Button
+                                                Content="发音"
+                                                Click="OnPronounceClick"
+                                                Visibility="{x:Bind IsWord}" />
+                                            <Button
+                                                Content="忘了"
+                                                Click="OnReviewForgotClick"
+                                                Visibility="{x:Bind IsWord}" />
+                                            <Button
+                                                Content="模糊"
+                                                Click="OnReviewFuzzyClick"
+                                                Visibility="{x:Bind IsWord}" />
+                                            <Button
+                                                Content="记住了"
+                                                Click="OnReviewRememberedClick"
+                                                Visibility="{x:Bind IsWord}" />
+                                            <Button
+                                                Content="打开网页"
+                                                Click="OnOpenResourceClick"
+                                                Visibility="{x:Bind IsResource}" />
+                                            <Button
+                                                Content="整理完成"
+                                                Click="OnOrganizeIdeaClick"
+                                                Visibility="{x:Bind IsIdea}" />
+                                            <Button
+                                                Content="归档"
+                                                Click="OnArchiveIdeaClick"
+                                                Visibility="{x:Bind IsIdea}" />
+                                            <Button Content="{x:Bind StarLabel}" Click="OnReviewStarClick" />
+                                            <Button Content="跳过" Click="OnReviewSkipClick" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <ListView
+                        x:Name="TrashList"
+                        Visibility="Collapsed"
+                        SelectionMode="None"
+                        SelectionChanged="OnListSelectionChanged"
+                        KeyDown="OnMemoListKeyDown"
+                        ItemContainerStyle="{StaticResource MemoListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:Memo">
+                                <Border
+                                    Padding="{StaticResource MemoCardPadding}"
+                                    Margin="0,0,0,12"
+                                    CornerRadius="{StaticResource MemoCardCornerRadius}"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" />
+                                        <TextBlock
+                                            Text="{x:Bind Summary}"
+                                            TextWrapping="Wrap"
+                                            MaxLines="2"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock
+                                            Text="{x:Bind TrashRetentionLabel}"
+                                            FontSize="12"
+                                            Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Button Content="恢复" Click="OnRestoreClick" />
+                                            <Button Content="彻底删除" Click="OnPurgeClick" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel
+                        x:Name="EmptyState"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="8">
+                        <FontIcon
+                            Glyph="&#xE8A5;"
+                            FontSize="30"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock
+                            Text="还没有内容，按 Ctrl+N 或点击「＋ 新建」开始收藏"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+
+                    <ListView
+                        x:Name="HealthList"
+                        Visibility="Collapsed"
+                        SelectionMode="None"
+                        ItemContainerStyle="{StaticResource MemoListItemStyle}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:Memo">
+                                <Border
+                                    Padding="{StaticResource MemoCardPadding}"
+                                    Margin="0,0,0,12"
+                                    CornerRadius="{StaticResource MemoCardCornerRadius}"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    BorderThickness="1"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <StackPanel Spacing="4">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <HyperlinkButton
+                                                Content="{x:Bind Title}"
+                                                NavigateUri="{x:Bind SourceUri}"
+                                                Padding="0"
+                                                Margin="0"
+                                                FontWeight="SemiBold"
+                                                ToolTipService.ToolTip="打开网页" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                Text="{x:Bind HealthStatusLabel}"
+                                                FontSize="12"
+                                                Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                                        </Grid>
+                                        <TextBlock
+                                            Text="{x:Bind SourceUrl}"
+                                            FontSize="12"
+                                            TextTrimming="CharacterEllipsis"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        <TextBlock
+                                            Text="{x:Bind HealthDetail}"
+                                            FontSize="12"
+                                            TextWrapping="Wrap"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Button
+                                                Content="重新检查"
+                                                Click="OnHealthRetryClick"
+                                                Visibility="{x:Bind IsHealthRetryable}" />
+                                            <Button
+                                                Content="采用新网址"
+                                                Click="OnHealthAdoptClick"
+                                                Visibility="{x:Bind HasRedirectCandidate}" />
+                                            <Button
+                                                Content="更新资料信息"
+                                                Click="OnHealthUpdateMetadataClick"
+                                                Visibility="{x:Bind IsHealthChanged}" />
+                                            <Button Content="更新网址" Click="OnHealthUpdateUrlClick" />
+                                            <Button
+                                                Content="忽略"
+                                                Click="OnHealthIgnoreClick"
+                                                Visibility="{x:Bind IsHealthIgnorable}" />
+                                            <Button
+                                                Content="恢复巡检"
+                                                Click="OnHealthResumeClick"
+                                                Visibility="{x:Bind IsHealthIgnored}" />
+                                            <Button Content="删除" Click="OnHealthDeleteClick" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel
+                        x:Name="BulkActionBar"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,0,10"
+                        Padding="12,6"
+                        CornerRadius="10"
+                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                        BorderThickness="1"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="BulkCountLabel"
+                            VerticalAlignment="Center"
+                            FontSize="12" />
+                        <Button Content="★ 星标" FontSize="12" Click="OnBulkStarClick" />
+                        <Button Content="☆ 取消星标" FontSize="12" Click="OnBulkUnstarClick" />
+                        <Button Content="♻ 移入回收站" FontSize="12" Click="OnBulkTrashClick" />
+                        <Button Content="恢复选中" FontSize="12" Visibility="Collapsed" x:Name="BulkRestoreButton" Click="OnBulkRestoreClick" />
+                        <Button Content="取消选择" FontSize="12" Click="OnBulkClearClick" />
+                    </StackPanel>
+
+                    <StackPanel
+                        x:Name="PagerBar"
+                        Orientation="Horizontal"
+                        Spacing="10"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,0,6"
+                        Visibility="Collapsed">
+                        <Button x:Name="PrevPageButton" Content="上一页" Click="OnPrevPageClick" />
+                        <TextBlock
+                            x:Name="PageLabel"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button x:Name="NextPageButton" Content="下一页" Click="OnNextPageClick" />
+                    </StackPanel>
+
+                    <ProgressRing
+                        x:Name="BusyRing"
+                        IsActive="False"
+                        Width="40"
+                        Height="40"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </Grid>
+
+            <StackPanel
+                Grid.Row="2"
+                Orientation="Horizontal"
+                Spacing="12"
+                Padding="16,6">
+                <TextBlock
+                    x:Name="StatusText"
+                    FontSize="12"
+                    TextWrapping="Wrap"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <Button
+                    x:Name="UndoButton"
+                    Content="撤销刚才的保存"
+                    Visibility="Collapsed"
+                    Click="OnUndoClick" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

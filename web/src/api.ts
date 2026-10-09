@@ -10,11 +10,20 @@ import type {
   BrowserCaptureContext,
   BrowserOpenTab,
   BrowserOpenTabListResponse,
+  CloudAccount,
+  CloudAccountCreateRequest,
+  EbookJob,
+  EbookJobCreateRequest,
   EmailRegisterResponse,
   LinkHealthAction,
   LinkHealthCenter,
   LinkHealthStatus,
   Memo,
+  MemoBatchAction,
+  MemoBatchResult,
+  ImageDuplicateList,
+  ImageOrganizationState,
+  ImageOrganizationAction,
   MemoCounts,
   MemoCreateRequest,
   MemoListResponse,
@@ -22,21 +31,94 @@ import type {
   MemoStatus,
   MemoType,
   MemoUpdateRequest,
+  ModelConnectionResult,
+  ModelProvider,
+  ModelSetting,
+  ModelSettingUpdate,
   ResourceCategoryCreateRequest,
+  ResourceCategoryGenerateResponse,
   ResourceCategoryOption,
   ResourceCategoryRule,
   ResourceCategoryRuleCreateRequest,
   ResourceCategoryRuleUpdateRequest,
   ResourceCategoryUpdateRequest,
   ResourceCategory,
+  ResourceClassificationState,
+  ResourceClassificationReviewList,
+  ResourceClassificationReviewRequest,
+  ResourceClassificationReviewResult,
   ResourceKind,
   ResourceReadingStatus,
   ReviewFeedback,
   ReviewQueueResponse,
+  ReviewSettings,
+  WordImportResponse,
+  WordLookupResponse,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 const ACCESS_TOKEN_STORAGE_KEY = "memoisle_access_token";
+const EXTENSION_MESSAGE_SOURCE = "memoisle-web";
+const EXTENSION_RESPONSE_SOURCE = "memoisle-extension";
+const REQUEST_WEB_CONTEXT_MESSAGE = "request-web-context";
+const WEB_CONTEXT_MESSAGE = "web-context";
+
+// 扩展按这个地址回连 API。开发时 Vite 会把 /api 代理到真实后端，
+// 所以本地端口由启动器改到 5174/5175 也不会让扩展连错地址。
+function extensionApiBaseUrl(): string | null {
+  try {
+    const resolved = new URL(API_BASE_URL, window.location.origin);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") {
+      return null;
+    }
+    return resolved.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function notifyBrowserExtension(
+  accessToken: string | null,
+  requestId?: string,
+): void {
+  // 扩展内容脚本只在 MemoIsle 页面接收此消息，token 不进入 URL 或服务端日志。
+  window.postMessage(
+    {
+      source: EXTENSION_MESSAGE_SOURCE,
+      type: "set-access-token",
+      accessToken,
+      requestId,
+      webOrigin: window.location.origin,
+      apiBaseUrl: extensionApiBaseUrl(),
+    },
+    window.location.origin,
+  );
+}
+
+function notifyBrowserExtensionWebContext(): void {
+  window.postMessage(
+    {
+      source: EXTENSION_MESSAGE_SOURCE,
+      type: WEB_CONTEXT_MESSAGE,
+      webOrigin: window.location.origin,
+      apiBaseUrl: extensionApiBaseUrl(),
+    },
+    window.location.origin,
+  );
+}
+
+// 扩展内容脚本注入后会询问当前地址，网页先回答，未登录也能回答。
+window.addEventListener("message", (event) => {
+  if (
+    event.source !== window ||
+    event.origin !== window.location.origin ||
+    event.data?.source !== EXTENSION_RESPONSE_SOURCE ||
+    event.data.type !== REQUEST_WEB_CONTEXT_MESSAGE
+  ) {
+    return;
+  }
+  notifyBrowserExtensionWebContext();
+});
 
 export function getAccessToken(): string | null {
   return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
@@ -44,10 +126,47 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string): void {
   window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
+  notifyBrowserExtension(token);
 }
 
 export function clearAccessToken(): void {
   window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+  notifyBrowserExtension(null);
+}
+
+export async function syncBrowserExtension(): Promise<boolean> {
+  const accessToken = getAccessToken();
+  if (!accessToken) {
+    return false;
+  }
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (connected: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("message", handleMessage);
+      resolve(connected);
+    };
+    const handleMessage = (event: MessageEvent): void => {
+      if (
+        event.source !== window ||
+        event.origin !== window.location.origin ||
+        event.data?.source !== EXTENSION_RESPONSE_SOURCE ||
+        event.data.type !== "access-token-synced" ||
+        event.data.requestId !== requestId
+      ) {
+        return;
+      }
+      finish(event.data.ok === true);
+    };
+    const timeoutId = window.setTimeout(() => finish(false), 3_000);
+    window.addEventListener("message", handleMessage);
+    notifyBrowserExtension(accessToken, requestId);
+  });
 }
 
 export class ApiError extends Error {
@@ -118,6 +237,7 @@ export async function registerWithEmail(
   email: string,
   password: string,
   confirmPassword: string,
+  verificationCode: string,
   displayName?: string,
 ): Promise<EmailRegisterResponse> {
   return request<EmailRegisterResponse>("/auth/register", {
@@ -126,8 +246,16 @@ export async function registerWithEmail(
       email,
       password,
       confirm_password: confirmPassword,
+      verification_code: verificationCode,
       display_name: displayName?.trim() || undefined,
     }),
+  });
+}
+
+export async function requestVerificationCode(email: string): Promise<void> {
+  await request<{ status: string }>("/auth/verification-code", {
+    method: "POST",
+    body: JSON.stringify({ email }),
   });
 }
 
@@ -179,6 +307,86 @@ export async function loginWithEmail(
 
 export async function getAuthUser(): Promise<AuthUser> {
   return request<AuthUser>("/auth/me");
+}
+
+export type DataExportFormat = "json" | "csv" | "markdown";
+
+export async function downloadUserData(
+  format: DataExportFormat = "json",
+): Promise<Blob> {
+  const accessToken = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/exports/${format}`, {
+    headers: {
+      Accept: "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string;
+    } | null;
+    throw new ApiError(
+      payload?.detail ?? `数据导出失败（${response.status}）`,
+      response.status,
+    );
+  }
+  return response.blob();
+}
+
+export async function importLibraryData(file: File): Promise<WordImportResponse> {
+  const accessToken = getAccessToken();
+  const format = file.name.toLowerCase().endsWith(".csv") ? "csv" : "json";
+  const response = await fetch(`${API_BASE_URL}/imports?format=${format}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": format === "csv" ? "text/csv" : "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: file,
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string;
+    } | null;
+    throw new ApiError(
+      payload?.detail ?? `数据导入失败（${response.status}）`,
+      response.status,
+    );
+  }
+  return (await response.json()) as WordImportResponse;
+}
+
+export async function importWords(file: File): Promise<WordImportResponse> {
+  // 从 JSON 导出或 CSV 文件导入单词，原始文件内容只发送到当前 API。
+  const accessToken = getAccessToken();
+  const format = file.name.toLowerCase().endsWith(".csv") ? "csv" : "json";
+  const response = await fetch(`${API_BASE_URL}/words/import?format=${format}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": format === "csv" ? "text/csv" : "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: file,
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string;
+    } | null;
+    throw new ApiError(
+      payload?.detail ?? `单词导入失败（${response.status}）`,
+      response.status,
+    );
+  }
+  return (await response.json()) as WordImportResponse;
 }
 
 export async function logout(): Promise<void> {
@@ -264,8 +472,71 @@ export async function getMemoCounts(): Promise<MemoCounts> {
   return request<MemoCounts>("/memos/counts");
 }
 
+export async function applyMemoBatch(action: MemoBatchAction, items: Array<{ memo_id: string; expected_version: number }>): Promise<MemoBatchResult> {
+  return request<MemoBatchResult>("/memos/batch", { method: "POST", body: JSON.stringify({ action, items }) });
+}
+
+export async function getImageOrganization(): Promise<ImageOrganizationState> {
+  return request<ImageOrganizationState>("/images/organization");
+}
+export async function startImageOrganization(action: ImageOrganizationAction, selected?: Memo[]): Promise<ImageOrganizationState> {
+  return request<ImageOrganizationState>("/images/organization", { method: "POST", body: JSON.stringify({
+    action, scope: selected ? "selected" : "all", items: selected ? selected.map((item) => ({ memo_id: item.id, expected_version: item.version })) : [],
+  }) });
+}
+export async function resumeImageOrganization(): Promise<ImageOrganizationState> {
+  return request<ImageOrganizationState>("/images/organization/resume", { method: "POST" });
+}
+export async function getImageDuplicates(offset = 0): Promise<ImageDuplicateList> {
+  return request<ImageDuplicateList>(`/images/duplicates?offset=${offset}&limit=10`);
+}
+export async function getImageDuplicateGroup(hash: string, offset = 0): Promise<MemoListResponse> {
+  return request<MemoListResponse>(`/images/duplicates/${encodeURIComponent(hash)}?offset=${offset}&limit=50`);
+}
+
 export async function getResourceCategories(): Promise<ResourceCategoryOption[]> {
   return request<ResourceCategoryOption[]>("/resource-categories");
+}
+
+
+export async function getResourceClassificationState(): Promise<ResourceClassificationState> {
+  return request<ResourceClassificationState>("/resource-classification");
+}
+
+export async function startResourceClassification(): Promise<ResourceClassificationState> {
+  return request<ResourceClassificationState>("/resource-classification", { method: "POST" });
+}
+
+export async function resumeResourceClassification(): Promise<ResourceClassificationState> {
+  return request<ResourceClassificationState>("/resource-classification/resume", { method: "POST" });
+}
+
+export async function getResourceClassificationReviews(
+  filters: { query: string; reason: string; candidate_code: string; max_confidence: string; offset: number },
+): Promise<ResourceClassificationReviewList> {
+  const params = new URLSearchParams({ limit: "50", offset: String(filters.offset) });
+  for (const key of ["query", "reason", "candidate_code", "max_confidence"] as const) {
+    if (filters[key]) params.set(key, filters[key]);
+  }
+  return request<ResourceClassificationReviewList>(`/resource-classification/review?${params}`);
+}
+
+export async function confirmResourceClassificationReviews(
+  payload: ResourceClassificationReviewRequest,
+): Promise<ResourceClassificationReviewResult> {
+  return request<ResourceClassificationReviewResult>("/resource-classification/review/confirm", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function generateResourceCategories(
+  instructions: string,
+): Promise<ResourceCategoryGenerateResponse> {
+  return request<ResourceCategoryGenerateResponse>("/resource-categories/generate", {
+    method: "POST",
+    body: JSON.stringify({ instructions }),
+  });
 }
 
 export async function createResourceCategory(
@@ -284,6 +555,14 @@ export async function updateResourceCategory(
   return request<ResourceCategoryOption>(`/resource-categories/${categoryId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteResourceCategory(
+  categoryId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/resource-categories/${categoryId}`, {
+    method: "DELETE",
   });
 }
 
@@ -378,6 +657,8 @@ export async function exchangeBrowserCapture(
 }
 
 export async function listOpenBrowserTabs(): Promise<BrowserOpenTab[]> {
+  // 刷新页面后已有登录态不会触发重新登录，读取前主动恢复扩展同步。
+  await syncBrowserExtension();
   const response = await request<BrowserOpenTabListResponse>(
     "/browser-tabs/open",
   );
@@ -411,6 +692,26 @@ export async function applyLinkHealthAction(
   });
 }
 
+export async function updateLinkHealthSettings(payload: {
+  enabled?: boolean;
+  interval_hours?: number;
+}): Promise<LinkHealthCenter> {
+  return request<LinkHealthCenter>("/resources/link-health/settings", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateLinkHealthSitePause(
+  hostname: string,
+  paused: boolean,
+): Promise<LinkHealthCenter> {
+  return request<LinkHealthCenter>("/resources/link-health/site-pauses", {
+    method: "POST",
+    body: JSON.stringify({ hostname, paused }),
+  });
+}
+
 export async function createMemo(
   payload: Omit<MemoCreateRequest, "client_id">,
   clientId: string = crypto.randomUUID(),
@@ -425,6 +726,44 @@ export async function createMemo(
   });
 }
 
+export async function lookupWord(word: string): Promise<WordLookupResponse> {
+  return request<WordLookupResponse>("/words/lookup", {
+    method: "POST",
+    body: JSON.stringify({ word }),
+  });
+}
+
+export async function synthesizeSpeech(
+  text: string,
+  voice?: string,
+): Promise<Blob> {
+  const accessToken = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/speech/tts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "audio/wav",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify({ text, voice }),
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string };
+    } | null;
+    const detail = payload?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message ?? `语音合成失败（${response.status}）`;
+    throw new ApiError(message, response.status);
+  }
+  return response.blob();
+}
+
 export async function updateMemo(
   memoId: string,
   payload: MemoUpdateRequest,
@@ -433,6 +772,55 @@ export async function updateMemo(
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export async function getMemo(memoId: string): Promise<Memo> {
+  return request<Memo>(`/memos/${memoId}`);
+}
+
+export async function recognizeMemoImageOcr(memoId: string): Promise<Memo> {
+  // 服务端未启用 OCR 时返回 503，由调用方按状态码提示。
+  return request<Memo>(`/memos/${memoId}/image/ocr`, { method: "POST" });
+}
+
+export async function trashMemo(
+  memoId: string,
+  expectedVersion: number,
+): Promise<Memo> {
+  return request<Memo>(
+    `/memos/${memoId}?expected_version=${expectedVersion}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function restoreMemo(
+  memoId: string,
+  expectedVersion: number,
+): Promise<Memo> {
+  return request<Memo>(
+    `/memos/${memoId}/restore?expected_version=${expectedVersion}`,
+    { method: "POST" },
+  );
+}
+
+export async function restoreAllTrash(): Promise<{ restored_count: number }> {
+  return request<{ restored_count: number }>("/memos/trash/restore", {
+    method: "POST",
+  });
+}
+
+export async function emptyTrash(): Promise<{ deleted_count: number }> {
+  return request<{ deleted_count: number }>("/memos/trash", { method: "DELETE" });
+}
+
+export async function permanentlyDeleteMemo(
+  memoId: string,
+  expectedVersion: number,
+): Promise<void> {
+  await request<{ status: string }>(
+    `/memos/${memoId}/permanent?expected_version=${expectedVersion}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function mergeWord(
@@ -490,6 +878,20 @@ export async function getReviewQueue(options: {
   );
 }
 
+export async function getReviewSettings(): Promise<ReviewSettings> {
+  return request<ReviewSettings>("/review-settings");
+}
+
+export async function updateReviewSettings(payload: {
+  daily_limit?: number;
+  intervals_days?: number[];
+}): Promise<ReviewSettings> {
+  return request<ReviewSettings>("/review-settings", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function skipReview(
   memoId: string,
   expectedVersion: number,
@@ -544,4 +946,167 @@ export async function loadMemoAudioUrl(memoId: string): Promise<string> {
   }
   const audio = await response.blob();
   return URL.createObjectURL(audio);
+}
+
+export async function createImageMemo(
+  title?: string,
+  body = "",
+  clientId: string = crypto.randomUUID(),
+): Promise<Memo> {
+  // 图片收藏允许正文为空，标题留空时由服务端回退为“图片收藏”。
+  return createMemo(
+    {
+      type: "image",
+      title: title?.trim() || undefined,
+      body,
+      tags: [],
+    },
+    clientId,
+  );
+}
+
+export async function uploadMemoImage(
+  memoId: string,
+  file: File | Blob,
+  expectedVersion: number,
+): Promise<Memo> {
+  // 图片接口接收原始二进制，不使用 multipart。
+  const accessToken = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/memos/${memoId}/image?expected_version=${expectedVersion}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: file,
+    },
+  );
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string; code?: string; current?: Memo };
+    } | null;
+    const detail = payload?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message ?? `图片上传失败（${response.status}）`;
+    const code = typeof detail === "object" ? detail?.code : undefined;
+    const current = typeof detail === "object" ? detail?.current : undefined;
+    throw new ApiError(message, response.status, code, current);
+  }
+  return (await response.json()) as Memo;
+}
+
+export async function loadMemoImageUrl(
+  memoId: string,
+  variant: "thumbnail" | "original" = "thumbnail",
+): Promise<string> {
+  // 图片接口需要 Bearer 头，因此先读取 Blob 再生成对象 URL。
+  const accessToken = getAccessToken();
+  const suffix = variant === "original" ? "" : "/thumbnail";
+  const response = await fetch(`${API_BASE_URL}/memos/${memoId}/image${suffix}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    throw new ApiError(
+      variant === "original"
+        ? `原图读取失败（${response.status}）`
+        : `缩略图读取失败（${response.status}）`,
+      response.status,
+    );
+  }
+  const image = await response.blob();
+  return URL.createObjectURL(image);
+}
+
+export async function listModelSettings(): Promise<ModelSetting[]> {
+  return request<ModelSetting[]>("/model-settings");
+}
+
+export async function saveModelSetting(
+  provider: ModelProvider,
+  payload: ModelSettingUpdate,
+): Promise<ModelSetting> {
+  return request<ModelSetting>(`/model-settings/${provider}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function resetModelSetting(
+  provider: ModelProvider,
+): Promise<ModelSetting> {
+  return request<ModelSetting>(`/model-settings/${provider}`, {
+    method: "DELETE",
+  });
+}
+
+export async function testModelConnection(
+  provider: ModelProvider,
+  payload: ModelSettingUpdate,
+): Promise<ModelConnectionResult> {
+  return request<ModelConnectionResult>(`/model-settings/${provider}/test`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCloudAccounts(): Promise<CloudAccount[]> {
+  return request<CloudAccount[]>("/cloud-accounts");
+}
+
+export async function createCloudAccount(
+  payload: CloudAccountCreateRequest,
+): Promise<CloudAccount> {
+  return request<CloudAccount>("/cloud-accounts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteCloudAccount(
+  accountId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/cloud-accounts/${accountId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function verifyCloudAccount(
+  accountId: string,
+): Promise<CloudAccount> {
+  return request<CloudAccount>(`/cloud-accounts/${accountId}/verify`, {
+    method: "POST",
+  });
+}
+
+export async function listEbookJobs(): Promise<EbookJob[]> {
+  return request<EbookJob[]>("/ebooks/jobs");
+}
+
+export async function createEbookJob(
+  payload: EbookJobCreateRequest,
+): Promise<EbookJob> {
+  return request<EbookJob>("/ebooks/jobs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getEbookJob(jobId: string): Promise<EbookJob> {
+  return request<EbookJob>(`/ebooks/jobs/${jobId}`);
+}
+
+export async function retryEbookJob(jobId: string): Promise<EbookJob> {
+  return request<EbookJob>(`/ebooks/jobs/${jobId}/retry`, {
+    method: "POST",
+  });
 }

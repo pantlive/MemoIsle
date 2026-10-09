@@ -58,7 +58,6 @@ def get_current_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user.id
-    return settings.local_user_id
 
 
 def get_settings(request: Request) -> Settings:

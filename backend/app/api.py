@@ -6,7 +6,7 @@ import json
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 from urllib.parse import parse_qsl, urlencode
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
@@ -19,6 +19,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, RedirectResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth_service import (
@@ -30,12 +31,16 @@ from app.auth_service import (
     EmailTokenInvalidError,
     InvalidEmailCredentialsError,
     LoginRateLimitedError,
+    VerificationCodeInvalidError,
+    VerificationCodeRateLimitedError,
     build_authorization_url,
+    consume_verification_code,
     create_dev_session,
+    ensure_email_available,
     exchange_authorization_code,
-    issue_email_token,
     login_with_password,
     login_with_provider,
+    prepare_verification_code,
     provider_enabled,
     provider_label,
     register_with_password,
@@ -59,6 +64,7 @@ from app.bookmark_service import (
     undo_bookmark_batch,
 )
 from app.browser_capture_service import (
+    BrowserBookmarkRevisionConflictError,
     BrowserCaptureConsumedError,
     BrowserCaptureExpiredError,
     BrowserCaptureNotFoundError,
@@ -67,35 +73,91 @@ from app.browser_capture_service import (
     exchange_browser_capture,
     list_open_browser_tabs,
     read_browser_bookmark_snapshot,
+    sync_browser_bookmark_delta,
     sync_browser_bookmarks,
     sync_open_browser_tabs,
 )
 from app.browser_extension_service import build_browser_extension_archive
+from app.category_generation_service import (
+    CategoryGenerationNotConfiguredError,
+    CategoryGenerationUnavailableError,
+    generate_category_suggestions,
+)
 from app.category_service import (
     CategoryCodeNotFoundError,
     CategoryNameConflictError,
+    CategoryParentError,
     CategoryRuleNotFoundError,
     CategoryTemplateNotFoundError,
     CategoryVersionConflictError,
     category_code_exists,
     category_label,
+    category_template_to_option,
     create_category_rule,
     create_category_template,
     delete_category_rule,
+    delete_category_template,
     list_category_rules,
     list_resource_category_options,
     update_category_rule,
     update_category_template,
 )
-from app.config import Settings
+from app.cloud_account_service import (
+    CloudAccountExistsError,
+    CloudAccountNotFoundError,
+    CloudCredentialRejectedError,
+    create_cloud_account,
+    delete_cloud_account,
+    list_cloud_accounts,
+    verify_cloud_account,
+)
+from app.cloud_drive import UnsupportedProviderError
+from app.config import Settings, normalize_image_ocr_provider
 from app.dependencies import get_current_user_id, get_session, get_settings
-from app.email_service import EmailDeliveryError, send_auth_email
+from app.ebook_service import (
+    EbookJobNotFoundError,
+    EbookJobStateError,
+    EbookLinkError,
+    create_ebook_job,
+    get_ebook_job,
+    list_ebook_jobs,
+    process_ebook_job_in_background,
+    retry_ebook_job,
+)
+from app.email_service import (
+    EmailDeliveryError,
+    send_auth_email,
+    send_verification_code_email,
+)
+from app.export_service import serialize_memos_csv, serialize_memos_markdown
+from app.image_ocr_service import (
+    mark_image_ocr_pending,
+    process_image_ocr_in_background,
+    recognize_image_ocr,
+)
+from app.import_service import (
+    MAX_LIBRARY_IMPORT_BYTES,
+    LibraryImportFormatError,
+    LibraryImportTooLargeError,
+    import_library_memos,
+    parse_library_import,
+)
 from app.link_health_service import (
     apply_link_health_action,
     check_resource_link,
+    get_link_health_settings,
     list_link_health_center,
+    update_link_health_settings,
+    update_link_health_site_pause,
 )
-from app.models import ResourceCategoryRule, User
+from app.meeting_service import (
+    MeetingSummaryNotConfiguredError,
+    MeetingSummaryUnavailableError,
+    summarize_meeting,
+)
+from app.memo_deletion_service import sync_change_page
+from app.model_settings_service import resolve_model_settings
+from app.models import Memo, MemoDeletion, ResourceCategoryRule, User
 from app.resource_processing import UnsafeResourceUrlError
 from app.resource_service import (
     apply_user_category_rules_in_background,
@@ -114,6 +176,7 @@ from app.schemas import (
     BookmarkImportBatchRead,
     BookmarkImportPreview,
     BookmarkImportRequest,
+    BrowserBookmarkDeltaSyncRequest,
     BrowserBookmarkSnapshotRead,
     BrowserBookmarkSyncRequest,
     BrowserBookmarkSyncResponse,
@@ -125,6 +188,10 @@ from app.schemas import (
     BrowserOpenTabRead,
     BrowserTabSyncRequest,
     BrowserTabSyncResponse,
+    CloudAccountCreate,
+    CloudAccountRead,
+    EbookJobCreate,
+    EbookJobRead,
     EmailLoginRequest,
     EmailRegisterRequest,
     EmailRegisterResponse,
@@ -132,7 +199,11 @@ from app.schemas import (
     EmailTokenRequest,
     LinkHealthActionRequest,
     LinkHealthListResponse,
+    LinkHealthSettingsUpdate,
+    LinkHealthSitePauseRequest,
     LinkHealthStatus,
+    MeetingSummaryRequest,
+    MeetingSummaryResponse,
     MemoCountsResponse,
     MemoCreate,
     MemoListResponse,
@@ -143,6 +214,8 @@ from app.schemas import (
     MemoUpdate,
     PasswordResetConfirmRequest,
     ResourceCategoryCreate,
+    ResourceCategoryGenerateRequest,
+    ResourceCategoryGenerateResponse,
     ResourceCategoryRead,
     ResourceCategoryRuleCreate,
     ResourceCategoryRuleRead,
@@ -151,34 +224,74 @@ from app.schemas import (
     ResourceKind,
     ResourceReadingStatus,
     ReviewQueueResponse,
+    ReviewSettingsResponse,
+    ReviewSettingsUpdate,
     ReviewSkipRequest,
+    SpeechTtsRequest,
     SyncResponse,
+    VerificationCodeRequest,
+    WordDictionarySenseRead,
+    WordImportErrorRead,
+    WordImportResponse,
+    WordLookupRequest,
+    WordLookupResponse,
     WordMergeRequest,
     WordReviewRequest,
 )
 from app.service import (
+    MAX_IMAGE_BYTES,
     AudioValidationError,
+    ImageValidationError,
     MemoNotFoundError,
+    MemoNotTrashedError,
     MemoTypeError,
     MemoVersionConflictError,
+    ResourceDuplicateError,
     WordDuplicateError,
     attach_audio,
+    attach_image,
     count_memos,
     count_memos_by_type,
     create_memo,
+    empty_trash,
     get_audio_path,
+    get_image_path,
     get_memo,
+    get_review_settings,
+    is_trash_expired,
     list_memos,
+    list_memos_for_export,
     list_review_queue,
     merge_word,
+    move_memo_to_trash,
+    permanently_delete_memo,
+    purge_expired_trash,
+    restore_all_trash,
+    restore_memo,
     review_word,
     skip_review_item,
     update_memo,
+    update_review_settings,
+)
+from app.speech_service import (
+    SpeechServiceUnavailableError,
+    SpeechTextTooLongError,
+    synthesize_speech,
+)
+from app.word_import_service import (
+    MAX_WORD_IMPORT_BYTES,
+    WordImportFormatError,
+    WordImportTooLargeError,
+    build_word_import_payload,
+    is_word_record,
+    parse_word_import,
 )
 from app.word_service import (
     WordDictionaryUnavailableError,
     enrich_word,
     enrich_word_in_background,
+    lookup_word_preview,
+    normalize_word_lemma,
 )
 
 router = APIRouter()
@@ -305,7 +418,7 @@ def health() -> dict[str, str]:
 
 @router.get("/auth/providers", response_model=AuthProvidersResponse, tags=["auth"])
 def read_auth_providers(settings: SettingsDependency) -> AuthProvidersResponse:
-    """返回当前环境可用的第三方登录方式。"""
+    """返回当前环境可用的登录方式。第三方登录默认关闭。"""
 
     providers = [
         AuthProviderInfo(
@@ -323,6 +436,39 @@ def read_auth_providers(settings: SettingsDependency) -> AuthProvidersResponse:
 
 
 @router.post(
+    "/auth/verification-code",
+    response_model=AuthActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["auth"],
+)
+def request_registration_verification_code(
+    payload: VerificationCodeRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthActionResponse:
+    """发送注册用六位邮箱验证码。"""
+
+    try:
+        code = prepare_verification_code(session, settings, payload.email)
+        send_verification_code_email(settings, payload.email, code)
+    except EmailAlreadyRegisteredError as error:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="该邮箱已被注册") from error
+    except VerificationCodeRateLimitedError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail="验证码发送过于频繁，请稍后重试",
+            headers={"Retry-After": str(error.retry_after_seconds)},
+        ) from error
+    except EmailDeliveryError as error:
+        session.rollback()
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    session.commit()
+    return AuthActionResponse(status="sent")
+
+
+@router.post(
     "/auth/register",
     response_model=EmailRegisterResponse,
     status_code=status.HTTP_201_CREATED,
@@ -333,9 +479,16 @@ def register_with_email_route(
     session: SessionDependency,
     settings: SettingsDependency,
 ) -> EmailRegisterResponse:
-    """使用邮箱和密码注册待验证账号。"""
+    """使用六位邮箱验证码注册账号。"""
 
     try:
+        ensure_email_available(session, payload.email)
+        consume_verification_code(
+            session,
+            settings,
+            payload.email,
+            payload.verification_code,
+        )
         created = register_with_password(
             session,
             settings,
@@ -345,20 +498,10 @@ def register_with_email_route(
         )
     except EmailAlreadyRegisteredError as error:
         raise HTTPException(status_code=409, detail="该邮箱已被注册") from error
-    verification_email_sent = True
-    try:
-        verification_token = issue_email_token(
-            session,
-            settings,
-            created,
-            "verify_email",
-        )
-        send_auth_email(settings, payload.email, "verify_email", verification_token)
-    except EmailDeliveryError:
-        verification_email_sent = False
+    except VerificationCodeInvalidError as error:
+        raise HTTPException(status_code=400, detail="验证码无效或已过期") from error
     return EmailRegisterResponse(
         user=AuthUserResponse.model_validate(created),
-        verification_email_sent=verification_email_sent,
     )
 
 
@@ -563,6 +706,152 @@ def read_current_auth_user(
     return AuthUserResponse.model_validate(user)
 
 
+def _prepare_export_data(
+    session: Session,
+    user_id: str,
+    settings: Settings,
+) -> tuple[User, list[Memo], datetime]:
+    """清理过期回收站并读取当前账号可导出的数据。"""
+
+    # 导出的数据必须遵循回收站保留期，避免把已永久删除内容重新带出。
+    purge_expired_trash(
+        session,
+        settings.audio_directory,
+        settings.image_directory,
+        settings.trash_retention_days,
+        user_id=user_id,
+    )
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="当前用户不存在")
+    exported_at = datetime.now(UTC)
+    return user, list_memos_for_export(session, user_id), exported_at
+
+
+def _export_headers(filename: str) -> dict[str, str]:
+    """为私人导出响应设置下载文件名和缓存策略。"""
+
+    return {
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+
+
+@router.get("/exports/json", tags=["exports"])
+def export_json_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> Response:
+    """下载当前用户的 JSON 数据副本，不包含访问令牌和录音二进制。"""
+
+    user, memos, exported_at = _prepare_export_data(session, user_id, settings)
+    payload = {
+        "format": "memoisle-json",
+        "version": 1,
+        "exported_at": exported_at.isoformat().replace("+00:00", "Z"),
+        "audio_files_included": False,
+        "image_files_included": False,
+        "user": AuthUserResponse.model_validate(user).model_dump(mode="json"),
+        "memos": [
+            MemoRead.model_validate(memo).model_dump(mode="json")
+            for memo in memos
+        ],
+    }
+    filename = f"memoisle-export-{exported_at.strftime('%Y%m%dT%H%M%SZ')}.json"
+    # 不缓存私人数据；响应中只放可迁移的条目字段，不暴露内部音频存储名。
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        media_type="application/json",
+        headers=_export_headers(filename),
+    )
+
+
+@router.get("/exports/csv", tags=["exports"])
+def export_csv_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> Response:
+    """下载当前用户的完整 CSV 数据副本。"""
+
+    _, memos, exported_at = _prepare_export_data(session, user_id, settings)
+    filename = f"memoisle-export-{exported_at.strftime('%Y%m%dT%H%M%SZ')}.csv"
+    return Response(
+        content=serialize_memos_csv(memos),
+        media_type="text/csv; charset=utf-8",
+        headers=_export_headers(filename),
+    )
+
+
+@router.get("/exports/markdown", tags=["exports"])
+def export_markdown_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> Response:
+    """下载当前用户的可读 Markdown 数据副本。"""
+
+    _, memos, exported_at = _prepare_export_data(session, user_id, settings)
+    filename = f"memoisle-export-{exported_at.strftime('%Y%m%dT%H%M%SZ')}.md"
+    return Response(
+        content=serialize_memos_markdown(memos),
+        media_type="text/markdown; charset=utf-8",
+        headers=_export_headers(filename),
+    )
+
+
+@router.post(
+    "/imports",
+    response_model=WordImportResponse,
+    tags=["exports"],
+)
+async def import_library_route(
+    request: Request,
+    session: SessionDependency,
+    user_id: UserDependency,
+    file_format: Annotated[str, Query(alias="format")] = "json",
+) -> WordImportResponse:
+    """导入 JSON 或 CSV 备份，按 client_id、词形和网址跳过重复项。"""
+
+    if file_format.strip().lower() == "markdown":
+        raise HTTPException(
+            status_code=422,
+            detail="Markdown 仅供阅读，完整恢复请使用 JSON 或 CSV 备份",
+        )
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="Content-Length 无效",
+            ) from error
+        if declared_size > MAX_LIBRARY_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="备份文件不能超过 10 MB")
+
+    content = await request.body()
+    try:
+        records = parse_library_import(content, file_format)
+        result = import_library_memos(session, user_id, records)
+    except LibraryImportTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except LibraryImportFormatError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return WordImportResponse(
+        total_count=result.total_count,
+        imported_count=result.imported_count,
+        duplicate_count=result.duplicate_count,
+        skipped_count=result.skipped_count,
+        failed_count=result.failed_count,
+        errors=[
+            WordImportErrorRead(row=row, message=message)
+            for row, message in result.errors
+        ],
+    )
+
+
 @router.post("/auth/logout", response_model=AuthLogoutResponse, tags=["auth"])
 def logout(
     session: SessionDependency,
@@ -722,6 +1011,48 @@ def sync_browser_bookmarks_route(
     return BrowserBookmarkSyncResponse(
         synced_count=len(snapshot.bookmarks),
         truncated=snapshot.truncated,
+        total_count=snapshot.total_count,
+        revision=snapshot.revision,
+    )
+
+
+@router.post(
+    "/browser-bookmarks/delta",
+    response_model=BrowserBookmarkSyncResponse,
+    tags=["browser-bookmarks"],
+)
+def sync_browser_bookmark_delta_route(
+    payload: BrowserBookmarkDeltaSyncRequest,
+    request: Request,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> BrowserBookmarkSyncResponse:
+    """应用扩展书签增量；版本落后时要求扩展重新上传完整快照。"""
+
+    try:
+        snapshot = sync_browser_bookmark_delta(
+            session,
+            user_id,
+            payload,
+            request.headers.get("origin"),
+        )
+    except BrowserBookmarkRevisionConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "bookmark_revision_conflict",
+                "message": "书签快照已在其他设备更新，请重新同步",
+            },
+        ) from error
+    except BrowserCaptureOriginError as error:
+        raise HTTPException(status_code=403, detail="浏览器扩展来源不匹配") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return BrowserBookmarkSyncResponse(
+        synced_count=len(snapshot.bookmarks),
+        truncated=snapshot.truncated,
+        total_count=snapshot.total_count,
+        revision=snapshot.revision,
     )
 
 
@@ -754,6 +1085,13 @@ def create_memo_route(
 ) -> MemoRead:
     """创建或返回同一客户端标识对应的条目。"""
 
+    if session.scalar(select(MemoDeletion.memo_id).where(
+        MemoDeletion.user_id == user_id,
+        MemoDeletion.client_id == str(payload.client_id),
+    )) is not None:
+        raise HTTPException(
+            status_code=410, detail="该条目已永久删除，请使用新的收藏标识",
+        )
     try:
         memo = create_memo(session, user_id, payload)
     except WordDuplicateError as error:
@@ -763,6 +1101,16 @@ def create_memo_route(
             detail={
                 "message": str(error),
                 "code": "duplicate_lemma",
+                "current": current.model_dump(mode="json"),
+            },
+        ) from error
+    except ResourceDuplicateError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(error),
+                "code": "duplicate_resource",
                 "current": current.model_dump(mode="json"),
             },
         ) from error
@@ -824,11 +1172,13 @@ def enrich_resource_route(
 def list_link_health_route(
     session: SessionDependency,
     user_id: UserDependency,
+    settings: SettingsDependency,
     health_status: Annotated[
         LinkHealthStatus | None,
         Query(alias="status"),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> LinkHealthListResponse:
     """读取失效、重定向、变化和暂时失败的网页资料。"""
 
@@ -837,10 +1187,69 @@ def list_link_health_route(
         user_id,
         health_status,
         limit,
+        offset=offset,
     )
     return LinkHealthListResponse(
         items=[MemoRead.model_validate(item) for item in items],
         counts=counts,
+        settings=get_link_health_settings(session, user_id, settings),
+    )
+
+
+@router.patch(
+    "/resources/link-health/settings",
+    response_model=LinkHealthListResponse,
+    tags=["resources"],
+)
+def update_link_health_settings_route(
+    payload: LinkHealthSettingsUpdate,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> LinkHealthListResponse:
+    """更新账号级巡检设置并返回最新巡检中心。"""
+
+    try:
+        health_settings = update_link_health_settings(
+            session,
+            user_id,
+            payload,
+            settings,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="账号不存在") from error
+    items, counts = list_link_health_center(session, user_id)
+    return LinkHealthListResponse(
+        items=[MemoRead.model_validate(item) for item in items],
+        counts=counts,
+        settings=health_settings,
+    )
+
+
+@router.post(
+    "/resources/link-health/site-pauses",
+    response_model=LinkHealthListResponse,
+    tags=["resources"],
+)
+def update_link_health_site_pause_route(
+    payload: LinkHealthSitePauseRequest,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> LinkHealthListResponse:
+    """暂停或恢复当前账号下某个网站的巡检。"""
+
+    health_settings = update_link_health_site_pause(
+        session,
+        user_id,
+        payload,
+        settings,
+    )
+    items, counts = list_link_health_center(session, user_id)
+    return LinkHealthListResponse(
+        items=[MemoRead.model_validate(item) for item in items],
+        counts=counts,
+        settings=health_settings,
     )
 
 
@@ -1025,6 +1434,7 @@ def undo_bookmark_import_route(
 def list_memos_route(
     session: SessionDependency,
     user_id: UserDependency,
+    settings: SettingsDependency,
     memo_type: Annotated[MemoType | None, Query(alias="type")] = None,
     query_text: Annotated[str | None, Query(alias="q", max_length=200)] = None,
     resource_category: Annotated[
@@ -1055,6 +1465,14 @@ def list_memos_route(
 ) -> MemoListResponse:
     """按类型及关键词读取当前用户条目。"""
 
+    if memo_status == MemoStatus.TRASHED:
+        purge_expired_trash(
+            session,
+            settings.audio_directory,
+            settings.image_directory,
+            settings.trash_retention_days,
+            user_id=user_id,
+        )
     normalized_health_status = (
         link_health_status.value if link_health_status is not None else None
     )
@@ -1122,6 +1540,8 @@ def count_memos_route(
         word_count=counts[MemoType.WORD],
         resource_count=counts[MemoType.RESOURCE],
         idea_count=counts[MemoType.IDEA],
+        image_count=counts[MemoType.IMAGE],
+        inbox_count=count_memos(session, user_id, memo_status=MemoStatus.INBOX),
     )
 
 
@@ -1143,6 +1563,35 @@ def list_resource_categories_route(
 
 
 @router.post(
+    "/resource-categories/generate",
+    response_model=ResourceCategoryGenerateResponse,
+    tags=["resources"],
+)
+def generate_resource_categories_route(
+    payload: ResourceCategoryGenerateRequest,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceCategoryGenerateResponse:
+    """根据整理要求生成当前用户可添加的分类建议。"""
+
+    existing = [
+        ResourceCategoryRead.model_validate(option)
+        for option in list_resource_category_options(session, user_id)
+    ]
+    try:
+        return generate_category_suggestions(
+            payload.instructions, existing,
+            resolve_model_settings(session, user_id, settings),
+            payload.max_categories,
+        )
+    except CategoryGenerationNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except CategoryGenerationUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post(
     "/resource-categories",
     response_model=ResourceCategoryRead,
     status_code=status.HTTP_201_CREATED,
@@ -1161,17 +1610,14 @@ def create_resource_category_route(
             user_id,
             payload.name,
             payload.description,
+            payload.parent_code,
         )
     except CategoryNameConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return ResourceCategoryRead(
-        id=template.id,
-        code=template.code,
-        name=template.name,
-        description=template.description,
-        is_system=False,
-        is_active=template.is_active,
-        version=template.version,
+    except CategoryParentError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return ResourceCategoryRead.model_validate(
+        category_template_to_option(session, user_id, template),
     )
 
 
@@ -1202,6 +1648,8 @@ def update_resource_category_route(
         raise HTTPException(status_code=404, detail="分类模板不存在") from error
     except CategoryNameConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except CategoryParentError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except CategoryVersionConflictError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1213,15 +1661,35 @@ def update_resource_category_route(
         user_id,
         settings,
     )
-    return ResourceCategoryRead(
-        id=template.id,
-        code=template.code,
-        name=template.name,
-        description=template.description,
-        is_system=False,
-        is_active=template.is_active,
-        version=template.version,
+    return ResourceCategoryRead.model_validate(
+        category_template_to_option(session, user_id, template),
     )
+
+
+@router.delete(
+    "/resource-categories/{category_id}",
+    response_model=dict[str, bool],
+    tags=["resources"],
+)
+def delete_resource_category_route(
+    category_id: UUID,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> dict[str, bool]:
+    """删除自定义分类模板，并重新判断原先使用该分类的资料。"""
+
+    try:
+        delete_category_template(session, user_id, str(category_id))
+    except CategoryTemplateNotFoundError as error:
+        raise HTTPException(status_code=404, detail="分类模板不存在") from error
+    background_tasks.add_task(
+        apply_user_category_rules_in_background,
+        settings.database_url,
+        user_id,
+    )
+    return {"deleted": True}
 
 
 @router.get(
@@ -1345,11 +1813,50 @@ def delete_resource_category_rule_route(
     return {"deleted": True}
 
 
+@router.delete(
+    "/memos/trash",
+    tags=["memos"],
+)
+def empty_trash_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> dict[str, int]:
+    """清空当前用户的回收站，返回永久删除的条目数。"""
+
+    deleted = empty_trash(
+        session,
+        user_id,
+        settings.audio_directory,
+        settings.image_directory,
+    )
+    return {"deleted_count": deleted}
+
+
+@router.post("/memos/trash/restore", tags=["memos"])
+def restore_all_trash_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> dict[str, int]:
+    """还原当前账号的全部回收站条目，遵循已有保留期限。"""
+
+    purge_expired_trash(
+        session,
+        settings.audio_directory,
+        settings.image_directory,
+        settings.trash_retention_days,
+        user_id=user_id,
+    )
+    return {"restored_count": restore_all_trash(session, user_id)}
+
+
 @router.get("/memos/{memo_id}", response_model=MemoRead, tags=["memos"])
 def get_memo_route(
     memo_id: UUID,
     session: SessionDependency,
     user_id: UserDependency,
+    settings: SettingsDependency,
 ) -> MemoRead:
     """读取一条内容。"""
 
@@ -1357,6 +1864,16 @@ def get_memo_route(
         memo = get_memo(session, user_id, str(memo_id))
     except MemoNotFoundError as error:
         raise HTTPException(status_code=404, detail="条目不存在") from error
+    if is_trash_expired(memo, settings.trash_retention_days):
+        permanently_delete_memo(
+            session,
+            user_id,
+            memo.id,
+            memo.version,
+            settings.audio_directory,
+            settings.image_directory,
+        )
+        raise HTTPException(status_code=404, detail="条目不存在")
     return MemoRead.model_validate(memo)
 
 
@@ -1364,27 +1881,57 @@ def get_memo_route(
 def update_memo_route(
     memo_id: UUID,
     payload: MemoUpdate,
+    background_tasks: BackgroundTasks,
     session: SessionDependency,
     user_id: UserDependency,
+    settings: SettingsDependency,
 ) -> MemoRead:
     """更新条目并检测跨设备版本冲突。"""
 
-    if payload.resource_category is not None and not category_code_exists(
-        session,
-        user_id,
-        payload.resource_category,
-    ):
-        raise HTTPException(status_code=422, detail="分类不存在或已停用")
+    category_codes = payload.resource_categories
+    if category_codes is None and payload.resource_category is not None:
+        category_codes = [payload.resource_category]
+    if category_codes:
+        try:
+            for code in category_codes:
+                if not category_code_exists(session, user_id, code):
+                    raise CategoryCodeNotFoundError("分类不存在或已停用")
+        except CategoryCodeNotFoundError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
     try:
         memo = update_memo(session, user_id, str(memo_id), payload)
     except MemoNotFoundError as error:
         raise HTTPException(status_code=404, detail="条目不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except WordDuplicateError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(error),
+                "code": "duplicate_lemma",
+                "current": current.model_dump(mode="json"),
+            },
+        ) from error
     except MemoVersionConflictError as error:
         current = MemoRead.model_validate(error.current)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"message": str(error), "current": current.model_dump(mode="json")},
         ) from error
+    if (
+        memo.type == MemoType.RESOURCE
+        and settings.resource_enrichment_enabled
+        and memo.resource_metadata_status in {"pending", "failed"}
+    ):
+        background_tasks.add_task(
+            enrich_resource_in_background,
+            settings.database_url,
+            user_id,
+            memo.id,
+            settings,
+        )
     if "resource_category" in payload.model_fields_set:
         memo.resource_category_label = (
             category_label(session, user_id, payload.resource_category)
@@ -1396,28 +1943,174 @@ def update_memo_route(
     return MemoRead.model_validate(memo)
 
 
+@router.delete("/memos/{memo_id}", response_model=MemoRead, tags=["memos"])
+def trash_memo_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    expected_version: Annotated[int, Query(ge=1)],
+) -> MemoRead:
+    """把条目移入回收站。"""
+
+    try:
+        memo = move_memo_to_trash(
+            session,
+            user_id,
+            str(memo_id),
+            expected_version,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="条目不存在") from error
+    except MemoVersionConflictError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error), "current": current.model_dump(mode="json")},
+        ) from error
+    return MemoRead.model_validate(memo)
+
+
+@router.post("/memos/{memo_id}/restore", response_model=MemoRead, tags=["memos"])
+def restore_memo_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+    expected_version: Annotated[int, Query(ge=1)],
+) -> MemoRead:
+    """从回收站恢复条目。"""
+
+    purge_expired_trash(
+        session,
+        settings.audio_directory,
+        settings.image_directory,
+        settings.trash_retention_days,
+        user_id=user_id,
+    )
+    try:
+        memo = restore_memo(
+            session,
+            user_id,
+            str(memo_id),
+            expected_version,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="条目不存在") from error
+    except MemoNotTrashedError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except MemoVersionConflictError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error), "current": current.model_dump(mode="json")},
+        ) from error
+    return MemoRead.model_validate(memo)
+
+
+@router.delete(
+    "/memos/{memo_id}/permanent",
+    response_model=AuthActionResponse,
+    tags=["memos"],
+)
+def permanently_delete_memo_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+    expected_version: Annotated[int, Query(ge=1)],
+) -> AuthActionResponse:
+    """永久删除回收站中的条目，需要客户端二次确认后调用。"""
+
+    purge_expired_trash(
+        session,
+        settings.audio_directory,
+        settings.image_directory,
+        settings.trash_retention_days,
+        user_id=user_id,
+    )
+    try:
+        permanently_delete_memo(
+            session,
+            user_id,
+            str(memo_id),
+            expected_version,
+            settings.audio_directory,
+            settings.image_directory,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="条目不存在") from error
+    except MemoNotTrashedError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except MemoVersionConflictError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error), "current": current.model_dump(mode="json")},
+        ) from error
+    return AuthActionResponse(status="deleted")
+
+
 @router.get("/sync/changes", response_model=SyncResponse, tags=["sync"])
 def sync_changes_route(
     session: SessionDependency,
     user_id: UserDependency,
+    settings: SettingsDependency,
     cursor: Annotated[datetime | None, Query()] = None,
+    cursor_id: Annotated[UUID | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> SyncResponse:
     """按服务端更新时间返回增量同步数据。"""
 
-    requested_at = datetime.now(UTC)
-    items = list_memos(
+    purge_expired_trash(
+        session,
+        settings.audio_directory,
+        settings.image_directory,
+        settings.trash_retention_days,
+        user_id=user_id,
+    )
+    return sync_change_page(
+        session, user_id, cursor, str(cursor_id) if cursor_id else None, limit,
+    )
+
+
+@router.get(
+    "/review-settings",
+    response_model=ReviewSettingsResponse,
+    tags=["review"],
+)
+def read_review_settings_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> ReviewSettingsResponse:
+    """返回当前账号的自定义复习计划。"""
+
+    daily_limit, intervals_days = get_review_settings(session, user_id)
+    return ReviewSettingsResponse(
+        daily_limit=daily_limit,
+        intervals_days=list(intervals_days),
+    )
+
+
+@router.patch(
+    "/review-settings",
+    response_model=ReviewSettingsResponse,
+    tags=["review"],
+)
+def update_review_settings_route(
+    payload: ReviewSettingsUpdate,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> ReviewSettingsResponse:
+    """更新当前账号的自定义复习计划。"""
+
+    daily_limit, intervals_days = update_review_settings(
         session,
         user_id,
-        updated_after=cursor,
-        limit=limit,
-        include_trashed=True,
-        oldest_first=True,
+        payload,
     )
-    next_cursor = items[-1].updated_at if items else requested_at
-    return SyncResponse(
-        items=[MemoRead.model_validate(item) for item in items],
-        cursor=next_cursor,
+    return ReviewSettingsResponse(
+        daily_limit=daily_limit,
+        intervals_days=list(intervals_days),
     )
 
 
@@ -1425,7 +2118,7 @@ def sync_changes_route(
 def review_queue_route(
     session: SessionDependency,
     user_id: UserDependency,
-    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
     memo_type: Annotated[MemoType | None, Query(alias="type")] = None,
 ) -> ReviewQueueResponse:
     """返回今日回顾：到期单词、未读资料和待整理灵感。"""
@@ -1441,6 +2134,8 @@ def review_queue_route(
         word_count=counts["word_count"],
         resource_count=counts["resource_count"],
         idea_count=counts["idea_count"],
+        daily_limit=counts["daily_limit"],
+        scheduled_count=counts["scheduled_count"],
     )
 
 
@@ -1503,6 +2198,141 @@ def merge_word_route(
             detail={"message": str(error), "current": current.model_dump(mode="json")},
         ) from error
     return MemoRead.model_validate(memo)
+
+
+@router.post(
+    "/words/import",
+    response_model=WordImportResponse,
+    tags=["words"],
+)
+async def import_words_route(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+    file_format: Annotated[str, Query(alias="format")] = "json",
+) -> WordImportResponse:
+    """导入 JSON 或 CSV 单词，只保留当前账号的单词内容。"""
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="Content-Length 无效",
+            ) from error
+        if declared_size > MAX_WORD_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="单词导入文件不能超过 5 MB")
+
+    content = await request.body()
+    try:
+        records = parse_word_import(content, file_format)
+    except WordImportTooLargeError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
+    except WordImportFormatError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    imported_count = 0
+    duplicate_count = 0
+    skipped_count = 0
+    failed_count = 0
+    errors: list[WordImportErrorRead] = []
+    for record in records:
+        if not is_word_record(record):
+            # 允许直接回灌完整 MemoIsle JSON/CSV，只提取其中的 word 条目。
+            skipped_count += 1
+            continue
+        try:
+            payload = build_word_import_payload(record)
+        except (TypeError, ValueError) as error:
+            failed_count += 1
+            if len(errors) < 50:
+                message = str(error).strip() or "字段校验失败"
+                errors.append(
+                    WordImportErrorRead(
+                        row=record.row_number,
+                        message=message[:200],
+                    )
+                )
+            continue
+
+        existing = session.scalar(
+            select(Memo).where(
+                Memo.user_id == user_id,
+                Memo.client_id == str(payload.client_id),
+            )
+        )
+        if existing is not None:
+            if existing.type == MemoType.WORD and existing.status != MemoStatus.TRASHED:
+                duplicate_count += 1
+                continue
+            # client_id 已被其他类型或回收站条目占用时，换用新标识继续导入。
+            payload = payload.model_copy(update={"client_id": uuid4()})
+        try:
+            memo = create_memo(session, user_id, payload)
+        except WordDuplicateError:
+            duplicate_count += 1
+            continue
+        imported_count += 1
+        if settings.word_dictionary_enabled:
+            background_tasks.add_task(
+                enrich_word_in_background,
+                settings.database_url,
+                user_id,
+                memo.id,
+                settings,
+            )
+
+    return WordImportResponse(
+        total_count=len(records),
+        imported_count=imported_count,
+        duplicate_count=duplicate_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
+        errors=errors,
+    )
+
+
+@router.post(
+    "/words/lookup",
+    response_model=WordLookupResponse,
+    tags=["words"],
+)
+def lookup_word_route(
+    payload: WordLookupRequest,
+    _user_id: UserDependency,
+    settings: SettingsDependency,
+) -> WordLookupResponse:
+    """查询单词并返回可由用户选择的中文释义预览。"""
+
+    lemma = normalize_word_lemma(payload.word)
+    if not lemma:
+        raise HTTPException(status_code=422, detail="请输入有效的英语单词或短语")
+    try:
+        dictionary = lookup_word_preview(lemma, settings)
+    except WordDictionaryUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return WordLookupResponse(
+        word=payload.word,
+        lemma=lemma,
+        phonetic=dictionary.phonetic,
+        us_audio_url=dictionary.us_audio_url,
+        uk_audio_url=dictionary.uk_audio_url,
+        senses=[
+            WordDictionarySenseRead(
+                index=index,
+                part_of_speech=sense.part_of_speech,
+                definition=sense.definition,
+                example=sense.example,
+            )
+            for index, sense in enumerate(dictionary.senses)
+        ],
+        source_name=dictionary.source_name,
+        source_url=dictionary.source_url,
+    )
 
 
 @router.post(
@@ -1626,3 +2456,397 @@ def download_memo_audio_route(
         filename=f"memoisle-{memo.id}.audio",
         content_disposition_type="inline",
     )
+
+
+@router.post("/memos/{memo_id}/image", response_model=MemoRead, tags=["image"])
+async def upload_memo_image_route(
+    memo_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+    expected_version: Annotated[int, Query(ge=1)],
+) -> MemoRead:
+    """接收原始图片字节并关联到一条图片收藏。"""
+
+    content_type = request.headers.get("content-type", "")
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="Content-Length 无效",
+            ) from error
+        if declared_size > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="图片不能超过 20 MB")
+    content = await request.body()
+    try:
+        memo = attach_image(
+            session=session,
+            user_id=user_id,
+            memo_id=str(memo_id),
+            expected_version=expected_version,
+            content=content,
+            mime_type=content_type,
+            image_directory=settings.image_directory,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="图片收藏不存在") from error
+    except (MemoTypeError, ImageValidationError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except MemoVersionConflictError as error:
+        current = MemoRead.model_validate(error.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(error), "current": current.model_dump(mode="json")},
+        ) from error
+    if normalize_image_ocr_provider(settings.image_ocr_provider) != "none":
+        # 图片落盘后再在后台识别；识别失败不影响图片本身已经保存。
+        mark_image_ocr_pending(session, memo)
+        background_tasks.add_task(
+            process_image_ocr_in_background,
+            settings.database_url,
+            user_id,
+            memo.id,
+            settings,
+        )
+    return MemoRead.model_validate(memo)
+
+
+@router.get("/memos/{memo_id}/image", tags=["image"])
+def download_memo_image_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> FileResponse:
+    """查看当前用户图片收藏的原图。"""
+
+    try:
+        memo, image_path = get_image_path(
+            session,
+            user_id,
+            str(memo_id),
+            settings.image_directory,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="图片不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return FileResponse(
+        path=image_path,
+        media_type=memo.image_mime_type or "application/octet-stream",
+        filename=f"memoisle-{memo.id}.image",
+        content_disposition_type="inline",
+    )
+
+
+@router.get("/memos/{memo_id}/image/thumbnail", tags=["image"])
+def download_memo_image_thumbnail_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> FileResponse:
+    """查看当前用户图片收藏的缩略图。"""
+
+    try:
+        memo, image_path = get_image_path(
+            session,
+            user_id,
+            str(memo_id),
+            settings.image_directory,
+            thumbnail=True,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="缩略图不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return FileResponse(
+        path=image_path,
+        media_type="image/webp",
+        filename=f"memoisle-{memo.id}.thumbnail.webp",
+        content_disposition_type="inline",
+    )
+
+
+@router.post(
+    "/memos/{memo_id}/image/ocr",
+    response_model=MemoRead,
+    tags=["image"],
+)
+def recognize_image_ocr_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> MemoRead:
+    """手动重试图片文字识别与自动标签。"""
+
+    if normalize_image_ocr_provider(settings.image_ocr_provider) == "none":
+        raise HTTPException(
+            status_code=503,
+            detail="服务端未启用图片 OCR（MEMOISLE_IMAGE_OCR_PROVIDER）",
+        )
+    try:
+        memo = recognize_image_ocr(session, user_id, str(memo_id), settings)
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="图片不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return MemoRead.model_validate(memo)
+
+
+@router.post(
+    "/meeting/summary",
+    response_model=MeetingSummaryResponse,
+    tags=["meeting"],
+)
+def summarize_meeting_route(
+    payload: MeetingSummaryRequest,
+    _user_id: UserDependency,
+    settings: SettingsDependency,
+) -> MeetingSummaryResponse:
+    """根据会议转写生成结构化会议纪要。"""
+
+    try:
+        summary = summarize_meeting(
+            transcript=payload.transcript,
+            title=payload.title,
+            settings=settings,
+        )
+    except MeetingSummaryNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except MeetingSummaryUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return MeetingSummaryResponse(summary=summary)
+
+
+@router.post("/speech/tts", tags=["speech"])
+def synthesize_speech_route(
+    payload: SpeechTtsRequest,
+    _user_id: UserDependency,
+    settings: SettingsDependency,
+) -> FileResponse:
+    """使用可选的 sanoTTS 服务生成私有语音。"""
+
+    try:
+        audio_path = synthesize_speech(
+            text=payload.text,
+            settings=settings,
+            voice=payload.voice,
+        )
+    except SpeechTextTooLongError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SpeechServiceUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return FileResponse(
+        path=audio_path,
+        media_type="audio/wav",
+        filename="memoisle-speech.wav",
+        content_disposition_type="inline",
+    )
+
+
+@router.get(
+    "/cloud-accounts",
+    response_model=list[CloudAccountRead],
+    tags=["cloud"],
+)
+def list_cloud_accounts_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> list[CloudAccountRead]:
+    """返回当前用户已绑定的云盘账号。"""
+
+    return [
+        CloudAccountRead.model_validate(account)
+        for account in list_cloud_accounts(session, user_id)
+    ]
+
+
+@router.post(
+    "/cloud-accounts",
+    response_model=CloudAccountRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["cloud"],
+)
+def create_cloud_account_route(
+    payload: CloudAccountCreate,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> CloudAccountRead:
+    """绑定云盘账号：先校验凭据，再加密保存。"""
+
+    try:
+        account = create_cloud_account(
+            session,
+            user_id,
+            provider=payload.provider.value,
+            credential=payload.credential,
+            default_folder=payload.default_folder,
+            settings=settings,
+        )
+    except CloudAccountExistsError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (CloudCredentialRejectedError, UnsupportedProviderError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return CloudAccountRead.model_validate(account)
+
+
+@router.delete(
+    "/cloud-accounts/{account_id}",
+    response_model=dict[str, bool],
+    tags=["cloud"],
+)
+def delete_cloud_account_route(
+    account_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> dict[str, bool]:
+    """解绑云盘账号。"""
+
+    try:
+        delete_cloud_account(session, user_id, str(account_id))
+    except CloudAccountNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"deleted": True}
+
+
+@router.post(
+    "/cloud-accounts/{account_id}/verify",
+    response_model=CloudAccountRead,
+    tags=["cloud"],
+)
+def verify_cloud_account_route(
+    account_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> CloudAccountRead:
+    """重新校验云盘凭据并刷新状态。"""
+
+    try:
+        account = verify_cloud_account(
+            session,
+            user_id,
+            str(account_id),
+            settings=settings,
+        )
+    except CloudAccountNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except CloudCredentialRejectedError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return CloudAccountRead.model_validate(account)
+
+
+@router.get(
+    "/ebooks/jobs",
+    response_model=list[EbookJobRead],
+    tags=["ebooks"],
+)
+def list_ebook_jobs_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> list[EbookJobRead]:
+    """返回当前用户最近的电子书任务。"""
+
+    return [
+        EbookJobRead.model_validate(job)
+        for job in list_ebook_jobs(session, user_id)
+    ]
+
+
+@router.post(
+    "/ebooks/jobs",
+    response_model=EbookJobRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["ebooks"],
+)
+def create_ebook_job_route(
+    payload: EbookJobCreate,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> EbookJobRead:
+    """提交电子书链接，并立刻在后台开始转存或下载上传。"""
+
+    try:
+        job = create_ebook_job(
+            session,
+            user_id,
+            url=payload.url,
+            settings=settings,
+            provider=payload.provider.value if payload.provider else None,
+            share_password=payload.share_password,
+            target_folder=payload.target_folder,
+            tags=payload.tags,
+            collections=payload.collections,
+            note=payload.note,
+        )
+    except EbookLinkError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    background_tasks.add_task(
+        process_ebook_job_in_background,
+        settings.database_url,
+        user_id,
+        job.id,
+        settings,
+    )
+    return EbookJobRead.model_validate(job)
+
+
+@router.get(
+    "/ebooks/jobs/{job_id}",
+    response_model=EbookJobRead,
+    tags=["ebooks"],
+)
+def read_ebook_job_route(
+    job_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> EbookJobRead:
+    """查询单个电子书任务进度。"""
+
+    try:
+        job = get_ebook_job(session, user_id, str(job_id))
+    except EbookJobNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return EbookJobRead.model_validate(job)
+
+
+@router.post(
+    "/ebooks/jobs/{job_id}/retry",
+    response_model=EbookJobRead,
+    tags=["ebooks"],
+)
+def retry_ebook_job_route(
+    job_id: UUID,
+    background_tasks: BackgroundTasks,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> EbookJobRead:
+    """重试失败的电子书任务。"""
+
+    try:
+        job = retry_ebook_job(session, user_id, str(job_id))
+    except EbookJobNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except EbookJobStateError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    background_tasks.add_task(
+        process_ebook_job_in_background,
+        settings.database_url,
+        user_id,
+        job.id,
+        settings,
+    )
+    return EbookJobRead.model_validate(job)

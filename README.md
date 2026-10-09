@@ -14,11 +14,18 @@ MemoIsle 是一个面向 Web 与 Android 的统一收藏、记录与回顾工具
 - Web 负责网页资料收藏、整理和原链接编辑；Android 主要用于只读浏览与打开来源。
 - Android 已注册系统分享入口，可从浏览器轻量保存网页资料，后续编辑在 Web 完成。
 - Web 与 Android 支持英语单词、音标、释义和例句收藏，以及三档复习反馈。
+- Web 与 Windows 桌面端支持图片收藏：选择、拖拽或粘贴一张图片，服务端生成缩略图，可查看原图、替换、编辑标题备注并随回收站清理；Android 只读浏览缩略图与原图。
+- 三端在图片超过 20 MB、单边 12000 像素或 5000 万像素时会在上传前自动压缩/缩放，并提示原大小与新大小、尺寸或格式变化（动图会提示已转为静态图片）。
+- Chrome/Edge 扩展支持在任意网页图片上右键「收藏图片到 MemoIsle」，直接创建图片条目并上传原图，超大图自动压缩后上传并提示；保存来源网页地址。
+- 服务端可对图片做 OCR 并生成自动标签（本地引擎 / 视觉大模型 / 本地优先回退，默认关闭），识别文字与标签参与搜索；Web 与桌面端可查看并重新识别，Android 只读展示。
 - Web 支持浏览器录音；Android 支持原生 AAC/M4A 录音、离线草稿和失败重试。
 - 服务端支持受限音频上传、私有读取和跨端播放。
-- Web 提供全部内容页和服务端跨类型搜索，Android 提供统一资料库与本地即时搜索。
+- Android 使用 sherpa-onnx SenseVoiceSmall INT8 做设备端 STT；Web 在浏览器支持时实时转写，均保留可编辑文字和原始录音。
+- Web 与 Android 的单词、例句和灵感正文支持服务端 sanoTTS，服务不可用时回退到词典音频与系统/浏览器 TTS。
+- Web 提供「首页」内容总览和服务端跨类型搜索，Android 提供统一资料库与本地即时搜索。
 - Web 与 Android 提供今日回顾：混合到期单词、未读资料和待整理灵感，可跳过或按类型处理。
-- 服务端支持邮箱验证、密码找回、登录限流、邮箱密码、微信、Google 和 Apple ID 登录，Web 与 Android 使用可撤销 Bearer 会话访问数据。
+- Web 支持电子书收藏：粘贴电子书链接后，云盘分享链接走转存、普通直链由服务端下载后上传，统一存进用户自己绑定的阿里云盘或百度网盘；MemoIsle 只保存云盘文件引用与元数据快照，不保存电子书本体，标签与分类复用资料库既有能力。云盘登录态由用户在「☁ 云盘绑定」里粘贴，凭据加密保存、只回显末四位。**注意**：该链路需要自备云盘开放平台应用凭据，且尚未与真实云盘联调验收，详见实现状态文档的当前边界。
+- 服务端支持 AgentlyMail/SMTP 邮箱验证码、密码找回、登录限流和邮箱密码登录，Web 与 Android 使用可撤销 Bearer 会话访问数据。微信、Google、Apple 登录暂缓。
 - Web 与 Android 视觉样式均来自 Stitch 设计系统。
 
 ## 快速运行
@@ -47,12 +54,25 @@ cd android
 ./gradlew assembleDebug
 ```
 
+Windows 桌面端使用 WinUI 3；Windows 本机构建目录、免安装 .NET SDK 路径和
+SenseVoice 离线转写模型路径见 [Windows 桌面端说明](winui/README.md)。
+
+Android 首次构建 STT 前需要下载 SenseVoiceSmall INT8 模型：
+
+```bash
+./android/scripts/download-sensevoice-model.sh
+```
+
+模型权重只保存在本地 assets，不提交到 Git；没有模型时仍可录音、保存并手动填写转写。
+服务端 TTS 的安装和环境变量见[后端说明](backend/README.md)。
+
 详细环境、接口和验证结果见[实现状态](docs/implementation-status.md)。
 
 ## 项目文档
 
 - [文档索引](docs/README.md)
 - [产品需求文档](docs/product-requirements.md)
+- [待办清单](docs/backlog.md)
 - [交互与页面设计](docs/ux-design.md)
 - [技术方案](docs/technical-design.md)
 - [视觉设计系统](docs/DESIGN.md)

@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import WordPronunciation from "./WordPronunciation";
-import type { Memo, MemoType, ReviewFeedback, ReviewQueueResponse } from "./types";
+import type {
+  Memo,
+  MemoType,
+  ReviewFeedback,
+  ReviewQueueResponse,
+  ReviewSettings,
+} from "./types";
 
 export type ReviewQueueFilter = "all" | MemoType;
 
@@ -17,6 +23,12 @@ interface ReviewPanelProps {
   onStarResource: (memo: Memo) => void;
   onOrganizeIdea: (memo: Memo, title: string, body: string) => void;
   onArchiveIdea: (memo: Memo) => void;
+  reviewSettings: ReviewSettings | null;
+  reviewSettingsBusy: boolean;
+  onSaveReviewSettings: (
+    dailyLimit: number,
+    intervalsDays: number[],
+  ) => Promise<void>;
 }
 
 const queueFilters: { value: ReviewQueueFilter; label: string }[] = [
@@ -51,6 +63,126 @@ function sourceHost(sourceUrl: string | null): string {
   }
 }
 
+const reviewIntervalLabels = [
+  "忘记后",
+  "模糊后 / 熟悉度 1",
+  "熟悉度 2",
+  "熟悉度 3",
+  "熟悉度 4",
+  "熟悉度 5",
+];
+
+interface ReviewPlanSettingsProps {
+  settings: ReviewSettings | null;
+  busy: boolean;
+  onSave: (dailyLimit: number, intervalsDays: number[]) => Promise<void>;
+}
+
+function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps) {
+  const [open, setOpen] = useState(false);
+  const [dailyLimit, setDailyLimit] = useState("10");
+  const [intervalsDays, setIntervalsDays] = useState<string[]>(
+    [1, 3, 7, 14, 30, 60].map(String),
+  );
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!settings) {
+      return;
+    }
+    setDailyLimit(String(settings.daily_limit));
+    setIntervalsDays(settings.intervals_days.map(String));
+  }, [settings]);
+
+  const handleSave = () => {
+    const parsedDailyLimit = Number(dailyLimit);
+    const parsedIntervals = intervalsDays.map(Number);
+    if (
+      !Number.isInteger(parsedDailyLimit) ||
+      parsedDailyLimit < 1 ||
+      parsedDailyLimit > 100
+    ) {
+      setError("每日上限需要是 1–100 的整数。");
+      return;
+    }
+    if (
+      parsedIntervals.length !== 6 ||
+      parsedIntervals.some(
+        (interval) => !Number.isInteger(interval) || interval < 1 || interval > 365,
+      )
+    ) {
+      setError("每个间隔需要是 1–365 天的整数。");
+      return;
+    }
+    setError("");
+    void onSave(parsedDailyLimit, parsedIntervals);
+  };
+
+  return (
+    <section className="review-plan-settings" aria-label="自定义复习计划">
+      <div className="review-plan-heading">
+        <div>
+          <strong>复习计划</strong>
+          <span>
+            {settings
+              ? `每天最多 ${settings.daily_limit} 条 · ${settings.intervals_days.join(" / ")} 天`
+              : "正在读取设置…"}
+          </span>
+        </div>
+        <button type="button" onClick={() => setOpen((value) => !value)}>
+          {open ? "收起" : "调整计划"}
+        </button>
+      </div>
+      {open && (
+        <div className="review-plan-fields">
+          <label>
+            每日队列上限
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={dailyLimit}
+              onChange={(event) => setDailyLimit(event.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <div className="review-interval-grid">
+            {intervalsDays.map((value, index) => (
+              <label key={reviewIntervalLabels[index]}>
+                {reviewIntervalLabels[index]}
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={value}
+                  onChange={(event) => {
+                    const next = [...intervalsDays];
+                    next[index] = event.target.value;
+                    setIntervalsDays(next);
+                  }}
+                  disabled={busy}
+                />
+              </label>
+            ))}
+          </div>
+          <p className="review-plan-help">
+            “记得”会按复习后的熟悉度选择对应间隔；“忘记”和“模糊”分别使用前两档。
+          </p>
+          {error && <p className="review-plan-error">{error}</p>}
+          <button
+            type="button"
+            className="primary"
+            onClick={handleSave}
+            disabled={busy || !settings}
+          >
+            {busy ? "保存中…" : "保存计划"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function ReviewPanel({
   queue,
   filter,
@@ -63,12 +195,17 @@ export default function ReviewPanel({
   onStarResource,
   onOrganizeIdea,
   onArchiveIdea,
+  reviewSettings,
+  reviewSettingsBusy,
+  onSaveReviewSettings,
 }: ReviewPanelProps) {
   const current = queue?.items[0] ?? null;
   const [showAnswer, setShowAnswer] = useState(false);
   const [ideaTitle, setIdeaTitle] = useState("");
   const [ideaBody, setIdeaBody] = useState("");
   const remainingCount = queue?.items.length ?? 0;
+  const scheduledCount = queue?.scheduled_count ?? remainingCount;
+  const dailyLimit = queue?.daily_limit ?? 10;
   const totalCount =
     filter === "word"
       ? (queue?.word_count ?? 0)
@@ -84,12 +221,12 @@ export default function ReviewPanel({
     sessionTotalRef.current = null;
   }, [filter]);
   if (queue && sessionTotalRef.current === null) {
-    sessionTotalRef.current = totalCount;
+    sessionTotalRef.current = scheduledCount;
   }
   const sessionTotal = sessionTotalRef.current ?? totalCount;
   const progressLabel =
     current && sessionTotal > 0
-      ? `${Math.min(sessionTotal - totalCount + 1, sessionTotal)}/${sessionTotal}`
+      ? `${Math.min(sessionTotal - remainingCount + 1, sessionTotal)}/${sessionTotal}`
       : null;
 
   useEffect(() => {
@@ -99,20 +236,41 @@ export default function ReviewPanel({
   }, [current?.id]);
 
   if (loading && !queue) {
-    return <div className="review-empty">正在准备今日回顾…</div>;
+    return (
+      <div className="review-empty">
+        <ReviewPlanSettings
+          settings={reviewSettings}
+          busy={reviewSettingsBusy}
+          onSave={onSaveReviewSettings}
+        />
+        正在准备今日回顾…
+      </div>
+    );
   }
   if (!queue || totalCount === 0 || !current) {
     return (
-      <section className="review-complete">
-        <span className="review-complete-icon" aria-hidden="true">◷</span>
-        <h2>今天的回顾已经完成</h2>
-        <p>到期单词、待读资料和待整理灵感都会出现在这里。可以返回资料库继续收藏。</p>
+      <section className="review-session">
+        <ReviewPlanSettings
+          settings={reviewSettings}
+          busy={reviewSettingsBusy}
+          onSave={onSaveReviewSettings}
+        />
+        <div className="review-complete">
+          <span className="review-complete-icon" aria-hidden="true">◷</span>
+          <h2>今天的回顾已经完成</h2>
+          <p>到期单词、待读资料和待整理灵感都会出现在这里。可以返回资料库继续收藏。</p>
+        </div>
       </section>
     );
   }
 
   return (
     <section className="review-session" aria-labelledby="review-card-title">
+      <ReviewPlanSettings
+        settings={reviewSettings}
+        busy={reviewSettingsBusy}
+        onSave={onSaveReviewSettings}
+      />
       <div className="review-queue-filters" aria-label="回顾队列">
         {queueFilters.map((item) => (
           <button
@@ -126,6 +284,7 @@ export default function ReviewPanel({
         ))}
       </div>
       <div className="review-stats" aria-label="今日回顾数量">
+        <span><strong>{scheduledCount}</strong> / {dailyLimit} 条今日计划</span>
         <span><strong>{queue.word_count}</strong> 个单词</span>
         <span><strong>{queue.resource_count}</strong> 篇待读</span>
         <span><strong>{queue.idea_count}</strong> 条待整理</span>
@@ -144,8 +303,12 @@ export default function ReviewPanel({
         {current.type === "word" && (
           <>
             <h2 id="review-card-title">{current.title}</h2>
-            <WordPronunciation lemma={current.title} />
-            {current.word_phonetic && <p className="review-phonetic">{current.word_phonetic}</p>}
+            <WordPronunciation
+              lemma={current.title}
+              phonetic={current.word_phonetic}
+              usAudioUrl={current.word_us_audio_url}
+              ukAudioUrl={current.word_uk_audio_url}
+            />
             {current.word_example && (
               <p className="review-example">“{current.word_example}”</p>
             )}
@@ -176,7 +339,11 @@ export default function ReviewPanel({
             <h2 id="review-card-title">{current.title}</h2>
             <p className="review-example">
               {sourceHost(current.source_url)}
-              {current.resource_category_label ? ` · ${current.resource_category_label}` : ""}
+              {current.resource_categories && current.resource_categories.length > 0
+                ? ` · ${current.resource_categories.length} 个分类`
+                : current.resource_category_label
+                  ? ` · ${current.resource_category_label}`
+                  : ""}
             </p>
             {current.resource_description && <p>{current.resource_description}</p>}
             <div className="review-actions">

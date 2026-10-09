@@ -13,6 +13,7 @@ import {
   getBookmarkImport,
   previewBookmarkImport,
   retryBookmarkImport,
+  syncBrowserExtension,
   undoBookmarkImport,
 } from "./api";
 import { parseChromeBookmarksFile } from "./bookmarkImport";
@@ -82,10 +83,12 @@ export default function BookmarkImportDialog({
     setPreview(null);
     setBatch(null);
     try {
+      // 点击重读时主动让扩展携带当前用户凭证刷新一次快照。
+      await syncBrowserExtension();
       const snapshot = await getCurrentBrowserBookmarks();
       if (!snapshot.extension_connected) {
         throw new Error(
-          "尚未收到浏览器书签。请重新下载或加载新版扩展，允许读取书签后重试。",
+          "尚未收到浏览器书签。请在 chrome://extensions 重新加载新版扩展，刷新 MemoIsle 页面并确认已登录后重试。",
         );
       }
       if (snapshot.items.length === 0) {

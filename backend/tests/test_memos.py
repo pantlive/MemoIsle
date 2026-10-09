@@ -41,6 +41,52 @@ def test_create_and_list_idea(client: TestClient) -> None:
     assert items[0]["id"] == created["id"]
 
 
+def test_export_json_contains_user_data_and_retained_trash(client: TestClient) -> None:
+    """个人导出包含当前账号和保留期内的回收站条目。"""
+
+    idea = create_idea(client)
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "可导出的网页资料",
+            "body": "导出测试正文",
+            "source_url": "https://example.com/export",
+        },
+    )
+    assert resource_response.status_code == 201
+    resource = resource_response.json()
+    trashed = client.delete(
+        f"/api/v1/memos/{resource['id']}?expected_version={resource['version']}"
+    )
+    assert trashed.status_code == 200
+
+    login_response = client.post("/api/v1/auth/dev-login")
+    assert login_response.status_code == 200
+    access_token = login_response.json()["access_token"]
+    response = client.get(
+        "/api/v1/exports/json",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert "attachment" in response.headers["content-disposition"]
+    payload = response.json()
+    assert payload["format"] == "memoisle-json"
+    assert payload["version"] == 1
+    assert payload["audio_files_included"] is False
+    assert payload["user"]["email"] is None
+    exported_ids = {item["id"] for item in payload["memos"]}
+    assert idea["id"] in exported_ids
+    assert resource["id"] in exported_ids
+    exported_resource = next(
+        item for item in payload["memos"] if item["id"] == resource["id"]
+    )
+    assert exported_resource["status"] == "trashed"
+
+
 def test_search_across_memo_types_and_fields(client: TestClient) -> None:
     """全局搜索覆盖三类内容的标题、释义、来源和标签。"""
 
@@ -111,6 +157,88 @@ def test_search_treats_like_wildcards_as_plain_text(client: TestClient) -> None:
     ]
 
 
+def test_search_matches_keywords_regardless_of_order(
+    client: TestClient,
+) -> None:
+    """多个关键词按「与」匹配，词序不影响命中。"""
+
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "React 教程：从入门到实践",
+            "source_url": "https://example.com/react-guide",
+        },
+    )
+    assert resource_response.status_code == 201
+    resource_id = resource_response.json()["id"]
+
+    forward = client.get("/api/v1/memos", params={"q": "react 教程"})
+    assert [item["id"] for item in forward.json()["items"]] == [resource_id]
+
+    backward = client.get("/api/v1/memos", params={"q": "教程 react"})
+    assert [item["id"] for item in backward.json()["items"]] == [resource_id]
+
+    missing = client.get("/api/v1/memos", params={"q": "react 不存在的词"})
+    assert missing.json()["items"] == []
+
+
+def test_search_splits_query_without_spaces(client: TestClient) -> None:
+    """中英文连写时按边界拆分，仍能命中带空格或分隔符的标题。"""
+
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "Rust 异步编程入门",
+            "source_url": "https://example.com/rust-async",
+        },
+    )
+    assert resource_response.status_code == 201
+    resource_id = resource_response.json()["id"]
+
+    compact = client.get(
+        "/api/v1/memos",
+        params={"type": "resource", "q": "Rust异步"},
+    )
+    assert [item["id"] for item in compact.json()["items"]] == [resource_id]
+
+    separator = client.get(
+        "/api/v1/memos",
+        params={"type": "resource", "q": "Rust-异步"},
+    )
+    assert [item["id"] for item in separator.json()["items"]] == [resource_id]
+
+
+def test_search_splits_query_for_resource_metadata(client: TestClient) -> None:
+    """关键词可以分别命中标题、网址与描述等不同字段。"""
+
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "分布式系统阅读笔记",
+            "body": "记录一致性协议要点。",
+            "source_url": "https://example.com/distributed-systems",
+            "resource_site_name": "Example Docs",
+        },
+    )
+    assert resource_response.status_code == 201
+    resource_id = resource_response.json()["id"]
+
+    cross_field = client.get(
+        "/api/v1/memos",
+        params={"q": "分布式 example"},
+    )
+    assert [item["id"] for item in cross_field.json()["items"]] == [resource_id]
+
+    tags = client.get("/api/v1/memos", params={"q": "分布式 协议"})
+    assert [item["id"] for item in tags.json()["items"]] == [resource_id]
+
+
 def test_create_is_idempotent(client: TestClient) -> None:
     """相同客户端标识重试不会生成重复条目。"""
 
@@ -123,8 +251,8 @@ def test_create_is_idempotent(client: TestClient) -> None:
     assert len(response.json()["items"]) == 1
 
 
-def test_resource_url_is_deduplicated_across_client_ids(client: TestClient) -> None:
-    """不同入口提交相同规范网址时只保留一条网页资料。"""
+def test_resource_url_duplicate_can_be_reviewed_or_forced(client: TestClient) -> None:
+    """不同入口提交相同规范网址时先提示，确认后可以另存。"""
 
     first = client.post(
         "/api/v1/memos",
@@ -147,13 +275,28 @@ def test_resource_url_is_deduplicated_across_client_ids(client: TestClient) -> N
         },
     )
     assert first.status_code == 201
-    assert second.status_code == 201
-    assert second.json()["id"] == first.json()["id"]
+    assert second.status_code == 409
+    detail = second.json()["detail"]
+    assert detail["code"] == "duplicate_resource"
+    assert detail["current"]["id"] == first.json()["id"]
+    forced = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "仍然保存",
+            "body": "保留不同语境",
+            "source_url": "https://example.com/library",
+            "allow_duplicate": True,
+        },
+    )
+    assert forced.status_code == 201
+    assert forced.json()["id"] != first.json()["id"]
     resources = client.get(
         "/api/v1/memos",
         params={"type": "resource"},
     ).json()["items"]
-    assert len(resources) == 1
+    assert len(resources) == 2
 
 
 def test_update_requires_current_version(client: TestClient) -> None:
@@ -180,6 +323,79 @@ def test_update_requires_current_version(client: TestClient) -> None:
     assert conflict.json()["detail"]["current"]["version"] == 2
 
 
+def test_memo_type_conversion_preserves_common_fields(client: TestClient) -> None:
+    """条目可转换类型，公共字段保留且不适用扩展字段会清理。"""
+
+    idea = create_idea(client)
+    missing_url = client.patch(
+        f"/api/v1/memos/{idea['id']}",
+        json={"expected_version": 1, "type": "resource"},
+    )
+    assert missing_url.status_code == 422
+
+    resource_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "可转换资料",
+            "body": "转换后仍保留的备注",
+            "source_url": "https://example.com/convert",
+        },
+    )
+    assert resource_response.status_code == 201
+    resource = resource_response.json()
+    word_response = client.patch(
+        f"/api/v1/memos/{resource['id']}",
+        json={"expected_version": resource["version"], "type": "word"},
+    )
+    assert word_response.status_code == 200
+    word = word_response.json()
+    assert word["type"] == "word"
+    assert word["title"] == resource["title"]
+    assert word["body"] == resource["body"]
+    assert word["source_url"] == resource["source_url"]
+    assert word["word_meaning"] == resource["body"]
+    assert word["resource_metadata_status"] == "none"
+
+    idea_response = client.patch(
+        f"/api/v1/memos/{word['id']}",
+        json={"expected_version": word["version"], "type": "idea"},
+    )
+    assert idea_response.status_code == 200
+    converted_idea = idea_response.json()
+    assert converted_idea["type"] == "idea"
+    assert converted_idea["source_url"] == resource["source_url"]
+    assert converted_idea["word_meaning"] is None
+    assert converted_idea["resource_metadata_status"] == "none"
+
+
+def test_type_conversion_respects_word_duplicate_protection(client: TestClient) -> None:
+    """转换为已有词形时仍然需要用户处理重复单词。"""
+
+    existing = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "focus",
+            "body": "专注",
+        },
+    )
+    idea = create_idea(client)
+    response = client.patch(
+        f"/api/v1/memos/{idea['id']}",
+        json={
+            "expected_version": 1,
+            "type": "word",
+            "title": "FOCUS",
+        },
+    )
+    assert existing.status_code == 201
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "duplicate_lemma"
+
+
 def test_sync_cursor_only_returns_newer_changes(client: TestClient) -> None:
     """增量同步游标不会重复返回旧数据。"""
 
@@ -188,13 +404,48 @@ def test_sync_cursor_only_returns_newer_changes(client: TestClient) -> None:
     assert first_sync.status_code == 200
     payload = first_sync.json()
     assert len(payload["items"]) == 1
+    assert payload["cursor_id"] == payload["items"][-1]["id"]
 
     second_sync = client.get(
         "/api/v1/sync/changes",
-        params={"cursor": payload["cursor"]},
+        params={
+            "cursor": payload["cursor"],
+            "cursor_id": payload["cursor_id"],
+        },
     )
     assert second_sync.status_code == 200
     assert second_sync.json()["items"] == []
+
+
+def test_sync_cursor_breaks_ties_with_memo_id(client: TestClient) -> None:
+    """相同更新时间的分页不会因时间游标而漏掉条目。"""
+
+    first_created = create_idea(client)
+    second_created = create_idea(client)
+    same_updated_at = datetime(2026, 9, 13, 12, tzinfo=UTC)
+    with client.app.state.database.session_factory() as session:
+        for memo_id in (first_created["id"], second_created["id"]):
+            memo = session.get(Memo, memo_id)
+            assert memo is not None
+            memo.updated_at = same_updated_at
+        session.commit()
+
+    first_page = client.get(
+        "/api/v1/sync/changes",
+        params={"limit": 1},
+    ).json()
+    assert first_page["cursor_id"] == first_page["items"][0]["id"]
+
+    second_page = client.get(
+        "/api/v1/sync/changes",
+        params={
+            "cursor": first_page["cursor"],
+            "cursor_id": first_page["cursor_id"],
+            "limit": 1,
+        },
+    ).json()
+    assert len(second_page["items"]) == 1
+    assert second_page["items"][0]["id"] != first_page["items"][0]["id"]
 
 
 def test_sync_includes_items_moved_to_trash(client: TestClient) -> None:
@@ -619,7 +870,48 @@ def test_memo_counts_include_current_resource_total(client: TestClient) -> None:
         "word_count": 0,
         "resource_count": 2,
         "idea_count": 1,
+        "image_count": 0,
+        "inbox_count": 1,
     }
+
+
+def test_inbox_list_returns_unorganized_ideas(client: TestClient) -> None:
+    """收件箱列表只返回 inbox 状态条目，整理后不再出现。"""
+
+    idea = create_idea(client)
+    organized = create_idea(client)
+    client.patch(
+        f"/api/v1/memos/{organized['id']}",
+        json={"expected_version": organized["version"], "status": "active"},
+    )
+    client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "word",
+            "title": "keep-out",
+            "body": "不应出现在收件箱",
+        },
+    )
+
+    inbox = client.get("/api/v1/memos", params={"status": "inbox"})
+    assert inbox.status_code == 200
+    payload = inbox.json()
+    assert payload["total_count"] == 1
+    assert [item["id"] for item in payload["items"]] == [idea["id"]]
+    assert payload["items"][0]["status"] == "inbox"
+
+    counts = client.get("/api/v1/memos/counts").json()
+    assert counts["inbox_count"] == 1
+
+    client.patch(
+        f"/api/v1/memos/{idea['id']}",
+        json={"expected_version": idea["version"], "status": "active"},
+    )
+    after = client.get("/api/v1/memos", params={"status": "inbox"}).json()
+    assert after["items"] == []
+    assert after["total_count"] == 0
+    assert client.get("/api/v1/memos/counts").json()["inbox_count"] == 0
 
 
 def test_memo_list_returns_total_for_filters(client: TestClient) -> None:
@@ -731,6 +1023,40 @@ def test_upload_and_download_idea_audio(client: TestClient) -> None:
     assert download_response.status_code == 200
     assert download_response.headers["content-type"] == "audio/webm"
     assert download_response.content == audio_content
+
+
+def test_upload_meeting_audio_preserves_transcript(client: TestClient) -> None:
+    """会议纪要正文与转写字段可以分别保存，上传音频不会覆盖转写。"""
+
+    created_response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "idea",
+            "title": "产品周会",
+            "body": "会议概要：确认上线时间。",
+            "transcript": "主持人：我们先确认上线时间。",
+            "tags": ["会议"],
+        },
+    )
+    assert created_response.status_code == 201
+    meeting = created_response.json()
+    assert meeting["transcript"] == "主持人：我们先确认上线时间。"
+
+    upload_response = client.post(
+        f"/api/v1/memos/{meeting['id']}/audio",
+        params={"expected_version": meeting["version"]},
+        content=b"meeting-audio",
+        headers={
+            "Content-Type": "audio/mp4",
+            "X-Audio-Duration-Ms": "120000",
+        },
+    )
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+    assert uploaded["body"] == "会议概要：确认上线时间。"
+    assert uploaded["transcript"] == "主持人：我们先确认上线时间。"
+    assert uploaded["transcript_status"] == "manual"
 
 
 def test_audio_rejects_wrong_memo_type_and_format(client: TestClient) -> None:

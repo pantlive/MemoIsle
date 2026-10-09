@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import httpx
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -25,6 +26,7 @@ from app.models import (
     AuthIdentity,
     AuthLoginAttempt,
     AuthSession,
+    AuthVerificationCode,
     User,
     utc_now,
 )
@@ -83,6 +85,20 @@ class EmailTokenInvalidError(Exception):
     """邮件令牌无效、已使用或已过期。"""
 
 
+class VerificationCodeInvalidError(Exception):
+    """邮箱验证码无效、已使用或已过期。"""
+
+
+class VerificationCodeRateLimitedError(Exception):
+    """邮箱验证码尚未达到下一次允许发送时间。"""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        """保存再次发送前需要等待的秒数。"""
+
+        super().__init__("验证码发送过于频繁")
+        self.retry_after_seconds = retry_after_seconds
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderProfile:
     """OAuth 提供方返回的最小身份信息。"""
@@ -114,8 +130,10 @@ def provider_label(provider: AuthProvider) -> str:
 
 
 def provider_enabled(settings: Settings, provider: AuthProvider) -> bool:
-    """判断提供方凭据是否配置完整。"""
+    """判断第三方登录是否对外开放且凭据配置完整。"""
 
+    if not settings.oauth_login_enabled:
+        return False
     match provider:
         case AuthProvider.GOOGLE:
             return bool(settings.google_client_id and settings.google_client_secret)
@@ -439,6 +457,158 @@ def _email_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _verification_code_hash(
+    settings: Settings,
+    email: str,
+    code: str,
+) -> str:
+    """使用应用密钥计算邮箱验证码哈希。"""
+
+    payload = f"{email}:{code}".encode()
+    return hmac.new(
+        settings.auth_token_secret.encode("utf-8"),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def generate_verification_code() -> str:
+    """生成六位数字邮箱验证码。"""
+
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def ensure_email_available(session: Session, email: str) -> None:
+    """检查邮箱尚未绑定邮箱密码账号。"""
+
+    normalized_email = email.strip().lower()
+    existing_credential = session.scalar(
+        select(AuthCredential).where(AuthCredential.email == normalized_email),
+    )
+    existing_user = session.scalar(
+        select(User).where(User.email == normalized_email),
+    )
+    if existing_credential is not None or existing_user is not None:
+        raise EmailAlreadyRegisteredError
+
+
+def prepare_verification_code(
+    session: Session,
+    settings: Settings,
+    email: str,
+) -> str:
+    """创建待发送验证码，发送成功前不提交数据库事务。"""
+
+    normalized_email = email.strip().lower()
+    ensure_email_available(session, normalized_email)
+    now = utc_now()
+
+    # 无意义写入只为占用该邮箱的行锁，避免并发重发都通过间隔检查。
+    session.execute(
+        update(AuthVerificationCode)
+        .where(AuthVerificationCode.email == normalized_email)
+        .values(email=normalized_email),
+    )
+    session.flush()
+
+    latest_code = session.scalar(
+        select(AuthVerificationCode)
+        .where(AuthVerificationCode.email == normalized_email)
+        .order_by(AuthVerificationCode.sent_at.desc()),
+    )
+    if latest_code is not None:
+        sent_at = _normalized_expires_at(latest_code.sent_at)
+        resend_at = sent_at + timedelta(
+            seconds=settings.auth_verification_code_resend_seconds,
+        )
+        if resend_at > now:
+            raise VerificationCodeRateLimitedError(
+                max(1, int((resend_at - now).total_seconds())),
+            )
+
+    # 新验证码签发时让同邮箱的旧验证码全部失效。
+    session.execute(
+        update(AuthVerificationCode)
+        .where(
+            AuthVerificationCode.email == normalized_email,
+            AuthVerificationCode.consumed_at.is_(None),
+        )
+        .values(consumed_at=now),
+    )
+    code = generate_verification_code()
+    session.add(
+        AuthVerificationCode(
+            id=str(uuid4()),
+            email=normalized_email,
+            code_hash=_verification_code_hash(settings, normalized_email, code),
+            sent_at=now,
+            expires_at=now
+            + timedelta(minutes=settings.auth_verification_code_expire_minutes),
+            attempt_count=0,
+        ),
+    )
+    try:
+        session.flush()
+    except IntegrityError as error:
+        raise VerificationCodeRateLimitedError(
+            settings.auth_verification_code_resend_seconds,
+        ) from error
+    return code
+
+
+def consume_verification_code(
+    session: Session,
+    settings: Settings,
+    email: str,
+    code: str,
+) -> None:
+    """校验并原子消费邮箱验证码。"""
+
+    normalized_email = email.strip().lower()
+    verification_code = session.scalar(
+        select(AuthVerificationCode)
+        .where(
+            AuthVerificationCode.email == normalized_email,
+            AuthVerificationCode.consumed_at.is_(None),
+        )
+        .order_by(AuthVerificationCode.sent_at.desc()),
+    )
+    now = utc_now()
+    if (
+        verification_code is None
+        or _normalized_expires_at(verification_code.expires_at) <= now
+        or (
+            verification_code.attempt_count
+            >= settings.auth_verification_code_max_attempts
+        )
+    ):
+        raise VerificationCodeInvalidError
+
+    expected_hash = _verification_code_hash(settings, normalized_email, code)
+    if not hmac.compare_digest(verification_code.code_hash, expected_hash):
+        next_attempt_count = verification_code.attempt_count + 1
+        verification_code.attempt_count = next_attempt_count
+        if next_attempt_count >= settings.auth_verification_code_max_attempts:
+            verification_code.consumed_at = now
+        session.commit()
+        raise VerificationCodeInvalidError
+
+    result = session.execute(
+        update(AuthVerificationCode)
+        .where(
+            AuthVerificationCode.id == verification_code.id,
+            AuthVerificationCode.consumed_at.is_(None),
+            AuthVerificationCode.attempt_count
+            < settings.auth_verification_code_max_attempts,
+        )
+        .values(consumed_at=now),
+    )
+    if int(result.rowcount or 0) != 1:
+        session.rollback()
+        raise VerificationCodeInvalidError
+    session.commit()
+
+
 def issue_email_token(
     session: Session,
     settings: Settings,
@@ -631,20 +801,18 @@ def register_with_password(
     password: str,
     display_name: str | None = None,
 ) -> User:
-    """创建待验证的邮箱密码账号。"""
+    """创建已通过邮箱验证码验证的邮箱密码账号。"""
 
-    existing_credential = session.scalar(
-        select(AuthCredential).where(AuthCredential.email == email),
-    )
+    ensure_email_available(session, email)
     existing_verified_user = session.scalar(select(User).where(User.email == email))
-    if existing_credential is not None or existing_verified_user is not None:
+    if existing_verified_user is not None:
         raise EmailAlreadyRegisteredError
 
     password_salt = secrets.token_bytes(16).hex()
     user = User(
         id=str(uuid4()),
-        email=None,
-        email_verified=False,
+        email=email,
+        email_verified=True,
         display_name=(display_name or email.rsplit("@", 1)[0])[:120],
     )
     credential = AuthCredential(

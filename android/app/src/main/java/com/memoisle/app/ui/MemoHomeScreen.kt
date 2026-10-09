@@ -5,10 +5,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.speech.tts.TextToSpeech
-import android.os.SystemClock
+import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,11 +32,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -63,6 +67,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -70,26 +77,43 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.memoisle.app.MemoIsleApplication
 import com.memoisle.app.MemoViewModel
 import com.memoisle.app.audio.VoiceRecorder
 import com.memoisle.app.audio.VoiceRecording
+import com.memoisle.app.audio.WordPronouncer
+import com.memoisle.app.audio.SherpaOnnxSpeechToText
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_IDEA
+import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
+import com.memoisle.app.data.formatFileSize
+import com.memoisle.app.data.hasUploadedImage
+import com.memoisle.app.data.imageDimensionsLabel
+import com.memoisle.app.data.imageOcrSourceLabel
+import com.memoisle.app.data.imageOcrStatusLabel
 import com.memoisle.app.data.isDueWord
 import com.memoisle.app.data.isInboxIdea
 import com.memoisle.app.data.isUnreadResource
+import com.memoisle.app.data.isInTrash
 import com.memoisle.app.data.isVisibleInLibrary
+import com.memoisle.app.data.linkHealthLabel
+import com.memoisle.app.data.trashDaysRemaining
 import com.memoisle.app.data.matchesQuery
 import com.memoisle.app.data.newLocalWord
 import com.memoisle.app.data.normalizeResourceUrl
 import com.memoisle.app.data.parseClipboardWord
+import com.memoisle.app.data.assignedCategoryCodes
 import com.memoisle.app.data.resourceCategoryLabel
 import com.memoisle.app.data.resourceHost
 import com.memoisle.app.data.todayReviewCounts
 import com.memoisle.app.data.todayReviewItems
+import com.memoisle.app.network.ReviewSettings
+import com.memoisle.app.network.WordLookupResponse
+import com.memoisle.app.network.WordLookupSense
+import java.nio.file.Paths
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -113,13 +137,26 @@ fun MemoHomeScreen(
     val coroutineScope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     val voiceRecorder = remember { VoiceRecorder(context.applicationContext) }
+    val speechToText = remember(context) { SherpaOnnxSpeechToText(context) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportUserData(uri, context.contentResolver)
+        }
+    }
     var draft by rememberSaveable { mutableStateOf("") }
     var selectedMemo by remember { mutableStateOf<Memo?>(null) }
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var sharedResourcePending by rememberSaveable { mutableStateOf(false) }
     var activeType by rememberSaveable { mutableStateOf(TYPE_IDEA) }
+    var libraryTypeFilter by rememberSaveable { mutableStateOf("") }
     var showAllMemos by rememberSaveable { mutableStateOf(false) }
     var showReview by rememberSaveable { mutableStateOf(false) }
+    var showTrash by rememberSaveable { mutableStateOf(false) }
+    var showInbox by rememberSaveable { mutableStateOf(false) }
+    var pendingPermanentDelete by remember { mutableStateOf<Memo?>(null) }
+    var pendingMoveToTrash by remember { mutableStateOf<Memo?>(null) }
     var showReviewAnswer by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var resourceUrl by rememberSaveable { mutableStateOf("") }
@@ -130,34 +167,160 @@ fun MemoHomeScreen(
     var wordPhonetic by rememberSaveable { mutableStateOf("") }
     var wordMeaning by rememberSaveable { mutableStateOf("") }
     var wordExample by rememberSaveable { mutableStateOf("") }
-    var wordSourceUrl by rememberSaveable { mutableStateOf("") }
+    val wordDraft = remember {
+        object {
+            var lemma = ""
+            var phonetic = ""
+            var meaning = ""
+            var example = ""
+            var autoPhonetic = ""
+            var autoMeaning = ""
+            var autoExample = ""
+        }
+    }
+    wordDraft.lemma = wordLemma
+    wordDraft.phonetic = wordPhonetic
+    wordDraft.meaning = wordMeaning
+    wordDraft.example = wordExample
     var reviewFilter by rememberSaveable { mutableStateOf("all") }
     var showVoiceDialog by rememberSaveable { mutableStateOf(false) }
     var isVoiceRecording by rememberSaveable { mutableStateOf(false) }
+    var isVoicePaused by rememberSaveable { mutableStateOf(false) }
     var voiceRecording by remember { mutableStateOf<VoiceRecording?>(null) }
     var voiceText by rememberSaveable { mutableStateOf("") }
     var voiceElapsedMs by rememberSaveable { mutableStateOf(0) }
+    var voiceAmplitude by rememberSaveable { mutableStateOf(0) }
     var voicePermissionDenied by rememberSaveable { mutableStateOf(false) }
+    var isVoiceTranscribing by rememberSaveable { mutableStateOf(false) }
+    var voiceTranscriptionMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var showVoiceDiscardConfirm by rememberSaveable { mutableStateOf(false) }
+    var pendingConflictMemo by remember { mutableStateOf<Memo?>(null) }
+    var resetEditorToServerMemo by remember { mutableStateOf<Memo?>(null) }
+    var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
+    var isPreparingLogout by rememberSaveable { mutableStateOf(false) }
     val normalizedSearchQuery = searchQuery.trim()
     val visibleMemos = memos.filter { memo ->
         val typeMatches = showAllMemos || normalizedSearchQuery.isNotEmpty() ||
             memo.type == activeType
+        val libraryTypeMatches = !showAllMemos || libraryTypeFilter.isEmpty() ||
+            memo.type == libraryTypeFilter
         val categoryMatches = showAllMemos || normalizedSearchQuery.isNotEmpty() ||
             activeType != TYPE_RESOURCE || resourceCategoryFilter.isEmpty() ||
-            memo.resourceCategory == resourceCategoryFilter
-        memo.isVisibleInLibrary() && typeMatches && categoryMatches &&
+            memo.assignedCategoryCodes().contains(resourceCategoryFilter)
+        memo.isVisibleInLibrary() && typeMatches && libraryTypeMatches && categoryMatches &&
             memo.matchesQuery(normalizedSearchQuery)
     }
     val libraryMemos = memos.filter { it.isVisibleInLibrary() }
+    val trashMemos = memos.filter { memo ->
+        memo.isInTrash() && memo.matchesQuery(normalizedSearchQuery)
+    }
+    val inboxMemos = memos.filter { memo ->
+        memo.status == "inbox" && memo.matchesQuery(normalizedSearchQuery)
+    }
     val reviewCounts = libraryMemos.todayReviewCounts()
-    val reviewItems = libraryMemos.todayReviewItems()
+    val reviewLimit = uiState.reviewSettings.dailyLimit
+    val reviewItems = libraryMemos.todayReviewItems(limit = reviewLimit)
     val filteredReviewItems = when (reviewFilter) {
-        TYPE_WORD -> libraryMemos.filter { it.isDueWord() }.take(10)
-        TYPE_RESOURCE -> libraryMemos.filter { it.isUnreadResource() }.take(10)
-        TYPE_IDEA -> libraryMemos.filter { it.isInboxIdea() }.take(10)
+        TYPE_WORD -> libraryMemos.filter { it.isDueWord() }.take(reviewLimit)
+        TYPE_RESOURCE -> libraryMemos.filter { it.isUnreadResource() }.take(reviewLimit)
+        TYPE_IDEA -> libraryMemos.filter { it.isInboxIdea() }.take(reviewLimit)
         else -> reviewItems
     }
     val currentReview = filteredReviewItems.firstOrNull()
+    var showReviewSettingsDialog by rememberSaveable { mutableStateOf(false) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.createImageMemo(uri, context.contentResolver) { created ->
+                // 上传成功后直接进入资料库的图片视图并打开详情，方便确认结果。
+                activeType = TYPE_IMAGE
+                libraryTypeFilter = TYPE_IMAGE
+                showAllMemos = true
+                showReview = false
+                showTrash = false
+                showInbox = false
+                searchQuery = ""
+                selectedMemo = created
+            }
+        }
+    }
+
+    fun resetVoiceRecording() {
+        voiceRecorder.cancel()
+        voiceRecording = null
+        isVoiceRecording = false
+        isVoicePaused = false
+        voiceAmplitude = 0
+        isVoiceTranscribing = false
+        voiceTranscriptionMessage = null
+        voiceElapsedMs = 0
+    }
+
+    fun discardVoiceCapture() {
+        resetVoiceRecording()
+        voiceText = ""
+        showVoiceDiscardConfirm = false
+        showVoiceDialog = false
+    }
+
+    fun requestVoiceDismiss() {
+        if (uiState.isSaving) {
+            return
+        }
+        if (isVoiceRecording || voiceRecording != null || voiceText.isNotBlank()) {
+            showVoiceDiscardConfirm = true
+        } else {
+            discardVoiceCapture()
+        }
+    }
+
+    fun openMemo(memo: Memo): Unit {
+        selectedMemo = memo
+        if (memo.syncState == SyncState.CONFLICT && memo.id != null) {
+            // 重启后重新读取服务端版本，确保冲突仍然可以选择两边内容。
+            viewModel.loadConflictServer(memo) { serverMemo ->
+                if (selectedMemo?.clientId == memo.clientId) {
+                    selectedMemo = serverMemo
+                    pendingConflictMemo = serverMemo
+                    resetEditorToServerMemo = null
+                }
+            }
+        }
+    }
+
+    fun requestLogout(): Unit {
+        if (uiState.isSaving || isPreparingLogout) {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("当前还有内容正在保存，请稍后再退出")
+            }
+            return
+        }
+        if (viewModel.unsyncedCount() == 0) {
+            onLogout()
+        } else {
+            showLogoutDialog = true
+        }
+    }
+
+    fun syncAndLogout(): Unit {
+        if (isPreparingLogout) {
+            return
+        }
+        isPreparingLogout = true
+        viewModel.syncBeforeLogout { completed ->
+            isPreparingLogout = false
+            if (completed) {
+                showLogoutDialog = false
+                onLogout()
+            } else {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("同步未完成，当前仍保持登录，内容不会被清理")
+                }
+            }
+        }
+    }
     fun fillWordFromClipboard(overwrite: Boolean = false): Boolean {
         val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
         val text = clipboard.primaryClip
@@ -167,6 +330,9 @@ fun MemoHomeScreen(
             ?.toString()
             .orEmpty()
         val draft = parseClipboardWord(text) ?: return false
+        if (overwrite) {
+            viewModel.clearWordLookup()
+        }
         if (overwrite || wordLemma.isBlank()) {
             wordLemma = draft.lemma
         }
@@ -185,6 +351,60 @@ fun MemoHomeScreen(
         return true
     }
 
+    fun applyDictionaryPreview(
+        preview: WordLookupResponse,
+        selectedSenses: List<WordLookupSense> = preview.senses.take(4),
+    ): List<String> {
+        val filled = mutableListOf<String>()
+        val meaning = selectedSenses.joinToString("\n") { sense ->
+            if (sense.partOfSpeech.isNullOrBlank()) {
+                sense.definition
+            } else {
+                "${sense.partOfSpeech}: ${sense.definition}"
+            }
+        }
+        val example = selectedSenses.firstOrNull { !it.example.isNullOrBlank() }
+            ?.example
+            .orEmpty()
+        val phonetic = preview.phonetic.orEmpty()
+        if (
+            phonetic.isNotBlank() &&
+            (wordDraft.phonetic.isBlank() || wordDraft.phonetic == wordDraft.autoPhonetic)
+        ) {
+            wordPhonetic = phonetic
+            wordDraft.autoPhonetic = phonetic
+            filled += "音标"
+        }
+        if (
+            meaning.isNotBlank() &&
+            (wordDraft.meaning.isBlank() || wordDraft.meaning == wordDraft.autoMeaning)
+        ) {
+            wordMeaning = meaning
+            wordDraft.autoMeaning = meaning
+            filled += "中文释义"
+        }
+        if (
+            example.isNotBlank() &&
+            (wordDraft.example.isBlank() || wordDraft.example == wordDraft.autoExample)
+        ) {
+            wordExample = example
+            wordDraft.autoExample = example
+            filled += "例句"
+        }
+        return filled
+    }
+
+    fun applyWordLookup(senses: List<WordLookupSense>) {
+        val preview = viewModel.uiState.wordLookup
+        if (preview != null) {
+            applyDictionaryPreview(preview, senses)
+        }
+        viewModel.clearWordLookup()
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar("已应用所选释义；手工填写内容已保留")
+        }
+    }
+
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -192,6 +412,8 @@ fun MemoHomeScreen(
         if (granted && voiceRecorder.start()) {
             voiceRecording = null
             voiceElapsedMs = 0
+            voiceAmplitude = 0
+            isVoicePaused = false
             isVoiceRecording = true
         }
     }
@@ -200,14 +422,84 @@ fun MemoHomeScreen(
         onDispose { voiceRecorder.cancel() }
     }
 
+    DisposableEffect(speechToText) {
+        onDispose { speechToText.close() }
+    }
+
     LaunchedEffect(isVoiceRecording) {
         if (isVoiceRecording) {
-            val startedAt = SystemClock.elapsedRealtime()
             while (isVoiceRecording) {
-                voiceElapsedMs = (SystemClock.elapsedRealtime() - startedAt)
-                    .coerceAtMost(Int.MAX_VALUE.toLong())
-                    .toInt()
+                voiceElapsedMs = voiceRecorder.elapsedMs()
                 delay(250)
+            }
+        }
+    }
+
+    LaunchedEffect(isVoiceRecording, isVoicePaused) {
+        if (isVoiceRecording && !isVoicePaused) {
+            while (isVoiceRecording && !isVoicePaused) {
+                voiceAmplitude = voiceRecorder.amplitudePercent()
+                delay(100)
+            }
+        }
+        voiceAmplitude = 0
+    }
+
+    LaunchedEffect(voiceRecording?.path) {
+        val recording = voiceRecording ?: return@LaunchedEffect
+        if (isVoiceRecording) {
+            return@LaunchedEffect
+        }
+        isVoiceTranscribing = true
+        voiceTranscriptionMessage = if (speechToText.isAvailable) {
+            "正在使用设备端 SenseVoice 转写…"
+        } else {
+            "首次使用正在下载设备端语音模型（约 160 MB）…"
+        }
+        val modelResult = speechToText.ensureAvailable()
+        if (modelResult.isFailure) {
+            isVoiceTranscribing = false
+            voiceTranscriptionMessage = modelResult.exceptionOrNull()?.message
+                ?: "设备端模型下载失败，可手动填写文字。"
+            return@LaunchedEffect
+        }
+        voiceTranscriptionMessage = "正在使用设备端 SenseVoice 转写…"
+        val result = speechToText.transcribe(Paths.get(recording.path))
+        result.onSuccess { transcript ->
+            if (voiceText.isBlank()) {
+                voiceText = transcript
+            }
+            isVoiceTranscribing = false
+            voiceTranscriptionMessage = if (transcript.isBlank()) {
+                "未识别到可用文字，请手动补充。"
+            } else {
+                "转写完成，可直接编辑结果。"
+            }
+        }.onFailure { error ->
+            isVoiceTranscribing = false
+            voiceTranscriptionMessage = error.message ?: "设备端转写失败，可手动填写文字。"
+        }
+    }
+
+    LaunchedEffect(wordLemma, activeType) {
+        if (activeType != TYPE_WORD) {
+            return@LaunchedEffect
+        }
+        val cleaned = wordLemma.trim()
+        if (parseClipboardWord(cleaned) == null) {
+            return@LaunchedEffect
+        }
+        delay(450)
+        viewModel.lookupWord(
+            cleaned,
+            silent = true,
+            showPreview = false,
+        ) { preview ->
+            val filled = applyDictionaryPreview(preview)
+            if (filled.isNotEmpty()) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("已自动填入${filled.joinToString("、")}")
+                }
             }
         }
     }
@@ -216,7 +508,10 @@ fun MemoHomeScreen(
         uiState.message?.let { message ->
             val result = snackbarHostState.showSnackbar(
                 message = message,
-                actionLabel = if (uiState.undoMemo != null && message.contains("已收藏")) {
+                actionLabel = if (
+                    uiState.undoMemo != null &&
+                    (message.contains("已保存") || message.contains("已收藏"))
+                ) {
                     "撤销"
                 } else {
                     null
@@ -254,18 +549,26 @@ fun MemoHomeScreen(
             MemoBottomNavigation(
                 showAllMemos = showAllMemos,
                 showReview = showReview,
+                showTrash = showTrash,
+                showInbox = showInbox,
                 onShowHome = {
                     showAllMemos = false
                     showReview = false
+                    showTrash = false
+                    showInbox = false
                     searchQuery = ""
                 },
                 onShowLibrary = {
                     showAllMemos = true
                     showReview = false
+                    showTrash = false
+                    showInbox = false
                 },
                 onShowReview = {
                     showReview = true
                     showAllMemos = false
+                    showTrash = false
+                    showInbox = false
                     searchQuery = ""
                     showReviewAnswer = false
                 },
@@ -274,6 +577,14 @@ fun MemoHomeScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
+                    if (activeType == TYPE_IMAGE) {
+                        imagePickerLauncher.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly,
+                            ),
+                        )
+                        return@FloatingActionButton
+                    }
                     if (activeType == TYPE_RESOURCE) {
                         activeType = TYPE_IDEA
                     }
@@ -307,8 +618,27 @@ fun MemoHomeScreen(
             item {
                 MemoHeader(
                     isRefreshing = uiState.isRefreshing,
+                    isSaving = uiState.isSaving,
+                    isExporting = uiState.isExporting,
                     onRefresh = viewModel::refresh,
-                    onLogout = onLogout,
+                    onExport = { exportLauncher.launch("memoisle-export.json") },
+                    onLogout = ::requestLogout,
+                    showTrash = showTrash,
+                    showInbox = showInbox,
+                    onShowTrash = {
+                        showTrash = true
+                        showInbox = false
+                        showReview = false
+                        showAllMemos = false
+                        selectedMemo = null
+                    },
+                    onShowInbox = {
+                        showInbox = true
+                        showTrash = false
+                        showReview = false
+                        showAllMemos = false
+                        selectedMemo = null
+                    },
                 )
             }
             item {
@@ -316,14 +646,99 @@ fun MemoHomeScreen(
                     value = searchQuery,
                     onValueChange = { value ->
                         searchQuery = value
-                        if (value.isNotBlank()) {
+                        if (value.isNotBlank() && !showTrash && !showInbox) {
                             showAllMemos = true
                         }
                     },
                     onClear = { searchQuery = "" },
                 )
             }
-            if (showReview) {
+            if (showInbox) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "收件箱",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = "${inboxMemos.size} 条待整理",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+                if (inboxMemos.isEmpty()) {
+                    item {
+                        Text(
+                            text = if (normalizedSearchQuery.isNotEmpty()) {
+                                "收件箱里没有匹配内容"
+                            } else {
+                                "收件箱是空的。快速记下的灵感会先到这里。"
+                            },
+                            color = TextMuted,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                } else {
+                    items(items = inboxMemos, key = Memo::clientId) { memo ->
+                        InboxMemoRow(
+                            memo = memo,
+                            isSaving = uiState.isSaving,
+                            onOpen = { openMemo(memo) },
+                            onOrganize = {
+                                viewModel.organizeIdea(memo, memo.title, memo.body) {}
+                            },
+                            onArchive = { viewModel.archiveIdea(memo) {} },
+                        )
+                    }
+                }
+            } else if (showTrash) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "回收站",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = "${trashMemos.size} 条 · 保留 30 天",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+                if (trashMemos.isEmpty()) {
+                    item {
+                        Text(
+                            text = if (normalizedSearchQuery.isNotEmpty()) {
+                                "回收站里没有匹配内容"
+                            } else {
+                                "回收站是空的。删除的内容会在这里保留 30 天。"
+                            },
+                            color = TextMuted,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                } else {
+                    items(items = trashMemos, key = Memo::clientId) { memo ->
+                        TrashMemoRow(
+                            memo = memo,
+                            isSaving = uiState.isSaving,
+                            onRestore = { viewModel.restoreMemo(memo) },
+                            onPermanentDelete = { pendingPermanentDelete = memo },
+                        )
+                    }
+                }
+            } else if (showReview) {
                 item {
                     ReviewSession(
                         current = currentReview,
@@ -331,8 +746,10 @@ fun MemoHomeScreen(
                         resourceCount = reviewCounts.resourceCount,
                         ideaCount = reviewCounts.ideaCount,
                         remainingCount = filteredReviewItems.size,
+                        dailyLimit = reviewLimit,
                         filter = reviewFilter,
                         onFilterChange = { reviewFilter = it },
+                        onOpenSettings = { showReviewSettingsDialog = true },
                         showAnswer = showReviewAnswer,
                         isSaving = uiState.isSaving,
                         onShowAnswer = { showReviewAnswer = true },
@@ -384,6 +801,7 @@ fun MemoHomeScreen(
                 item {
                     QuickActions(
                         activeType = activeType,
+                        isUploadingImage = uiState.isUploadingImage,
                         onSelectWord = {
                             fillWordFromClipboard(overwrite = wordLemma.isBlank())
                             activeType = TYPE_WORD
@@ -396,11 +814,22 @@ fun MemoHomeScreen(
                             showCreateDialog = true
                         },
                         onBrowseResource = {
+                            viewModel.clearWordLookup()
                             activeType = TYPE_RESOURCE
                             showAllMemos = false
                             showCreateDialog = false
                         },
                         onSelectVoice = { showVoiceDialog = true },
+                        onSelectImage = {
+                            activeType = TYPE_IMAGE
+                            showAllMemos = false
+                            showCreateDialog = false
+                            imagePickerLauncher.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
+                            )
+                        },
                     )
                 }
                 item {
@@ -417,6 +846,17 @@ fun MemoHomeScreen(
                         )
                     } else if (activeType == TYPE_RESOURCE) {
                         ResourceReadOnlyCard()
+                    } else if (activeType == TYPE_IMAGE) {
+                        ImageComposerCard(
+                            isUploading = uiState.isUploadingImage,
+                            onPickImage = {
+                                imagePickerLauncher.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            },
+                        )
                     } else {
                         WordComposer(
                             lemma = wordLemma,
@@ -424,26 +864,32 @@ fun MemoHomeScreen(
                             meaning = wordMeaning,
                             example = wordExample,
                             isSaving = uiState.isSaving,
-                            onLemmaChange = { wordLemma = it },
+                            isLookingUp = uiState.isLookingUpWord,
+                            lookup = uiState.wordLookup,
+                            showLookupPreview = !showCreateDialog,
+                            onLemmaChange = {
+                                wordLemma = it
+                                viewModel.clearWordLookup()
+                            },
                             onPhoneticChange = { wordPhonetic = it },
                             onMeaningChange = { wordMeaning = it },
                             onExampleChange = { wordExample = it },
-                            sourceUrl = wordSourceUrl,
-                            onSourceUrlChange = { wordSourceUrl = it },
                             onFillClipboard = { fillWordFromClipboard(overwrite = true) },
+                            onLookup = { viewModel.lookupWord(wordLemma) },
+                            onClearLookup = viewModel::clearWordLookup,
+                            onApplyLookup = ::applyWordLookup,
                             onSave = {
                                 viewModel.createWord(
                                     wordLemma,
                                     wordPhonetic,
                                     wordMeaning,
                                     wordExample,
-                                    wordSourceUrl.trim().ifEmpty { null },
                                 ) {
+                                    viewModel.clearWordLookup()
                                     wordLemma = ""
                                     wordPhonetic = ""
                                     wordMeaning = ""
                                     wordExample = ""
-                                    wordSourceUrl = ""
                                 }
                             },
                         )
@@ -456,6 +902,19 @@ fun MemoHomeScreen(
                             onSelect = { resourceCategoryFilter = it },
                         )
                     }
+                }
+            }
+            if (showAllMemos && !showReview && !showTrash && !showInbox) {
+                item {
+                    LibraryTypeFilter(
+                        selected = libraryTypeFilter,
+                        onSelect = { value ->
+                            libraryTypeFilter = value
+                            if (value.isNotEmpty()) {
+                                showAllMemos = true
+                            }
+                        },
+                    )
                 }
             }
             if (!showReview) item {
@@ -475,11 +934,13 @@ fun MemoHomeScreen(
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = when {
-                            normalizedSearchQuery.isNotEmpty() || showAllMemos -> {
-                                "${visibleMemos.size} 条内容"
-                            }
+                            normalizedSearchQuery.isNotEmpty() -> "${visibleMemos.size} 条内容"
+                            showAllMemos && libraryTypeFilter == TYPE_IMAGE ->
+                                "${visibleMemos.size} 张图片"
+                            showAllMemos -> "${visibleMemos.size} 条内容"
                             activeType == TYPE_IDEA -> "${visibleMemos.size} 条灵感"
                             activeType == TYPE_RESOURCE -> "${visibleMemos.size} 条资料"
+                            activeType == TYPE_IMAGE -> "${visibleMemos.size} 张图片"
                             else -> "${visibleMemos.size} 个单词"
                         },
                         color = TextMuted,
@@ -487,7 +948,7 @@ fun MemoHomeScreen(
                     )
                 }
             }
-            if (!showReview) {
+            if (!showReview && !showTrash && !showInbox) {
             if (visibleMemos.isEmpty()) {
                 item {
                     EmptyMemos(
@@ -498,7 +959,13 @@ fun MemoHomeScreen(
                 }
             } else {
                 items(items = visibleMemos, key = Memo::clientId) { memo ->
-                    MemoRow(memo = memo, onClick = { selectedMemo = memo })
+                    MemoRow(
+                        memo = memo,
+                        onClick = { openMemo(memo) },
+                        imageThumbnail = viewModel.imageThumbnail(memo),
+                        imageLoading = viewModel.isImageLoading(memo, thumbnail = true),
+                        onRequestThumbnail = { viewModel.requestImageThumbnail(memo) },
+                    )
                 }
             }
             }
@@ -509,7 +976,12 @@ fun MemoHomeScreen(
         if (memo.type == TYPE_RESOURCE) {
             ResourceDetailDialog(
                 memo = memo,
-                onDismiss = { selectedMemo = null },
+                        onDismiss = { selectedMemo = null },
+                onMoveToTrash = { pendingMoveToTrash = memo },
+                isSaving = uiState.isSaving,
+                onArchive = {
+                    viewModel.archiveMemo(memo) { selectedMemo = null }
+                },
                 onOpen = { memo.sourceUrl?.let(uriHandler::openUri) },
                 onCopy = {
                     val clipboard = context.getSystemService(ClipboardManager::class.java)
@@ -529,11 +1001,42 @@ fun MemoHomeScreen(
                     context.startActivity(Intent.createChooser(shareIntent, "分享网页资料"))
                 },
             )
+        } else if (memo.type == TYPE_IMAGE) {
+            ImageDetailDialog(
+                memo = memo,
+                isSaving = uiState.isSaving,
+                thumbnail = viewModel.imageThumbnail(memo),
+                fullImage = viewModel.imageFullImage(memo),
+                isLoadingThumbnail = viewModel.isImageLoading(memo, thumbnail = true),
+                isLoadingFull = viewModel.isImageLoading(memo, thumbnail = false),
+                onDismiss = {
+                    viewModel.releaseFullImage(memo)
+                    selectedMemo = null
+                },
+                onMoveToTrash = { pendingMoveToTrash = memo },
+                onRequestThumbnail = { viewModel.requestImageThumbnail(memo) },
+                onRequestFull = { viewModel.requestFullImage(memo) },
+                onShare = {
+                    // 项目没有文件分享的 FileProvider，这里只分享标题与备注文字。
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(
+                            Intent.EXTRA_TEXT,
+                            listOfNotNull(
+                                memo.title,
+                                memo.body.takeIf { it.isNotBlank() },
+                            ).joinToString("\n"),
+                        )
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "分享图片收藏"))
+                },
+            )
         } else {
             EditMemoDialog(
                 memo = memo,
                 isSaving = uiState.isSaving,
                 onDismiss = { selectedMemo = null },
+                onMoveToTrash = { pendingMoveToTrash = memo },
                 onSave = { title, body, phonetic, meaning, example ->
                     viewModel.updateMemo(
                         memo,
@@ -545,8 +1048,10 @@ fun MemoHomeScreen(
                         example,
                         onSuccess = { selectedMemo = null },
                         onConflict = { currentMemo ->
-                            // 用服务端最新版本替换编辑基线，但保留对话框让用户确认后再保存。
+                            // 保留编辑器中的本地字段，等待用户决定采用哪一个版本。
                             selectedMemo = currentMemo
+                            pendingConflictMemo = currentMemo
+                            resetEditorToServerMemo = null
                         },
                     )
                 },
@@ -558,8 +1063,79 @@ fun MemoHomeScreen(
                 onPlayAudio = {
                     viewModel.playAudio(memo)
                 },
+                resetToServerMemo = resetEditorToServerMemo,
             )
         }
+    }
+
+    pendingConflictMemo?.let { serverMemo ->
+        ConflictResolutionDialog(
+            serverMemo = serverMemo,
+            onKeepLocal = {
+                pendingConflictMemo = null
+                selectedMemo = serverMemo
+                resetEditorToServerMemo = null
+            },
+            onUseServer = {
+                viewModel.resolveConflictWithServer(serverMemo)
+                pendingConflictMemo = null
+                selectedMemo = serverMemo
+                resetEditorToServerMemo = serverMemo
+            },
+            onLater = {
+                pendingConflictMemo = null
+                selectedMemo = null
+                resetEditorToServerMemo = null
+            },
+        )
+    }
+
+    if (showLogoutDialog) {
+        val unsyncedCount = viewModel.unsyncedCount()
+        AlertDialog(
+            onDismissRequest = {
+                if (!isPreparingLogout) {
+                    showLogoutDialog = false
+                }
+            },
+            title = { Text("还有内容尚未同步") },
+            text = {
+                Text(
+                    "当前有 $unsyncedCount 条内容等待同步或处理。先完成同步再退出，避免本机录音和编辑内容被清理。",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = ::syncAndLogout,
+                    enabled = !isPreparingLogout && !uiState.isRefreshing,
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                ) {
+                    Text(if (isPreparingLogout) "同步中…" else "同步并退出")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showLogoutDialog = false },
+                    enabled = !isPreparingLogout,
+                ) {
+                    Text("继续编辑")
+                }
+            },
+            containerColor = SurfaceWhite,
+            shape = RoundedCornerShape(14.dp),
+        )
+    }
+
+    if (showReviewSettingsDialog) {
+        ReviewSettingsDialog(
+            settings = uiState.reviewSettings,
+            isSaving = uiState.isSaving,
+            onDismiss = { if (!uiState.isSaving) showReviewSettingsDialog = false },
+            onSave = { dailyLimit, intervalsDays ->
+                viewModel.saveReviewSettings(dailyLimit, intervalsDays)
+                showReviewSettingsDialog = false
+            },
+        )
     }
 
     if (showCreateDialog && activeType == TYPE_IDEA) {
@@ -585,7 +1161,11 @@ fun MemoHomeScreen(
                 showCreateDialog = false
             },
             onSave = {
-                viewModel.createSharedResource(resourceUrl, resourceTitle, resourceNote) {
+                viewModel.createSharedResource(
+                    url = resourceUrl,
+                    title = resourceTitle,
+                    note = resourceNote,
+                ) {
                     resourceUrl = ""
                     resourceTitle = ""
                     resourceNote = ""
@@ -602,27 +1182,35 @@ fun MemoHomeScreen(
             meaning = wordMeaning,
             example = wordExample,
             isSaving = uiState.isSaving,
-            onLemmaChange = { wordLemma = it },
+            isLookingUp = uiState.isLookingUpWord,
+            lookup = uiState.wordLookup,
+            onLemmaChange = {
+                wordLemma = it
+                viewModel.clearWordLookup()
+            },
             onPhoneticChange = { wordPhonetic = it },
             onMeaningChange = { wordMeaning = it },
             onExampleChange = { wordExample = it },
-            sourceUrl = wordSourceUrl,
-            onSourceUrlChange = { wordSourceUrl = it },
             onFillClipboard = { fillWordFromClipboard(overwrite = true) },
-            onDismiss = { showCreateDialog = false },
+            onLookup = { viewModel.lookupWord(wordLemma) },
+            onClearLookup = viewModel::clearWordLookup,
+            onApplyLookup = ::applyWordLookup,
+            onDismiss = {
+                viewModel.clearWordLookup()
+                showCreateDialog = false
+            },
             onSave = {
                 viewModel.createWord(
                     wordLemma,
                     wordPhonetic,
                     wordMeaning,
                     wordExample,
-                    wordSourceUrl.trim().ifEmpty { null },
                 ) {
+                    viewModel.clearWordLookup()
                     wordLemma = ""
                     wordPhonetic = ""
                     wordMeaning = ""
                     wordExample = ""
-                    wordSourceUrl = ""
                     showCreateDialog = false
                 }
             },
@@ -640,14 +1228,12 @@ fun MemoHomeScreen(
                     onClick = {
                         viewModel.mergeWord(
                             existing,
-                            newLocalWord(wordLemma, wordPhonetic, wordMeaning, wordExample)
-                                .copy(sourceUrl = wordSourceUrl.trim().ifEmpty { null }),
+                            newLocalWord(wordLemma, wordPhonetic, wordMeaning, wordExample),
                         ) {
                             wordLemma = ""
                             wordPhonetic = ""
                             wordMeaning = ""
                             wordExample = ""
-                            wordSourceUrl = ""
                             showCreateDialog = false
                         }
                     },
@@ -669,14 +1255,54 @@ fun MemoHomeScreen(
                                 wordPhonetic,
                                 wordMeaning,
                                 wordExample,
-                                wordSourceUrl.trim().ifEmpty { null },
                                 allowDuplicate = true,
                             ) {
                                 wordLemma = ""
                                 wordPhonetic = ""
                                 wordMeaning = ""
                                 wordExample = ""
-                                wordSourceUrl = ""
+                                showCreateDialog = false
+                            }
+                        },
+                    ) { Text("仍然保存") }
+                }
+            },
+        )
+    }
+    uiState.duplicateResource?.let { existing ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearDuplicateResource() },
+            title = { Text("已收藏相同网址") },
+            text = {
+                Text("“${existing.title}”已经在资料库中。可以查看已有资料，或仍然另外保存。")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        selectedMemo = existing
+                        viewModel.clearDuplicateResource()
+                        sharedResourcePending = false
+                        showCreateDialog = false
+                    },
+                ) { Text("查看已有") }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { viewModel.clearDuplicateResource() }) {
+                        Text("稍后")
+                    }
+                    TextButton(
+                        onClick = {
+                            viewModel.createSharedResource(
+                                url = resourceUrl,
+                                title = resourceTitle,
+                                note = resourceNote,
+                                allowDuplicate = true,
+                            ) {
+                                resourceUrl = ""
+                                resourceTitle = ""
+                                resourceNote = ""
+                                sharedResourcePending = false
                                 showCreateDialog = false
                             }
                         },
@@ -689,13 +1315,18 @@ fun MemoHomeScreen(
         VoiceCaptureDialog(
             text = voiceText,
             isRecording = isVoiceRecording,
+            isPaused = isVoicePaused,
             recording = voiceRecording,
             elapsedMs = voiceElapsedMs,
+            amplitudePercent = voiceAmplitude,
+            isTranscribing = isVoiceTranscribing,
+            transcriptionMessage = voiceTranscriptionMessage,
             isSaving = uiState.isSaving,
             permissionDenied = voicePermissionDenied,
             onTextChange = { voiceText = it },
             onStart = {
                 voicePermissionDenied = false
+                voiceTranscriptionMessage = null
                 val permission = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.RECORD_AUDIO,
@@ -704,6 +1335,8 @@ fun MemoHomeScreen(
                     if (voiceRecorder.start()) {
                         voiceRecording = null
                         voiceElapsedMs = 0
+                        voiceAmplitude = 0
+                        isVoicePaused = false
                         isVoiceRecording = true
                     }
                 } else {
@@ -713,22 +1346,31 @@ fun MemoHomeScreen(
             onStop = {
                 voiceRecording = voiceRecorder.stop()
                 isVoiceRecording = false
+                isVoicePaused = false
+                voiceAmplitude = 0
                 voiceElapsedMs = voiceRecording?.durationMs ?: 0
+                if (voiceRecording == null) {
+                    voiceTranscriptionMessage = "录音没有保存成功，请重试。"
+                }
             },
             onReset = {
-                voiceRecorder.cancel()
-                voiceRecording = null
-                voiceElapsedMs = 0
-                isVoiceRecording = false
+                resetVoiceRecording()
             },
-            onDismiss = {
-                voiceRecorder.cancel()
-                voiceRecording = null
-                voiceText = ""
-                voiceElapsedMs = 0
-                isVoiceRecording = false
-                showVoiceDialog = false
+            onTogglePause = {
+                if (isVoicePaused) {
+                    if (voiceRecorder.resume()) {
+                        isVoicePaused = false
+                    } else {
+                        voiceTranscriptionMessage = "当前设备暂不支持继续录音，请结束当前录音。"
+                    }
+                } else if (voiceRecorder.pause()) {
+                    isVoicePaused = true
+                    voiceAmplitude = 0
+                } else {
+                    voiceTranscriptionMessage = "当前设备暂不支持暂停录音，请直接结束录音。"
+                }
             },
+            onRequestDismiss = ::requestVoiceDismiss,
             onSave = {
                 voiceRecording?.let { recording ->
                     viewModel.createVoiceIdea(
@@ -746,13 +1388,99 @@ fun MemoHomeScreen(
             },
         )
     }
+
+    if (showVoiceDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = { showVoiceDiscardConfirm = false },
+            title = { Text("放弃这段记录？") },
+            text = { Text("录音和当前文字不会保存，确定要放弃吗？") },
+            confirmButton = {
+                Button(
+                    onClick = ::discardVoiceCapture,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("放弃记录") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVoiceDiscardConfirm = false }) {
+                    Text("继续编辑")
+                }
+            },
+        )
+    }
+
+    pendingMoveToTrash?.let { memo ->
+        AlertDialog(
+            onDismissRequest = { pendingMoveToTrash = null },
+            title = { Text("移入回收站") },
+            text = {
+                Text("「${memo.title}」将移入回收站，30 天后永久删除。继续吗？")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingMoveToTrash = null
+                        selectedMemo = null
+                        viewModel.releaseFullImage(memo)
+                        viewModel.moveToTrash(memo)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
+                ) {
+                    Text("移入回收站")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingMoveToTrash = null }) {
+                    Text("取消")
+                }
+            },
+            containerColor = SurfaceWhite,
+            shape = RoundedCornerShape(14.dp),
+        )
+    }
+
+    pendingPermanentDelete?.let { memo ->
+        AlertDialog(
+            onDismissRequest = { pendingPermanentDelete = null },
+            title = { Text("永久删除") },
+            text = {
+                Text("将永久删除「${memo.title}」，此操作不可恢复。确定继续吗？")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingPermanentDelete = null
+                        viewModel.permanentlyDeleteMemo(memo)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
+                ) {
+                    Text("永久删除")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingPermanentDelete = null }) {
+                    Text("取消")
+                }
+            },
+            containerColor = SurfaceWhite,
+            shape = RoundedCornerShape(14.dp),
+        )
+    }
 }
 
 @Composable
 private fun MemoHeader(
     isRefreshing: Boolean,
+    isSaving: Boolean,
+    isExporting: Boolean,
     onRefresh: () -> Unit,
+    onExport: () -> Unit,
     onLogout: () -> Unit,
+    showTrash: Boolean,
+    showInbox: Boolean,
+    onShowTrash: () -> Unit,
+    onShowInbox: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -772,6 +1500,12 @@ private fun MemoHeader(
             )
         }
         Spacer(Modifier.weight(1f))
+        TextButton(onClick = onShowInbox) {
+            Text(if (showInbox) "收件箱中" else "收件箱")
+        }
+        TextButton(onClick = onShowTrash) {
+            Text(if (showTrash) "回收站中" else "回收站")
+        }
         TextButton(onClick = onRefresh, enabled = !isRefreshing) {
             if (isRefreshing) {
                 CircularProgressIndicator(
@@ -781,6 +1515,19 @@ private fun MemoHeader(
                 Spacer(Modifier.width(8.dp))
             }
             Text(if (isRefreshing) "同步中" else "同步")
+        }
+        TextButton(
+            onClick = onExport,
+            enabled = !isRefreshing && !isSaving && !isExporting,
+        ) {
+            if (isExporting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(if (isExporting) "导出中" else "导出")
         }
         TextButton(onClick = onLogout) {
             Text("退出")
@@ -869,14 +1616,96 @@ private fun ReviewCard(
 }
 
 @Composable
+private fun ReviewSettingsDialog(
+    settings: ReviewSettings,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (Int, List<Int>) -> Unit,
+) {
+    var dailyLimitText by remember(settings) {
+        mutableStateOf(settings.dailyLimit.toString())
+    }
+    var intervalsText by remember(settings) {
+        mutableStateOf(settings.intervalsDays.joinToString(", "))
+    }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = { Text("复习计划", fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "每日队列会混合单词、待读资料和待整理灵感。单词反馈会使用下面的间隔。",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = dailyLimitText,
+                    onValueChange = { dailyLimitText = it },
+                    label = { Text("每日队列上限（1–100）") },
+                    singleLine = true,
+                    enabled = !isSaving,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = intervalsText,
+                    onValueChange = { intervalsText = it },
+                    label = { Text("间隔天数（6 个，用逗号分隔）") },
+                    supportingText = { Text("忘记后、模糊后/熟悉度 1、熟悉度 2–5") },
+                    singleLine = true,
+                    enabled = !isSaving,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                errorText?.let { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val dailyLimit = dailyLimitText.trim().toIntOrNull()
+                    val intervals = intervalsText.split(",").map { it.trim().toIntOrNull() }
+                    if (dailyLimit == null || dailyLimit !in 1..100) {
+                        errorText = "每日上限需要是 1–100 的整数"
+                    } else if (intervals.size != 6 || intervals.any {
+                            it == null || it !in 1..365
+                        }
+                    ) {
+                        errorText = "间隔需要是 6 个 1–365 天的整数"
+                    } else {
+                        errorText = null
+                        onSave(dailyLimit, intervals.filterNotNull())
+                    }
+                },
+                enabled = !isSaving,
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+            ) {
+                Text(if (isSaving) "保存中…" else "保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
+                Text("取消")
+            }
+        },
+        containerColor = SurfaceWhite,
+        shape = RoundedCornerShape(14.dp),
+    )
+}
+
+@Composable
 private fun ReviewSession(
     current: Memo?,
     wordCount: Int,
     resourceCount: Int,
     ideaCount: Int,
     remainingCount: Int,
+    dailyLimit: Int,
     filter: String,
     onFilterChange: (String) -> Unit,
+    onOpenSettings: () -> Unit,
     showAnswer: Boolean,
     isSaving: Boolean,
     onShowAnswer: () -> Unit,
@@ -888,7 +1717,16 @@ private fun ReviewSession(
     onArchiveIdea: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("今日回顾", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("今日回顾", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onOpenSettings) {
+                Text("复习计划")
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
                 "all" to "混合",
@@ -908,7 +1746,8 @@ private fun ReviewSession(
             }
         }
         Text(
-            "$wordCount 个单词 · $resourceCount 篇待读 · $ideaCount 条待整理",
+            "$remainingCount / $dailyLimit 条今日计划 · " +
+                "$wordCount 个单词 · $resourceCount 篇待读 · $ideaCount 条待整理",
             color = TextMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -952,10 +1791,10 @@ private fun ReviewSession(
                 Text(current.title, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
                 when (current.type) {
                     TYPE_WORD -> {
-                        WordPronunciationRow(lemma = current.title)
-                        current.wordPhonetic?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, color = TextMuted)
-                        }
+                        ClickablePhonetic(
+                            lemma = current.title,
+                            phonetic = current.wordPhonetic,
+                        )
                         current.wordExample?.takeIf { it.isNotBlank() }?.let {
                             Text("“$it”", color = TextMuted)
                         }
@@ -1046,32 +1885,37 @@ private fun ReviewSession(
 @Composable
 private fun QuickActions(
     activeType: String,
+    isUploadingImage: Boolean,
     onSelectWord: () -> Unit,
     onSelectIdea: () -> Unit,
     onBrowseResource: () -> Unit,
     onSelectVoice: () -> Unit,
+    onSelectImage: () -> Unit,
 ) {
     val actions = listOf(
         "Aa" to "记单词",
         "↗" to "看资料",
         "✦" to "写灵感",
         "●" to "语音记录",
+        "▣" to "图片",
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         actions.forEach { (icon, label) ->
-            val enabled = label in setOf("记单词", "看资料", "写灵感", "语音记录")
+            val uploading = label == "图片" && isUploadingImage
             val selected = (label == "写灵感" && activeType == TYPE_IDEA) ||
                 (label == "看资料" && activeType == TYPE_RESOURCE) ||
-                (label == "记单词" && activeType == TYPE_WORD)
+                (label == "记单词" && activeType == TYPE_WORD) ||
+                (label == "图片" && activeType == TYPE_IMAGE)
             Column(
-                modifier = Modifier.clickable(enabled = enabled) {
+                modifier = Modifier.clickable {
                     when (label) {
                         "记单词" -> onSelectWord()
                         "写灵感" -> onSelectIdea()
                         "看资料" -> onBrowseResource()
+                        "图片" -> onSelectImage()
                         else -> onSelectVoice()
                     }
                 },
@@ -1086,10 +1930,237 @@ private fun QuickActions(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(icon, color = if (selected) DeepTeal else TextMuted)
+                    if (uploading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(icon, color = if (selected) DeepTeal else TextMuted)
+                    }
                 }
                 Spacer(Modifier.height(6.dp))
-                Text(label, color = TextMuted, fontSize = 11.sp)
+                Text(
+                    text = if (uploading) "上传中" else label,
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryTypeFilter(
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    val filters = listOf(
+        "" to "全部",
+        TYPE_IDEA to "灵感",
+        TYPE_WORD to "单词",
+        TYPE_RESOURCE to "资料",
+        TYPE_IMAGE to "图片",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        filters.forEach { (value, label) ->
+            if (selected == value) {
+                Button(
+                    onClick = { onSelect(value) },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                ) { Text(label, fontSize = 12.sp) }
+            } else {
+                OutlinedButton(
+                    onClick = { onSelect(value) },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                ) { Text(label, fontSize = 12.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageComposerCard(
+    isUploading: Boolean,
+    onPickImage: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+        border = CardDefaults.outlinedCardBorder(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("收藏图片", fontWeight = FontWeight.SemiBold)
+            Text(
+                "从相册选择一张图片，会自动创建图片收藏并上传原图；" +
+                    "标题取自文件名，稍后可在 Web 端补充备注。",
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(
+                onClick = onPickImage,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isUploading,
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+            ) {
+                Text(if (isUploading) "上传中…" else "从相册选择图片")
+            }
+        }
+    }
+}
+
+@Composable
+private fun WordLookupControls(
+    lemma: String,
+    isSaving: Boolean,
+    isLookingUp: Boolean,
+    lookup: WordLookupResponse?,
+    onLookup: () -> Unit,
+    onClearLookup: () -> Unit,
+    onApplyLookup: (List<WordLookupSense>) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = onLookup,
+                enabled = lemma.isNotBlank() && !isSaving && !isLookingUp,
+            ) {
+                Text(if (isLookingUp) "正在查词…" else "重新查词")
+            }
+            if (lookup != null) {
+                TextButton(onClick = onClearLookup, enabled = !isSaving) {
+                    Text("清除预览")
+                }
+            }
+        }
+        lookup?.let { preview ->
+            WordLookupPreview(
+                preview = preview,
+                busy = isSaving || isLookingUp,
+                onApply = onApplyLookup,
+                onDismiss = onClearLookup,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WordLookupPreview(
+    preview: WordLookupResponse,
+    busy: Boolean,
+    onApply: (List<WordLookupSense>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectionKey = preview.senses.joinToString("|") { sense ->
+        "${sense.index}:${sense.definition}"
+    }
+    var selectedIndices by remember(preview.word, preview.lemma, selectionKey) {
+        mutableStateOf(preview.senses.take(1).map { it.index })
+    }
+    fun toggle(index: Int) {
+        selectedIndices = if (selectedIndices.contains(index)) {
+            selectedIndices.filterNot { it == index }
+        } else {
+            selectedIndices + index
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceSubtle),
+        border = CardDefaults.outlinedCardBorder(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column {
+                    Text("词典预览", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (preview.word != preview.lemma) {
+                            "按词元 ${preview.lemma} 查询"
+                        } else {
+                            "选择要保存的中文释义"
+                        },
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                TextButton(onClick = onDismiss, enabled = !busy) {
+                    Text("收起")
+                }
+            }
+            ClickablePhonetic(
+                lemma = preview.word,
+                phonetic = preview.phonetic,
+                usAudioUrl = preview.usAudioUrl,
+                ukAudioUrl = preview.ukAudioUrl,
+            )
+            if (preview.senses.isEmpty()) {
+                Text("词典没有返回中文释义，请手动填写。", color = TextMuted)
+            } else {
+                preview.senses.forEach { sense ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !busy) { toggle(sense.index) },
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Checkbox(
+                            checked = selectedIndices.contains(sense.index),
+                            onCheckedChange = null,
+                            enabled = !busy,
+                        )
+                        Column(
+                            modifier = Modifier.padding(top = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            sense.partOfSpeech?.let {
+                                Text(
+                                    it,
+                                    color = DeepTeal,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                            Text(sense.definition)
+                            sense.example?.takeIf { it.isNotBlank() }?.let {
+                                Text("例句：$it", color = TextMuted, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        onApply(preview.senses.filter { it.index in selectedIndices })
+                    },
+                    enabled = !busy && selectedIndices.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                ) {
+                    Text("使用所选释义")
+                }
+                OutlinedButton(onClick = onDismiss, enabled = !busy) {
+                    Text("保留手动填写")
+                }
             }
         }
     }
@@ -1102,13 +2173,17 @@ private fun WordComposer(
     meaning: String,
     example: String,
     isSaving: Boolean,
+    isLookingUp: Boolean,
+    lookup: WordLookupResponse?,
+    showLookupPreview: Boolean = true,
     onLemmaChange: (String) -> Unit,
     onPhoneticChange: (String) -> Unit,
     onMeaningChange: (String) -> Unit,
     onExampleChange: (String) -> Unit,
-    sourceUrl: String,
-    onSourceUrlChange: (String) -> Unit,
     onFillClipboard: () -> Unit,
+    onLookup: () -> Unit,
+    onClearLookup: () -> Unit,
+    onApplyLookup: (List<WordLookupSense>) -> Unit,
     onSave: () -> Unit,
 ) {
     Card(
@@ -1122,7 +2197,15 @@ private fun WordComposer(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("收藏英语单词", fontWeight = FontWeight.SemiBold)
-            WordPronunciationRow(lemma = lemma)
+            Text(
+                if (isLookingUp) {
+                    "正在填入中文释义、音标和例句…"
+                } else {
+                    "输入单词后自动填入中文释义、音标和例句"
+                },
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
             TextButton(onClick = onFillClipboard, enabled = !isSaving) {
                 Text("从剪贴板填入")
             }
@@ -1131,23 +2214,33 @@ private fun WordComposer(
                 onValueChange = onLemmaChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("单词或短语") },
-                placeholder = { Text("点击时可从剪贴板填入") },
+                placeholder = { Text("输入后自动填入中文释义") },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp),
             )
-            OutlinedTextField(
-                value = phonetic,
-                onValueChange = onPhoneticChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("音标（可选）") },
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp),
+            PhoneticPlayField(
+                lemma = lemma,
+                phonetic = phonetic,
+                onPhoneticChange = onPhoneticChange,
+                usAudioUrl = lookup?.usAudioUrl,
+                ukAudioUrl = lookup?.ukAudioUrl,
             )
+            if (showLookupPreview) {
+                WordLookupControls(
+                    lemma = lemma,
+                    isSaving = isSaving,
+                    isLookingUp = isLookingUp,
+                    lookup = lookup,
+                    onLookup = onLookup,
+                    onClearLookup = onClearLookup,
+                    onApplyLookup = onApplyLookup,
+                )
+            }
             OutlinedTextField(
                 value = meaning,
                 onValueChange = onMeaningChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("释义（可选）") },
+                label = { Text("中文释义（自动填入）") },
                 minLines = 2,
                 maxLines = 5,
                 shape = RoundedCornerShape(10.dp),
@@ -1156,17 +2249,9 @@ private fun WordComposer(
                 value = example,
                 onValueChange = onExampleChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("例句或上下文（可选）") },
+                label = { Text("例句（自动填入）") },
                 minLines = 2,
                 maxLines = 5,
-                shape = RoundedCornerShape(10.dp),
-            )
-            OutlinedTextField(
-                value = sourceUrl,
-                onValueChange = onSourceUrlChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("出处链接（可选）") },
-                singleLine = true,
                 shape = RoundedCornerShape(10.dp),
             )
             Button(
@@ -1281,10 +2366,24 @@ private fun IdeaComposer(
 }
 
 @Composable
-private fun MemoRow(memo: Memo, onClick: () -> Unit) {
+private fun MemoRow(
+    memo: Memo,
+    onClick: () -> Unit,
+    imageThumbnail: ByteArray? = null,
+    imageLoading: Boolean = false,
+    onRequestThumbnail: () -> Unit = {},
+) {
     val isResource = memo.type == TYPE_RESOURCE
     val isWord = memo.type == TYPE_WORD
+    val isImage = memo.type == TYPE_IMAGE
     val isVoice = memo.audioMimeType != null
+    if (isImage) {
+        LaunchedEffect(memo.clientId, memo.version, imageThumbnail == null) {
+            if (imageThumbnail == null) {
+                onRequestThumbnail()
+            }
+        }
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1297,28 +2396,39 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(
-                        when {
-                            isResource -> TealSoft
-                            isWord -> Color(0xFFEDEFF8)
-                            else -> WarmAmberSoft
-                        },
-                        RoundedCornerShape(10.dp),
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    when {
-                        isResource -> "↗"
-                        isWord -> "Aa"
-                        isVoice -> "●"
-                        else -> "✦"
-                    },
-                    color = if (isResource || isWord) DeepTeal else WarmAmberText,
+            if (isImage) {
+                MemoImage(
+                    bytes = imageThumbnail,
+                    loading = imageLoading && imageThumbnail == null,
+                    modifier = Modifier.size(56.dp),
+                    maxDimension = 320,
+                    contentScale = ContentScale.Crop,
+                    contentDescription = memo.title,
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(
+                            when {
+                                isResource -> TealSoft
+                                isWord -> Color(0xFFEDEFF8)
+                                else -> WarmAmberSoft
+                            },
+                            RoundedCornerShape(10.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        when {
+                            isResource -> "↗"
+                            isWord -> "Aa"
+                            isVoice -> "●"
+                            else -> "✦"
+                        },
+                        color = if (isResource || isWord) DeepTeal else WarmAmberText,
+                    )
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -1331,6 +2441,7 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
                 Spacer(Modifier.height(3.dp))
                 Text(
                     text = when {
+                        isImage -> imageRowSubtitle(memo)
                         isResource -> memo.resourceDescription ?: if (
                             memo.body == memo.sourceUrl
                         ) {
@@ -1373,7 +2484,192 @@ private fun MemoRow(memo: Memo, onClick: () -> Unit) {
                         )
                         Spacer(Modifier.width(8.dp))
                     }
+                    if (isImage) {
+                        Text(
+                            imageMimeLabel(memo.imageMimeType) ?: "图片收藏",
+                            color = DeepTeal,
+                            fontSize = 11.sp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     SyncBadge(memo.syncState)
+                }
+            }
+        }
+    }
+}
+
+private fun imageRowSubtitle(memo: Memo): String {
+    val metadata = listOfNotNull(
+        imageDimensionsLabel(memo.imageWidth, memo.imageHeight),
+        formatFileSize(memo.imageSizeBytes),
+    ).joinToString(" · ")
+    return when {
+        metadata.isNotBlank() -> metadata
+        memo.body.isNotBlank() -> memo.body
+        memo.hasUploadedImage() -> "图片收藏"
+        else -> "图片待上传"
+    }
+}
+
+private fun imageMimeLabel(mimeType: String?): String? = when (mimeType) {
+    "image/png" -> "PNG"
+    "image/jpeg", "image/jpg" -> "JPEG"
+    "image/webp" -> "WebP"
+    "image/gif" -> "GIF"
+    else -> null
+}
+
+/**
+ * 展示经 Bearer 鉴权拉取的图片字节；缩略图未就绪时显示进度或占位符。
+ */
+@Composable
+private fun MemoImage(
+    bytes: ByteArray?,
+    loading: Boolean,
+    modifier: Modifier,
+    maxDimension: Int,
+    contentScale: ContentScale,
+    contentDescription: String?,
+) {
+    val bitmap = remember(bytes, maxDimension) { decodeImageBitmap(bytes, maxDimension) }
+    Box(
+        modifier = modifier.background(SurfaceSubtle, RoundedCornerShape(10.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            bitmap != null -> Image(
+                bitmap = bitmap,
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale,
+            )
+            loading -> CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+            )
+            else -> Text("▣", color = TextMuted)
+        }
+    }
+}
+
+private fun decodeImageBitmap(bytes: ByteArray?, maxDimension: Int): ImageBitmap? {
+    if (bytes == null || bytes.isEmpty()) {
+        return null
+    }
+    return runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sampleSize = 1
+        while (
+            bounds.outWidth / sampleSize > maxDimension ||
+            bounds.outHeight / sampleSize > maxDimension
+        ) {
+            sampleSize *= 2
+        }
+        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+    }.getOrNull()
+}
+
+@Composable
+private fun InboxMemoRow(
+    memo: Memo,
+    isSaving: Boolean,
+    onOpen: () -> Unit,
+    onOrganize: () -> Unit,
+    onArchive: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+        border = CardDefaults.outlinedCardBorder(),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(memo.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            if (memo.body.isNotBlank() && memo.body != memo.title) {
+                Text(
+                    text = memo.body,
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 3,
+                )
+            }
+            Text(
+                text = if (memo.audioMimeType != null) "语音灵感 · 待整理" else "灵感 · 待整理",
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onOrganize,
+                    enabled = !isSaving,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                ) {
+                    Text("整理完成")
+                }
+                OutlinedButton(
+                    onClick = onArchive,
+                    enabled = !isSaving,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("归档")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrashMemoRow(
+    memo: Memo,
+    isSaving: Boolean,
+    onRestore: () -> Unit,
+    onPermanentDelete: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+        border = CardDefaults.outlinedCardBorder(),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(memo.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            Text(
+                text = when (memo.type) {
+                    TYPE_WORD -> "单词 · 还剩 ${memo.trashDaysRemaining()} 天"
+                    TYPE_RESOURCE -> "网页资料 · 还剩 ${memo.trashDaysRemaining()} 天"
+                    TYPE_IMAGE -> "图片收藏 · 还剩 ${memo.trashDaysRemaining()} 天"
+                    else -> "灵感 · 还剩 ${memo.trashDaysRemaining()} 天"
+                },
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onRestore,
+                    enabled = !isSaving && memo.id != null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("恢复")
+                }
+                Button(
+                    onClick = onPermanentDelete,
+                    enabled = !isSaving && memo.id != null,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
+                ) {
+                    Text("永久删除")
                 }
             }
         }
@@ -1386,12 +2682,51 @@ private fun SyncBadge(syncState: SyncState) {
         SyncState.SYNCED -> "已同步" to DeepTeal
         SyncState.PENDING -> "等待同步" to TextMuted
         SyncState.FAILED -> "同步失败" to MaterialTheme.colorScheme.error
+        SyncState.CONFLICT -> "待处理冲突" to WarmAmberText
     }
     Text(
         text = label,
         color = color,
         fontSize = 11.sp,
         fontWeight = FontWeight.Medium,
+    )
+}
+
+@Composable
+private fun ConflictResolutionDialog(
+    serverMemo: Memo,
+    onKeepLocal: () -> Unit,
+    onUseServer: () -> Unit,
+    onLater: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onLater,
+        title = { Text("发现编辑冲突", fontWeight = FontWeight.SemiBold) },
+        text = {
+            Text(
+                "其他设备已更新「${serverMemo.title}」。你的本地修改已经保留，请选择要使用的版本。",
+            )
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onUseServer) {
+                    Text("采用服务端版本")
+                }
+                Button(
+                    onClick = onKeepLocal,
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                ) {
+                    Text("保留我的修改")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onLater) {
+                Text("稍后处理")
+            }
+        },
+        containerColor = SurfaceWhite,
+        shape = RoundedCornerShape(14.dp),
     )
 }
 
@@ -1403,6 +2738,7 @@ private fun EmptyMemos(
 ) {
     val isResource = activeType == TYPE_RESOURCE
     val isWord = activeType == TYPE_WORD
+    val isImage = activeType == TYPE_IMAGE
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1417,6 +2753,7 @@ private fun EmptyMemos(
                 isLibrary -> "□"
                 isResource -> "↗"
                 isWord -> "Aa"
+                isImage -> "▣"
                 else -> "✦"
             },
             color = DeepTeal,
@@ -1428,6 +2765,7 @@ private fun EmptyMemos(
                 isLibrary -> "资料库还是空的"
                 isResource -> "还没有收藏网页资料"
                 isWord -> "从第一个英语单词开始"
+                isImage -> "还没有收藏图片"
                 else -> "第一条灵感正在等你"
             },
             fontWeight = FontWeight.SemiBold,
@@ -1435,9 +2773,10 @@ private fun EmptyMemos(
         Text(
             when {
                 hasQuery -> "换个关键词，或清除搜索后浏览全部收藏。"
-                isLibrary -> "从灵感、英语单词或网页资料开始收藏第一条内容。"
+                isLibrary -> "从灵感、英语单词、图片或网页资料开始收藏第一条内容。"
                 isResource -> "可在 Web 端收藏，或从手机浏览器分享链接到 MemoIsle。"
                 isWord -> "保存词形、释义和例句，稍后按计划复习。"
+                isImage -> "点击「从相册选择图片」，原图与缩略图会同步到 Web。"
                 else -> "保存后会进入本地资料库，并在联网时同步到 Web。"
             },
             color = TextMuted,
@@ -1449,7 +2788,10 @@ private fun EmptyMemos(
 @Composable
 private fun ResourceDetailDialog(
     memo: Memo,
+    isSaving: Boolean,
     onDismiss: () -> Unit,
+    onMoveToTrash: () -> Unit,
+    onArchive: () -> Unit,
     onOpen: () -> Unit,
     onCopy: () -> Unit,
     onShare: () -> Unit,
@@ -1490,6 +2832,26 @@ private fun ResourceDetailDialog(
                         )
                     }
                 }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "巡检：${linkHealthLabel(memo.linkHealthStatus)}",
+                        modifier = Modifier
+                            .background(SurfaceSubtle, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                    )
+                    memo.linkLastCheckedAt?.let { checkedAt ->
+                        Text(
+                            "最近检查 ${formatTime(checkedAt)}",
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
                 memo.resourceDescription?.let { description ->
                     Text(description, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -1521,19 +2883,25 @@ private fun ResourceDetailDialog(
         confirmButton = {
             Button(
                 onClick = onOpen,
-                enabled = memo.sourceUrl != null,
+                enabled = memo.sourceUrl != null && !isSaving,
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) { Text("打开原网页") }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onCopy, enabled = memo.sourceUrl != null) {
+                TextButton(onClick = onCopy, enabled = memo.sourceUrl != null && !isSaving) {
                     Text("复制")
                 }
-                TextButton(onClick = onShare, enabled = memo.sourceUrl != null) {
+                TextButton(onClick = onShare, enabled = memo.sourceUrl != null && !isSaving) {
                     Text("分享")
                 }
-                OutlinedButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onArchive, enabled = !isSaving) {
+                    Text("归档")
+                }
+                TextButton(onClick = onMoveToTrash, enabled = !isSaving) {
+                    Text("回收站", color = Color(0xFFB84A4A))
+                }
+                OutlinedButton(onClick = onDismiss, enabled = !isSaving) { Text("关闭") }
             }
         },
         containerColor = SurfaceWhite,
@@ -1542,31 +2910,267 @@ private fun ResourceDetailDialog(
 }
 
 @Composable
+private fun ImageDetailDialog(
+    memo: Memo,
+    isSaving: Boolean,
+    thumbnail: ByteArray?,
+    fullImage: ByteArray?,
+    isLoadingThumbnail: Boolean,
+    isLoadingFull: Boolean,
+    onDismiss: () -> Unit,
+    onMoveToTrash: () -> Unit,
+    onRequestThumbnail: () -> Unit,
+    onRequestFull: () -> Unit,
+    onShare: () -> Unit,
+) {
+    var expanded by rememberSaveable(memo.clientId) { mutableStateOf(false) }
+    LaunchedEffect(memo.clientId, memo.version) {
+        onRequestThumbnail()
+    }
+    LaunchedEffect(expanded) {
+        if (expanded && memo.id != null && fullImage == null) {
+            onRequestFull()
+        }
+    }
+    val displayBytes = if (expanded) fullImage ?: thumbnail else thumbnail
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("图片收藏", color = DeepTeal, fontSize = 12.sp)
+                Text(
+                    memo.title,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                MemoImage(
+                    bytes = displayBytes,
+                    loading = displayBytes == null && (isLoadingThumbnail || isLoadingFull),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (expanded) 320.dp else 200.dp)
+                        .clickable { expanded = !expanded },
+                    maxDimension = if (expanded) 2_048 else 1_280,
+                    contentScale = if (expanded) ContentScale.Fit else ContentScale.Crop,
+                    contentDescription = memo.title,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        if (expanded) "点击图片可收起" else "点击图片查看原图",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    if (memo.id != null) {
+                        TextButton(
+                            onClick = { expanded = !expanded },
+                            enabled = !isSaving,
+                        ) {
+                            Text(if (expanded) "收起原图" else "查看原图")
+                        }
+                    }
+                }
+                memo.body.takeIf { it.isNotBlank() }?.let { note ->
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("备注", color = TextMuted, fontSize = 11.sp)
+                        Text(note, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    imageDimensionsLabel(memo.imageWidth, memo.imageHeight)?.let { dimensions ->
+                        ImageMetaChip(dimensions)
+                    }
+                    formatFileSize(memo.imageSizeBytes)?.let { size -> ImageMetaChip(size) }
+                    imageMimeLabel(memo.imageMimeType)?.let { label -> ImageMetaChip(label) }
+                }
+                ImageOcrSection(memo)
+                if (memo.id == null || !memo.hasUploadedImage()) {
+                    Text(
+                        "图片尚未上传完成；联网后会自动重试。",
+                        color = WarmAmberText,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                Text(
+                    "服务端版本 ${memo.version}",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onMoveToTrash,
+                enabled = !isSaving,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
+            ) { Text("移入回收站") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onShare, enabled = !isSaving) { Text("分享") }
+                OutlinedButton(onClick = onDismiss, enabled = !isSaving) { Text("关闭") }
+            }
+        },
+        containerColor = SurfaceWhite,
+        shape = RoundedCornerShape(14.dp),
+    )
+}
+
+@Composable
+private fun ImageMetaChip(label: String) {
+    Text(
+        label,
+        modifier = Modifier
+            .background(TealSoft, RoundedCornerShape(20.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        color = DeepTeal,
+        fontSize = 11.sp,
+    )
+}
+
+/**
+ * 只读展示服务端识别出的图片 OCR 文字与自动标签；Android 不触发识别。
+ */
+@Composable
+private fun ImageOcrSection(memo: Memo) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceSubtle, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("图片文字识别", color = TextMuted, fontSize = 11.sp)
+            Text(memo.imageOcrStatusLabel(), color = DeepTeal, fontSize = 11.sp)
+        }
+        when (memo.imageOcrStatus) {
+            "ready" -> {
+                val ocrText = memo.imageOcrText?.trim().orEmpty()
+                if (ocrText.isEmpty()) {
+                    Text(
+                        "没有识别到文字",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    Text(
+                        ocrText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+                if (memo.imageAutoTags.isNotEmpty()) {
+                    Text("自动标签", color = TextMuted, fontSize = 11.sp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        memo.imageAutoTags.forEach { tag -> ImageMetaChip(tag) }
+                    }
+                }
+                val metaLine = listOfNotNull(
+                    memo.imageOcrSourceLabel()?.let { source -> "来源：$source" },
+                    memo.imageOcrUpdatedAt
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { updated -> "更新于 ${formatTime(updated)}" },
+                ).joinToString(" · ")
+                if (metaLine.isNotEmpty()) {
+                    Text(
+                        metaLine,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+            "failed" -> Text(
+                memo.imageOcrError?.takeIf { it.isNotBlank() } ?: "图片文字识别失败。",
+                color = WarmAmberText,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            "disabled" -> Text(
+                memo.imageOcrError?.takeIf { it.isNotBlank() } ?: "图片文字识别未启用。",
+                color = WarmAmberText,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            "pending" -> Text(
+                "已排队，等待识别图片文字。",
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            "processing" -> Text(
+                "正在识别图片文字…",
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            else -> Text(
+                "尚未开始识别图片文字。",
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
 private fun EditMemoDialog(
     memo: Memo,
     isSaving: Boolean,
     onDismiss: () -> Unit,
+    onMoveToTrash: () -> Unit,
     onSave: (String, String, String?, String?, String?) -> Unit,
     onReview: (String) -> Unit,
     onPlayAudio: () -> Unit,
+    resetToServerMemo: Memo? = null,
 ) {
-    var title by rememberSaveable(memo.clientId, memo.version) { mutableStateOf(memo.title) }
-    var body by rememberSaveable(memo.clientId, memo.version) {
+    var title by rememberSaveable(memo.clientId) { mutableStateOf(memo.title) }
+    var body by rememberSaveable(memo.clientId) {
         mutableStateOf(memo.body)
     }
-    var wordPhonetic by rememberSaveable(memo.clientId, memo.version) {
+    var wordPhonetic by rememberSaveable(memo.clientId) {
         mutableStateOf(memo.wordPhonetic.orEmpty())
     }
-    var wordMeaning by rememberSaveable(memo.clientId, memo.version) {
+    var wordMeaning by rememberSaveable(memo.clientId) {
         mutableStateOf(memo.wordMeaning.orEmpty())
     }
-    var wordExample by rememberSaveable(memo.clientId, memo.version) {
+    var wordExample by rememberSaveable(memo.clientId) {
         mutableStateOf(memo.wordExample.orEmpty())
     }
-    var showWordAnswer by rememberSaveable(memo.clientId, memo.version) {
+    var showWordAnswer by rememberSaveable(memo.clientId) {
         mutableStateOf(false)
     }
     val isWord = memo.type == TYPE_WORD
+
+    LaunchedEffect(resetToServerMemo?.clientId, resetToServerMemo?.version) {
+        resetToServerMemo?.let { serverMemo ->
+            title = serverMemo.title
+            body = serverMemo.body
+            wordPhonetic = serverMemo.wordPhonetic.orEmpty()
+            wordMeaning = serverMemo.wordMeaning.orEmpty()
+            wordExample = serverMemo.wordExample.orEmpty()
+            showWordAnswer = false
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1592,6 +3196,18 @@ private fun EditMemoDialog(
                         Text(if (seconds > 0) "播放原始录音 · ${seconds}秒" else "播放原始录音")
                     }
                 }
+                if (!memo.transcript.isNullOrBlank()) {
+                    OutlinedTextField(
+                        value = memo.transcript,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("会议转写（我 / 对方）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 8,
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                }
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -1600,24 +3216,15 @@ private fun EditMemoDialog(
                     shape = RoundedCornerShape(10.dp),
                 )
                 if (isWord) {
-                    WordPronunciationRow(lemma = title)
                     Text(
                         "上次 ${memo.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · 下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
                         color = TextMuted,
                         style = MaterialTheme.typography.labelSmall,
                     )
-                    memo.sourceUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                        Text("出处 ${resourceHost(url)}", color = TextMuted, fontSize = 12.sp)
-                    }
-                }
-                if (isWord) {
-                    OutlinedTextField(
-                        value = wordPhonetic,
-                        onValueChange = { wordPhonetic = it },
-                        label = { Text("音标（可选）") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
+                    PhoneticPlayField(
+                        lemma = title,
+                        phonetic = wordPhonetic,
+                        onPhoneticChange = { wordPhonetic = it },
                     )
                     if (!showWordAnswer) {
                         Column(
@@ -1652,6 +3259,7 @@ private fun EditMemoDialog(
                             maxLines = 5,
                             shape = RoundedCornerShape(10.dp),
                         )
+                        SentencePronunciationButton(text = wordExample)
                         Text(
                             "熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.reviewCount} 次",
                             color = TextMuted,
@@ -1688,6 +3296,7 @@ private fun EditMemoDialog(
                         maxLines = 12,
                         shape = RoundedCornerShape(10.dp),
                     )
+                    SentencePronunciationButton(text = body)
                 }
                 HorizontalDivider(color = Border)
                 Text(
@@ -1722,8 +3331,13 @@ private fun EditMemoDialog(
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("取消")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onMoveToTrash, enabled = !isSaving) {
+                    Text("移入回收站", color = Color(0xFFB84A4A))
+                }
+                OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
+                    Text("取消")
+                }
             }
         },
         containerColor = SurfaceWhite,
@@ -1846,13 +3460,16 @@ private fun CreateWordDialog(
     meaning: String,
     example: String,
     isSaving: Boolean,
+    isLookingUp: Boolean,
+    lookup: WordLookupResponse?,
     onLemmaChange: (String) -> Unit,
     onPhoneticChange: (String) -> Unit,
     onMeaningChange: (String) -> Unit,
     onExampleChange: (String) -> Unit,
-    sourceUrl: String,
-    onSourceUrlChange: (String) -> Unit,
     onFillClipboard: () -> Unit,
+    onLookup: () -> Unit,
+    onClearLookup: () -> Unit,
+    onApplyLookup: (List<WordLookupSense>) -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -1861,7 +3478,15 @@ private fun CreateWordDialog(
         title = { Text("收藏英语单词", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                WordPronunciationRow(lemma = lemma)
+                Text(
+                    if (isLookingUp) {
+                        "正在填入中文释义、音标和例句…"
+                    } else {
+                        "输入单词后自动填入中文释义、音标和例句"
+                    },
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 TextButton(onClick = onFillClipboard, enabled = !isSaving) {
                     Text("从剪贴板填入")
                 }
@@ -1870,22 +3495,30 @@ private fun CreateWordDialog(
                     onValueChange = onLemmaChange,
                     label = { Text("单词或短语") },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("点击时可从剪贴板填入") },
+                    placeholder = { Text("输入后自动填入中文释义") },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                 )
-                OutlinedTextField(
-                    value = phonetic,
-                    onValueChange = onPhoneticChange,
-                    label = { Text("音标（可选）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
+                PhoneticPlayField(
+                    lemma = lemma,
+                    phonetic = phonetic,
+                    onPhoneticChange = onPhoneticChange,
+                    usAudioUrl = lookup?.usAudioUrl,
+                    ukAudioUrl = lookup?.ukAudioUrl,
+                )
+                WordLookupControls(
+                    lemma = lemma,
+                    isSaving = isSaving,
+                    isLookingUp = isLookingUp,
+                    lookup = lookup,
+                    onLookup = onLookup,
+                    onClearLookup = onClearLookup,
+                    onApplyLookup = onApplyLookup,
                 )
                 OutlinedTextField(
                     value = meaning,
                     onValueChange = onMeaningChange,
-                    label = { Text("释义（可选）") },
+                    label = { Text("中文释义（自动填入）") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 6,
@@ -1894,18 +3527,10 @@ private fun CreateWordDialog(
                 OutlinedTextField(
                     value = example,
                     onValueChange = onExampleChange,
-                    label = { Text("例句或上下文（可选）") },
+                    label = { Text("例句（自动填入）") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 5,
-                    shape = RoundedCornerShape(10.dp),
-                )
-                OutlinedTextField(
-                    value = sourceUrl,
-                    onValueChange = onSourceUrlChange,
-                    label = { Text("出处链接（可选）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                 )
             }
@@ -1932,20 +3557,25 @@ private fun CreateWordDialog(
 private fun VoiceCaptureDialog(
     text: String,
     isRecording: Boolean,
+    isPaused: Boolean,
     recording: VoiceRecording?,
     elapsedMs: Int,
+    amplitudePercent: Int,
+    isTranscribing: Boolean,
+    transcriptionMessage: String?,
     isSaving: Boolean,
     permissionDenied: Boolean,
     onTextChange: (String) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onTogglePause: () -> Unit,
     onReset: () -> Unit,
-    onDismiss: () -> Unit,
+    onRequestDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
     val seconds = elapsedMs / 1_000
     AlertDialog(
-        onDismissRequest = { if (!isRecording && !isSaving) onDismiss() },
+        onDismissRequest = { if (!isSaving) onRequestDismiss() },
         title = { Text("语音记录", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(
@@ -1974,12 +3604,35 @@ private fun VoiceCaptureDialog(
                         )
                         Text(
                             when {
+                                isPaused -> "已暂停"
                                 isRecording -> "正在录音"
                                 recording != null -> "录音已就绪"
                                 else -> "等待开始"
                             },
                             color = TextMuted,
                             fontSize = 11.sp,
+                        )
+                    }
+                }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("输入音量", color = TextMuted, fontSize = 12.sp)
+                        Text("${amplitudePercent}%", color = TextMuted, fontSize = 12.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .background(TealSoft, RoundedCornerShape(99.dp)),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth((amplitudePercent / 100f).coerceIn(0f, 1f))
+                                .height(8.dp)
+                                .background(WarmAmberText, RoundedCornerShape(99.dp)),
                         )
                     }
                 }
@@ -1993,16 +3646,39 @@ private fun VoiceCaptureDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = onTextChange,
-                    label = { Text("配套文字（可选）") },
-                    placeholder = { Text("写下关键词或整理后的文字") },
+                    label = { Text("转写结果（可编辑，可选）") },
+                    placeholder = { Text("录音停止后会自动填入识别结果") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 7,
                     enabled = !isSaving,
                     shape = RoundedCornerShape(10.dp),
                 )
+                if (isTranscribing) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            transcriptionMessage ?: "正在转写…",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                } else if (transcriptionMessage != null) {
+                    Text(
+                        transcriptionMessage,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
                 Text(
-                    "原始录音只保存到你的私人资料库。",
+                    "原始录音只保存到你的私人资料库；没有模型时仍可手动填写文字。",
                     color = TextMuted,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -2010,7 +3686,12 @@ private fun VoiceCaptureDialog(
         },
         confirmButton = {
             when {
-                isRecording -> Button(onClick = onStop) { Text("结束录音") }
+                isRecording -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onTogglePause) {
+                        Text(if (isPaused) "继续" else "暂停")
+                    }
+                    Button(onClick = onStop) { Text("结束录音") }
+                }
                 recording != null -> Button(onClick = onSave, enabled = !isSaving) {
                     Text(if (isSaving) "保存中…" else "保存语音灵感")
                 }
@@ -2025,8 +3706,8 @@ private fun VoiceCaptureDialog(
                     TextButton(onClick = onReset) { Text("重新录制") }
                 }
                 OutlinedButton(
-                    onClick = onDismiss,
-                    enabled = !isRecording && !isSaving,
+                    onClick = onRequestDismiss,
+                    enabled = !isSaving,
                 ) {
                     Text("取消")
                 }
@@ -2041,20 +3722,22 @@ private fun VoiceCaptureDialog(
 private fun MemoBottomNavigation(
     showAllMemos: Boolean,
     showReview: Boolean,
+    showTrash: Boolean,
+    showInbox: Boolean,
     onShowHome: () -> Unit,
     onShowLibrary: () -> Unit,
     onShowReview: () -> Unit,
 ) {
     NavigationBar(containerColor = SurfaceWhite) {
         NavigationBarItem(
-            selected = !showAllMemos && !showReview,
+            selected = !showAllMemos && !showReview && !showTrash && !showInbox,
             onClick = onShowHome,
             icon = { Text("⌂", fontSize = 17.sp) },
             label = { Text("首页", fontSize = 11.sp) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
-            selected = showAllMemos && !showReview,
+            selected = showAllMemos && !showReview && !showTrash && !showInbox,
             onClick = onShowLibrary,
             icon = { Text("□", fontSize = 17.sp) },
             label = { Text("资料库", fontSize = 11.sp) },
@@ -2088,46 +3771,146 @@ private fun memoNavigationColors() = NavigationBarItemDefaults.colors(
 )
 
 @Composable
-private fun WordPronunciationRow(lemma: String) {
+private fun rememberWordPlayer(
+    lemma: String,
+    usAudioUrl: String?,
+    ukAudioUrl: String?,
+): Pair<String?, (String) -> Unit> {
     val context = LocalContext.current
-    var usReady by remember { mutableStateOf(false) }
-    var ukReady by remember { mutableStateOf(false) }
-    val ttsState = remember { mutableStateOf<TextToSpeech?>(null) }
-    DisposableEffect(context) {
-        lateinit var engine: TextToSpeech
-        engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                usReady = engine.isLanguageAvailable(Locale.US) >= TextToSpeech.LANG_AVAILABLE
-                ukReady = engine.isLanguageAvailable(Locale.UK) >= TextToSpeech.LANG_AVAILABLE
-                ttsState.value = engine
+    val apiClient = (context.applicationContext as? MemoIsleApplication)?.api
+    var playingTag by remember { mutableStateOf<String?>(null) }
+    val pronouncer = remember(context, apiClient) { WordPronouncer(context, apiClient) }
+    DisposableEffect(pronouncer) {
+        onDispose { pronouncer.release() }
+    }
+    val play: (String) -> Unit = play@{ tag ->
+        if (lemma.isBlank()) {
+            return@play
+        }
+        val locale = if (tag == "uk") Locale.UK else Locale.US
+        val audioUrl = if (tag == "uk") ukAudioUrl else usAudioUrl
+        playingTag = tag
+        pronouncer.play(lemma, locale, audioUrl) { playing ->
+            playingTag = if (playing) tag else null
+        }
+    }
+    return playingTag to play
+}
+
+@Composable
+private fun SentencePronunciationButton(text: String) {
+    val context = LocalContext.current
+    val apiClient = (context.applicationContext as? MemoIsleApplication)?.api
+    var playing by remember { mutableStateOf(false) }
+    val pronouncer = remember(context, apiClient) { WordPronouncer(context, apiClient) }
+    DisposableEffect(pronouncer) {
+        onDispose { pronouncer.release() }
+    }
+    OutlinedButton(
+        onClick = {
+            pronouncer.playText(text, Locale.US) { playing = it }
+        },
+        enabled = text.isNotBlank() && !playing,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(if (playing) "句子播放中…" else "▶ 播放例句/内容")
+    }
+}
+
+@Composable
+private fun PhoneticPlayField(
+    lemma: String,
+    phonetic: String,
+    onPhoneticChange: (String) -> Unit,
+    usAudioUrl: String? = null,
+    ukAudioUrl: String? = null,
+) {
+    val (playingTag, play) = rememberWordPlayer(lemma, usAudioUrl, ukAudioUrl)
+    val canPlay = lemma.isNotBlank()
+    OutlinedTextField(
+        value = phonetic,
+        onValueChange = onPhoneticChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("音标（点右侧播放）") },
+        placeholder = { Text("输入单词后自动填入") },
+        supportingText = {
+            Text(if (canPlay) "点击音标旁的 ▶美 / ▶英 播放读音" else "先输入单词再播放读音")
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(10.dp),
+        trailingIcon = {
+            Row {
+                TextButton(
+                    onClick = { play("us") },
+                    enabled = canPlay,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        if (playingTag == "us") "播放中" else "▶美",
+                        color = if (canPlay) DeepTeal else TextMuted,
+                        fontSize = 13.sp,
+                    )
+                }
+                TextButton(
+                    onClick = { play("uk") },
+                    enabled = canPlay,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        if (playingTag == "uk") "播放中" else "▶英",
+                        color = if (canPlay) DeepTeal else TextMuted,
+                        fontSize = 13.sp,
+                    )
+                }
             }
-        }
-        onDispose {
-            engine.stop()
-            engine.shutdown()
-            ttsState.value = null
-        }
-    }
-    fun speak(locale: Locale, ready: Boolean) {
-        val engine = ttsState.value
-        if (!ready || lemma.isBlank() || engine == null) {
-            return
-        }
-        engine.language = locale
-        engine.speak(lemma, TextToSpeech.QUEUE_FLUSH, null, locale.toLanguageTag())
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(
-            onClick = { speak(Locale.US, usReady) },
-            enabled = lemma.isNotBlank() && usReady,
+        },
+    )
+}
+
+@Composable
+private fun ClickablePhonetic(
+    lemma: String,
+    phonetic: String?,
+    usAudioUrl: String? = null,
+    ukAudioUrl: String? = null,
+) {
+    val (playingTag, play) = rememberWordPlayer(lemma, usAudioUrl, ukAudioUrl)
+    val canPlay = lemma.isNotBlank()
+    val display = phonetic?.takeIf { it.isNotBlank() } ?: "点击播放读音"
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        TextButton(
+            onClick = { play("us") },
+            enabled = canPlay,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            Text(if (usReady) "美式" else "美式不可用")
+            Text(
+                if (playingTag == "us") "播放中… $display" else display,
+                color = if (canPlay) DeepTeal else TextMuted,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
+            )
         }
-        OutlinedButton(
-            onClick = { speak(Locale.UK, ukReady) },
-            enabled = lemma.isNotBlank() && ukReady,
+        TextButton(
+            onClick = { play("us") },
+            enabled = canPlay,
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         ) {
-            Text(if (ukReady) "英式" else "英式不可用")
+            Text("▶美", color = if (canPlay) DeepTeal else TextMuted, fontSize = 13.sp)
+        }
+        TextButton(
+            onClick = { play("uk") },
+            enabled = canPlay,
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+        ) {
+            Text(
+                if (playingTag == "uk") "播放中" else "▶英",
+                color = if (canPlay) DeepTeal else TextMuted,
+                fontSize = 13.sp,
+            )
         }
     }
 }

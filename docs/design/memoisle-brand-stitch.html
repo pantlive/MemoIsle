@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemoIsle 品牌图标与 Favicon 规范指南</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+      background-color: #F6F7F2;
+      color: #1E2B29;
+    }
+    .font-brand {
+      font-family: 'Sora', 'Noto Sans SC', sans-serif;
+    }
+    .font-mono-code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Custom tab shapes for realistic browser preview */
+    .browser-tab-light {
+      background: #FFFFFF;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .browser-tab-dark {
+      background: #2B2D30;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-16 antialiased selection:bg-[#E2F2EE] selection:text-[#177A72]">
+
+  <!-- Top Navigation & Brand Header -->
+  <header class="border-b border-[#DCE4E0] bg-white sticky top-0 z-30">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Live SVG Brand Mark (32px) -->
+        <svg class="w-8 h-8 rounded-lg shadow-sm" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+          <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="flex items-baseline gap-2">
+          <span class="font-brand font-bold text-xl tracking-tight text-[#177A72]">MemoIsle</span>
+          <span class="text-xs px-2 py-0.5 rounded bg-[#E2F2EE] text-[#177A72] font-medium">Design Tokens v2.4</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-4 text-xs text-[#687673]">
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#177A72]"></span>纯矢量几何 SVG 规范</span>
+        <span class="hidden sm:inline border-l border-[#DCE4E0] pl-4">浏览器 Favicon 与应用端 100% 同构</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-6xl mx-auto px-6 pt-8 space-y-8">
+
+    <!-- Overview Hero -->
+    <div class="bg-white border border-[#DCE4E0] rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      <div class="space-y-2 max-w-2xl">
+        <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#E2F2EE] text-[#177A72] text-xs font-semibold tracking-wide">
+          标准资产规范 · FAVICON & APP GLYPH
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-brand font-bold text-[#1E2B29] tracking-tight">
+          MemoIsle 品牌徽标与浏览器 Favicon 视觉规范
+        </h1>
+        <p class="text-sm sm:text-base text-[#687673] leading-relaxed">
+          统一 Web 标签栏、桌面工作台侧边栏（36px）及移动/登录页（48px）的单一标准标识。采用柔和浅薄荷底色（<code class="text-xs px-1.5 py-0.5 rounded bg-[#F6F7F2] text-[#177A72] font-mono-code font-semibold">#E2F2EE</code>）承载深青色（<code class="text-xs px-1.5 py-0.5 rounded bg-[#F6F7F2] text-[#177A72] font-mono-code font-semibold">#177A72</code>）几何化「M / 展开书页 / 双峰岛屿」符号，确保 16px 极限微小尺寸下在浅色和深色浏览器标签页中均具备高辨识度与强对比度。
+        </p>
+      </div>
+
+      <!-- Color Chips -->
+      <div class="flex md:flex-col gap-3 w-full md:w-auto shrink-0 bg-[#F6F7F2] p-4 rounded-xl border border-[#DCE4E0]">
+        <div class="text-xs font-semibold text-[#1E2B29] mb-1">核心品牌色系</div>
+        <div class="flex items-center gap-2.5">
+          <div class="w-6 h-6 rounded-md bg-[#177A72] shadow-inner border border-black/10"></div>
+          <div>
+            <div class="text-xs font-mono-code font-semibold text-[#1E2B29]">#177A72</div>
+            <div class="text-[11px] text-[#687673]">Primary Deep Teal 符号</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+          <div class="w-6 h-6 rounded-md bg-[#E2F2EE] border border-[#DCE4E0]"></div>
+          <div>
+            <div class="text-xs font-mono-code font-semibold text-[#1E2B29]">#E2F2EE</div>
+            <div class="text-[11px] text-[#687673]">Primary Soft 薄荷瓷底</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+          <div class="w-6 h-6 rounded-md bg-[#F6F7F2] border border-[#DCE4E0]"></div>
+          <div>
+            <div class="text-xs font-mono-code font-semibold text-[#1E2B29]">#F6F7F2</div>
+            <div class="text-[11px] text-[#687673]">Warm Mist 页面底色</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 1: Master Icon & Geometry Breakdown -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Large Master Icon Display -->
+      <div class="lg:col-span-5 bg-white border border-[#DCE4E0] rounded-2xl p-6 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between pb-4 border-b border-[#DCE4E0]/60">
+            <h2 class="font-brand font-bold text-base text-[#1E2B29]">主几何矢量徽标 (Master Spec)</h2>
+            <span class="text-xs font-mono-code text-[#687673]">viewBox: 0 0 64 64</span>
+          </div>
+          <p class="text-xs text-[#687673] mt-2">
+            标准 16px 圆角容器，内置 7px 粗圆角折线笔画。书卷翻折与岛峰同构，剔除所有冗余装饰与渐变。
+          </p>
+        </div>
+
+        <div class="py-8 flex flex-col items-center justify-center">
+          <!-- 192px Rendered Master Icon -->
+          <div class="relative group">
+            <svg class="w-48 h-48 drop-shadow-md transition-transform duration-300 group-hover:scale-105" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+              <!-- Structural Construction Guidelines (Soft Grid Overlay) -->
+              <circle cx="32" cy="32" r="28" stroke="#177A72" stroke-width="0.5" stroke-dasharray="2 2" stroke-opacity="0.3"/>
+              <line x1="32" y1="4" x2="32" y2="60" stroke="#177A72" stroke-width="0.5" stroke-dasharray="2 2" stroke-opacity="0.3"/>
+              <!-- M / Book-Fold / Isle Core Glyph -->
+              <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur px-2.5 py-0.5 rounded-full border border-[#DCE4E0] text-[11px] font-mono-code text-[#177A72] shadow-sm whitespace-nowrap">
+              Master 192px (64×64 @3x)
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-[#F6F7F2] rounded-xl p-3.5 border border-[#DCE4E0] text-xs space-y-1.5">
+          <div class="flex justify-between text-[#687673]">
+            <span>容器圆角 (rx):</span>
+            <span class="font-mono-code font-semibold text-[#1E2B29]">16px (25% 比例)</span>
+          </div>
+          <div class="flex justify-between text-[#687673]">
+            <span>主笔画粗度 (stroke-width):</span>
+            <span class="font-mono-code font-semibold text-[#1E2B29]">7px (在 16px 下保证约 1.75px)</span>
+          </div>
+          <div class="flex justify-between text-[#687673]">
+            <span>端点形态 (stroke-linecap):</span>
+            <span class="font-mono-code font-semibold text-[#1E2B29]">round (柔和舒适、有机温润)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Favicon Size Hierarchy & Dark/Light Browser Tab Previews -->
+      <div class="lg:col-span-7 bg-white border border-[#DCE4E0] rounded-2xl p-6 flex flex-col justify-between space-y-6">
+        <div>
+          <div class="flex items-center justify-between pb-3 border-b border-[#DCE4E0]/60">
+            <h2 class="font-brand font-bold text-base text-[#1E2B29]">真实尺寸与浏览器标签栏适配 (Tab Previews)</h2>
+            <span class="text-xs px-2 py-0.5 rounded bg-[#2E7D5A]/10 text-[#2E7D5A] font-medium">免外部字体依赖</span>
+          </div>
+          <p class="text-xs text-[#687673] mt-2">
+            浅薄荷圆角瓷底（#E2F2EE）有效隔绝深色与浅色标签栏的底色干扰，16px 极限物理像素下依然保持清爽锐利。
+          </p>
+        </div>
+
+        <!-- 1:1 Scale Previews (16px, 32px, 48px) -->
+        <div class="bg-[#F6F7F2] rounded-xl p-4 border border-[#DCE4E0]">
+          <div class="text-xs font-semibold text-[#1E2B29] mb-3">1:1 实际像素级物理渲染检测</div>
+          <div class="flex flex-wrap items-end gap-8">
+            <!-- 16px Favicon standard -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="w-12 h-12 flex items-center justify-center bg-white rounded-lg border border-[#DCE4E0] shadow-sm">
+                <svg class="w-4 h-4 rounded-[4px]" viewBox="0 0 64 64" fill="none">
+                  <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                  <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <span class="text-[11px] font-mono-code text-[#687673]">16 × 16px (标配)</span>
+            </div>
+
+            <!-- 24px Desktop UI -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="w-12 h-12 flex items-center justify-center bg-white rounded-lg border border-[#DCE4E0] shadow-sm">
+                <svg class="w-6 h-6 rounded-[6px]" viewBox="0 0 64 64" fill="none">
+                  <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                  <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <span class="text-[11px] font-mono-code text-[#687673]">24 × 24px (快捷栏)</span>
+            </div>
+
+            <!-- 32px Retina / Win Taskbar -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="w-12 h-12 flex items-center justify-center bg-white rounded-lg border border-[#DCE4E0] shadow-sm">
+                <svg class="w-8 h-8 rounded-[8px]" viewBox="0 0 64 64" fill="none">
+                  <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                  <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <span class="text-[11px] font-mono-code text-[#687673]">32 × 32px (高分屏)</span>
+            </div>
+
+            <!-- 48px PWA / Login Tile -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="w-14 h-14 flex items-center justify-center bg-white rounded-lg border border-[#DCE4E0] shadow-sm">
+                <svg class="w-12 h-12 rounded-[12px]" viewBox="0 0 64 64" fill="none">
+                  <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                  <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <span class="text-[11px] font-mono-code text-[#687673]">48 × 48px (登录/磁贴)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Browser Mockups: Light & Dark Tab Environments -->
+        <div class="space-y-3">
+          <div class="text-xs font-semibold text-[#1E2B29]">主流浏览器 Tab 标签实境模拟对比</div>
+          
+          <!-- Light Chrome / Edge Tab -->
+          <div class="bg-[#E9ECEF] p-2.5 rounded-xl border border-[#DCE4E0]">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="flex gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-[#FF5F56]"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-[#FFBD2E]"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-[#27C93F]"></div>
+              </div>
+              <span class="text-[10px] text-[#687673] font-mono-code ml-1">Chrome Light Mode (浅色标签)</span>
+            </div>
+            
+            <div class="flex items-end">
+              <!-- Active MemoIsle Tab -->
+              <div class="browser-tab-light h-9 px-3 flex items-center gap-2 w-52 max-w-[220px]">
+                <svg class="w-4 h-4 rounded-[4px] shrink-0" viewBox="0 0 64 64" fill="none">
+                  <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                  <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="text-xs text-[#1E2B29] font-medium truncate">MemoIsle - 知识岛屿</span>
+                <span class="text-xs text-[#687673] ml-auto">×</span>
+              </div>
+              <!-- Inactive Tab -->
+              <div class="h-8 px-3 flex items-center gap-2 text-[#687673] text-xs">
+                <span class="truncate">PyTorch 官方文档</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dark Chrome / Arc / Edge Tab -->
+          <div class="bg-[#1E1F22] p-2.5 rounded-xl border border-[#3A3D42]">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="flex gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-[#FF5F56]/70"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-[#FFBD2E]/70"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-[#27C93F]/70"></div>
+              </div>
+              <span class="text-[10px] text-gray-400 font-mono-code ml-1">Arc / Dark Mode (深色标签) — 浅薄荷底色自带高对比衬托</span>
+            </div>
+            
+            <div class="flex items-end">
+              <!-- Active Dark Tab -->
+              <div class="browser-tab-dark h-9 px-3 flex items-center gap-2 w-52 max-w-[220px] text-gray-100">
+                <svg class="w-4 h-4 rounded-[4px] shrink-0 shadow-sm" viewBox="0 0 64 64" fill="none">
+                  <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                  <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="text-xs font-medium truncate">MemoIsle</span>
+                <span class="text-xs text-gray-400 ml-auto">×</span>
+              </div>
+              <!-- Inactive Tab -->
+              <div class="h-8 px-3 flex items-center gap-2 text-gray-400 text-xs">
+                <span class="truncate">GitHub Repository</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Section 2: In-App UI Side-by-Side Cohesion Check -->
+    <div class="bg-white border border-[#DCE4E0] rounded-2xl p-6 sm:p-8 space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-[#DCE4E0]/60">
+        <div>
+          <h2 class="font-brand font-bold text-lg text-[#1E2B29]">应用内实境组件同构对照 (In-App Consistency Check)</h2>
+          <p class="text-xs text-[#687673] mt-1">验证同一 SVG 矢量结构在 36px 侧边栏与 48px 登录/认证入口处的天然和谐感。</p>
+        </div>
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#E2F2EE] text-[#177A72] text-xs font-semibold">
+          100% 相同矢量形状与色彩体系
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Sidebar Integration (36px Tile) -->
+        <div class="bg-[#F6F7F2] rounded-xl p-5 border border-[#DCE4E0] space-y-4">
+          <div class="flex items-center justify-between text-xs text-[#687673]">
+            <span class="font-medium text-[#1E2B29]">场景 A：桌面端工作台左侧导航栏顶部</span>
+            <span class="font-mono-code">36 × 36px</span>
+          </div>
+
+          <div class="bg-white rounded-xl p-4 border border-[#DCE4E0] max-w-xs shadow-sm">
+            <div class="flex items-center gap-3">
+              <!-- Exact 36px SVG -->
+              <svg class="w-9 h-9 rounded-lg shrink-0" viewBox="0 0 64 64" fill="none">
+                <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+                <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <span class="font-brand font-bold text-base text-[#177A72]">MemoIsle</span>
+                  <span class="text-[10px] font-mono-code px-1 py-0.2 rounded bg-[#E2F2EE] text-[#177A72]">v2.4</span>
+                </div>
+                <div class="text-[11px] text-[#687673]">个人知识岛屿 · 已加密</div>
+              </div>
+            </div>
+
+            <!-- Mini Nav Items for Context -->
+            <div class="mt-4 pt-3 border-t border-[#DCE4E0]/60 space-y-1 text-xs">
+              <div class="px-2.5 py-1.5 rounded-lg bg-[#E2F2EE] text-[#177A72] font-medium flex items-center justify-between">
+                <span>全部备忘</span>
+                <span class="text-[11px]">128</span>
+              </div>
+              <div class="px-2.5 py-1.5 text-[#687673] flex items-center justify-between">
+                <span>灵感笔记</span>
+                <span class="text-[11px]">42</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-[#687673] leading-relaxed">
+            在 232px 固定宽度桌面左栏中，36px 磁贴与 Sora 品牌字形在水平 X 轴上形成视觉重心，与深青色主色调保持稳定呼应。
+          </p>
+        </div>
+
+        <!-- Login / Onboarding Header Integration (48px Tile) -->
+        <div class="bg-[#F6F7F2] rounded-xl p-5 border border-[#DCE4E0] space-y-4">
+          <div class="flex items-center justify-between text-xs text-[#687673]">
+            <span class="font-medium text-[#1E2B29]">场景 B：登录 / 注册 / 移动端欢迎屏</span>
+            <span class="font-mono-code">48 × 48px</span>
+          </div>
+
+          <div class="bg-white rounded-xl p-5 border border-[#DCE4E0] flex flex-col items-center text-center shadow-sm">
+            <!-- Exact 48px SVG -->
+            <svg class="w-12 h-12 rounded-xl mb-3 shadow-sm" viewBox="0 0 64 64" fill="none">
+              <rect width="64" height="64" rx="16" fill="#E2F2EE"/>
+              <path d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47" stroke="#177A72" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h3 class="font-brand font-bold text-xl text-[#1E2B29]">欢迎回到 MemoIsle</h3>
+            <p class="text-xs text-[#687673] mt-1">继续整理那些值得再次遇见的内容</p>
+
+            <div class="w-full mt-4 h-8 rounded-lg bg-[#F6F7F2] border border-[#DCE4E0] flex items-center px-3 text-[11px] text-[#687673]">
+              输入邮箱地址...
+            </div>
+            <div class="w-full mt-2 h-8 rounded-lg bg-[#177A72] text-white flex items-center justify-center text-xs font-semibold">
+              登录
+            </div>
+          </div>
+
+          <p class="text-xs text-[#687673] leading-relaxed">
+            居中 48px 展示时，圆润的 16px 圆角矩形底板呈现如陶瓷般的温润质感，强化品牌静谧、私密与聚焦的心智。
+          </p>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Section 3: Reusable Standalone SVG & Favicon Implementation Code -->
+    <div class="bg-white border border-[#DCE4E0] rounded-2xl p-6 sm:p-8 space-y-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#DCE4E0]/60">
+        <div>
+          <h2 class="font-brand font-bold text-lg text-[#1E2B29]">标准 Favicon 与内联 SVG 代码实现</h2>
+          <p class="text-xs text-[#687673] mt-0.5">无外部字体依赖、无位图栅格、无动态计算，可直接拷贝保存为 <code class="text-[#177A72] font-mono-code font-semibold">favicon.svg</code> 或内联引入。</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono-code bg-[#E2F2EE] text-[#177A72] px-2.5 py-1 rounded font-semibold">
+            SVG 源码 (仅 245 字节)
+          </span>
+        </div>
+      </div>
+
+      <!-- Code Box -->
+      <div class="relative bg-[#1A2321] rounded-xl p-4 sm:p-5 text-gray-200 font-mono-code text-xs overflow-x-auto leading-relaxed border border-[#2D3E3A]">
+        <pre><code class="text-[#84D8CB]">&lt;!-- MemoIsle Unified Brand Favicon &amp; Icon (favicon.svg) --&gt;</code>
+&lt;<span class="text-[#56B6C2]">svg</span> <span class="text-[#E5C07B]">xmlns</span>=<span class="text-[#98C379]">"http://www.w3.org/2000/svg"</span> <span class="text-[#E5C07B]">viewBox</span>=<span class="text-[#98C379]">"0 0 64 64"</span> <span class="text-[#E5C07B]">fill</span>=<span class="text-[#98C379]">"none"</span>&gt;
+  &lt;<span class="text-[#56B6C2]">rect</span> <span class="text-[#E5C07B]">width</span>=<span class="text-[#98C379]">"64"</span> <span class="text-[#E5C07B]">height</span>=<span class="text-[#98C379]">"64"</span> <span class="text-[#E5C07B]">rx</span>=<span class="text-[#98C379]">"16"</span> <span class="text-[#E5C07B]">fill</span>=<span class="text-[#98C379]">"#E2F2EE"</span>/&gt;
+  &lt;<span class="text-[#56B6C2]">path</span> 
+    <span class="text-[#E5C07B]">d</span>=<span class="text-[#98C379]">"M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47"</span> 
+    <span class="text-[#E5C07B]">stroke</span>=<span class="text-[#98C379]">"#177A72"</span> 
+    <span class="text-[#E5C07B]">stroke-width</span>=<span class="text-[#98C379]">"7"</span> 
+    <span class="text-[#E5C07B]">stroke-linecap</span>=<span class="text-[#98C379]">"round"</span> 
+    <span class="text-[#E5C07B]">stroke-linejoin</span>=<span class="text-[#98C379]">"round"</span>/&gt;
+&lt;/<span class="text-[#56B6C2]">svg</span>&gt;</pre>
+      </div>
+
+      <!-- HTML Head Integration Instruction -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+        <div class="bg-[#F6F7F2] p-4 rounded-xl border border-[#DCE4E0] text-xs">
+          <div class="font-semibold text-[#1E2B29] mb-1">HTML 引入方式</div>
+          <p class="text-[#687673] mb-2 font-mono-code text-[11px]">&lt;link rel="icon" type="image/svg+xml" href="/favicon.svg"&gt;</p>
+          <p class="text-[#687673]">现代浏览器均原生支持 SVG Favicon，具备无限矢量缩放及微小体积优势。</p>
+        </div>
+
+        <div class="bg-[#F6F7F2] p-4 rounded-xl border border-[#DCE4E0] text-xs">
+          <div class="font-semibold text-[#1E2B29] mb-1">深浅主题自适应说明</div>
+          <p class="text-[#687673]">因为自带浅薄荷瓷底（#E2F2EE），在深色标签栏下提供足够的自然边缘对比，无需额外编写复杂媒体查询。</p>
+        </div>
+
+        <div class="bg-[#F6F7F2] p-4 rounded-xl border border-[#DCE4E0] text-xs">
+          <div class="font-semibold text-[#1E2B29] mb-1">16px 极限物理渲染保证</div>
+          <p class="text-[#687673]">折线夹角控制在 72°，避免在极端缩小时出现模糊并线，始终保持清晰的 M 骨架与岛屿轮廓。</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</body>
+</html>

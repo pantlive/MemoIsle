@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MemoIsle - 个人知识岛屿</title>
+<!-- Google Fonts: Sora & Inter -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Sora:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#177A72",
+            "primary-hover": "#0F625C",
+            "primary-soft": "#E2F2EE",
+            "background-warm": "#F6F7F2",
+            surface: "#FFFFFF",
+            "surface-subtle": "#EEF2EF",
+            "text-strong": "#1E2B29",
+            "text-muted": "#687673",
+            border: "#DCE4E0",
+            success: "#2E7D5A",
+            warning: "#B36A1E",
+            error: "#BA1A1A",
+            "error-container": "#FFDAD6"
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            lg: "0.5rem",
+            xl: "0.75rem",
+            "14": "14px",
+            full: "9999px"
+          },
+          spacing: {
+            "rail-width": "232px",
+            "max-content-width": "920px"
+          },
+          fontFamily: {
+            body: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
+            label: ["Inter", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+            "page-title": ["Sora", "sans-serif"],
+            "card-title": ["Sora", "sans-serif"],
+            "section-title": ["Sora", "sans-serif"],
+            metadata: ["Inter", "sans-serif"]
+          },
+          fontSize: {
+            body: ["14px", { lineHeight: "22px", fontWeight: "400" }],
+            label: ["13px", { lineHeight: "18px", fontWeight: "500" }],
+            "card-title": ["16px", { lineHeight: "24px", fontWeight: "600" }],
+            "section-title": ["20px", { lineHeight: "28px", fontWeight: "650" }],
+            metadata: ["12px", { lineHeight: "16px", fontWeight: "400" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #DCE4E0;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #bdc9c6;
+    }
+  </style>
+</head>
+<body class="bg-background-warm text-text-strong font-body text-body antialiased h-full flex flex-col overflow-hidden select-none">
+<!-- Main Desktop Window Area -->
+<div class="flex-1 flex overflow-hidden">
+<!-- 1. LEFT NAVIGATION RAIL (Exact 232px) -->
+<aside class="fixed top-0 left-0 h-screen w-rail-width flex flex-col justify-between p-4 border-r border-border bg-background-warm z-40 select-none">
+<!-- Top section: App Identity & Navigation Items -->
+<div class="flex flex-col gap-5">
+<!-- App Brand Logo & Title -->
+<div class="flex items-center gap-2.5 px-2 pt-1">
+<div class="w-8 h-8 rounded-[9px] bg-primary flex items-center justify-center text-white shrink-0 shadow-xs">
+<span class="material-symbols-outlined text-[19px]">all_inbox</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-1.5 leading-tight">
+<span class="font-page-title text-[15px] font-bold text-primary tracking-tight">MemoIsle</span>
+<span class="text-[10px] px-1.5 py-0.5 rounded bg-[#E2ECE8] text-[#3e5652] font-mono font-medium">v2.4</span>
+</div>
+<span class="font-metadata text-[11px] text-text-muted">个人知识岛屿</span>
+</div>
+</div>
+<!-- Navigation links (min-h: 44px) -->
+<nav class="flex flex-col gap-1">
+<!-- Active: 全部 (128) -->
+<a class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-xl bg-primary-soft text-primary font-label text-label transition-colors group" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[19px]">all_inbox</span>
+<span>全部</span>
+</div>
+<span class="text-[11px] px-2 py-0.5 rounded-full bg-white text-primary font-semibold font-metadata">128</span>
+</a>
+<!-- 灵感 (42) -->
+<a class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-xl text-text-muted hover:text-text-strong hover:bg-surface-subtle font-label text-label transition-colors group" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[19px]">lightbulb</span>
+<span>灵感</span>
+</div>
+<span class="text-[11px] px-2 py-0.5 rounded-full text-text-muted group-hover:bg-white transition-colors font-metadata">42</span>
+</a>
+<!-- 单词 (61) -->
+<a class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-xl text-text-muted hover:text-text-strong hover:bg-surface-subtle font-label text-label transition-colors group" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[19px]">translate</span>
+<span>单词</span>
+</div>
+<span class="text-[11px] px-2 py-0.5 rounded-full text-text-muted group-hover:bg-white transition-colors font-metadata">61</span>
+</a>
+<!-- 资料 (25) -->
+<a class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-xl text-text-muted hover:text-text-strong hover:bg-surface-subtle font-label text-label transition-colors group" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[19px]">folder_open</span>
+<span>资料</span>
+</div>
+<span class="text-[11px] px-2 py-0.5 rounded-full text-text-muted group-hover:bg-white transition-colors font-metadata">25</span>
+</a>
+<!-- 复习 (9) -->
+<a class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-xl text-text-muted hover:text-text-strong hover:bg-surface-subtle font-label text-label transition-colors group" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[19px]">school</span>
+<span>复习</span>
+</div>
+<span class="text-[11px] px-2 py-0.5 rounded-full bg-primary-soft text-primary font-semibold font-metadata">9</span>
+</a>
+<!-- 回收站 (3) -->
+<a class="flex items-center justify-between min-h-[44px] px-3 py-2 rounded-xl text-text-muted hover:text-text-strong hover:bg-surface-subtle font-label text-label transition-colors group" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[19px]">delete</span>
+<span>回收站</span>
+</div>
+<span class="text-[11px] px-2 py-0.5 rounded-full text-text-muted group-hover:bg-white transition-colors font-metadata">3</span>
+</a>
+</nav>
+</div>
+<!-- Rail Footer: User Profile & Sync Status -->
+<div class="pt-3 border-t border-border flex items-center justify-between px-1">
+<div class="flex items-center gap-2.5 cursor-pointer group">
+<img class="w-8 h-8 rounded-full border border-border object-cover" data-alt="Refined personal profile portrait" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBPFIaJvzyO3KdD9EXBikF78l62-OVddXc88nMPLxreTPjl1oT8nmvB6MPxnXS-eA3Mm2oxoyGrslpzRWbwn42bVpcBplpcPl5Rjrse49c-cldLLz8dhTFFX_HbR9aCqR15qUf4c8PSWa2ITJ7_9yNbqGuoJ6rBeJD4JHMTi32yD6nnbzlTifo8NCoPsBKF92qU8W_yz5EfqD4BfVoLdDrGc3XUy46bI1W5NmVbaqBKZqdnBMi3W7Q90HPZIQxiTWbAQPelzURqpitR"/>
+<div class="flex flex-col">
+<span class="font-label text-[13px] font-medium text-text-strong group-hover:text-primary transition-colors leading-tight">Sanctuary Keeper</span>
+<div class="flex items-center gap-1.5 pt-0.5">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+<span class="font-metadata text-[11px] text-text-muted">已同步 · 18ms</span>
+</div>
+</div>
+</div>
+<button class="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-text-strong hover:bg-surface-subtle transition-colors" title="账户与设置">
+<span class="material-symbols-outlined text-[17px]">settings</span>
+</button>
+</div>
+</aside>
+<!-- Content Stage (Offset margin-left 232px) -->
+<div class="ml-rail-width flex-1 flex flex-col h-screen overflow-hidden bg-background-warm">
+<!-- 2. TOP UTILITY BAR (Clean, Calm Window Header) -->
+<header class="h-14 flex items-center justify-between px-6 z-30 border-b border-border bg-surface shrink-0">
+<!-- Left: Prominent, Calm Search Input -->
+<div class="w-80">
+<div class="relative w-full">
+<span class="material-symbols-outlined text-text-muted text-[17px] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
+<input class="w-full pl-9 pr-14 py-1.5 bg-surface-subtle border border-transparent focus:border-border hover:border-border rounded-[10px] text-label font-body text-text-strong placeholder:text-text-muted focus:outline-none focus:bg-surface transition-all" placeholder="搜索备忘、单词、链接或标签..." type="text"/>
+<kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-mono font-medium text-text-muted bg-surface border border-border rounded">Ctrl+F</kbd>
+</div>
+</div>
+<!-- Right: Icon-only Action Buttons + Native Window Caption Controls -->
+<div class="flex items-center gap-4">
+<!-- Action Icon Group (32px hit areas, generous spacing, max 4 icons) -->
+<div class="flex items-center gap-2">
+<!-- 1. Primary Accent Action: New Memo -->
+<button class="w-8 h-8 rounded-[9px] bg-primary text-white hover:bg-primary-hover flex items-center justify-center transition-colors active:scale-95 shadow-xs" title="新建备忘 (Ctrl+N)">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</button>
+<!-- 2. Voice Input -->
+<button class="w-8 h-8 rounded-[9px] text-text-muted hover:text-text-strong hover:bg-surface-subtle flex items-center justify-center transition-colors" title="语音记事 (Ctrl+M)">
+<span class="material-symbols-outlined text-[18px]">mic</span>
+</button>
+<!-- 3. Import -->
+<button class="w-8 h-8 rounded-[9px] text-text-muted hover:text-text-strong hover:bg-surface-subtle flex items-center justify-center transition-colors" title="导入文件与书签">
+<span class="material-symbols-outlined text-[18px]">file_upload</span>
+</button>
+<!-- 4. Sync / Refresh -->
+<button class="w-8 h-8 rounded-[9px] text-text-muted hover:text-text-strong hover:bg-surface-subtle flex items-center justify-center transition-colors" title="刷新同步 (F5)">
+<span class="material-symbols-outlined text-[18px]">sync</span>
+</button>
+</div>
+<!-- Window Caption Controls Divider -->
+<div class="h-4 w-px bg-border"></div>
+<!-- Windows Native Window Controls -->
+<div class="flex items-center -mr-2">
+<button class="w-9 h-9 flex items-center justify-center text-text-muted hover:bg-surface-subtle hover:text-text-strong transition-colors" title="最小化">
+<span class="material-symbols-outlined text-[16px]">minimize</span>
+</button>
+<button class="w-9 h-9 flex items-center justify-center text-text-muted hover:bg-surface-subtle hover:text-text-strong transition-colors" title="最大化">
+<span class="material-symbols-outlined text-[15px]">crop_square</span>
+</button>
+<button class="w-9 h-9 flex items-center justify-center text-text-muted hover:bg-error hover:text-white transition-colors" title="关闭">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+</div>
+</header>
+<!-- 3. MAIN CONTENT WORKSPACE (24px padding, Max 920px) -->
+<main class="flex-1 overflow-y-auto p-6">
+<div class="max-w-max-content-width mx-auto flex flex-col">
+<!-- Quick-Capture Composer Card (Clean, calm single-line feel) -->
+<section class="bg-surface border border-border rounded-14 p-3.5 mb-5 shadow-none transition-all focus-within:border-primary">
+<div class="flex items-center gap-3">
+<!-- Ghost Type Badges / Switchers -->
+<div class="flex items-center gap-1 bg-surface-subtle p-0.5 rounded-[8px] shrink-0">
+<button class="px-2.5 py-1 text-xs font-label rounded-md bg-surface text-primary font-semibold shadow-xs">灵感</button>
+<button class="px-2.5 py-1 text-xs font-label rounded-md text-text-muted hover:text-text-strong transition-colors">单词</button>
+<button class="px-2.5 py-1 text-xs font-label rounded-md text-text-muted hover:text-text-strong transition-colors">资料</button>
+</div>
+<!-- Input Field -->
+<input class="flex-1 bg-transparent border-0 p-0 text-[14px] font-body text-text-strong placeholder:text-text-muted focus:ring-0 focus:outline-none" placeholder="记录一条灵感，或粘贴网页链接、英语单词... (Enter 保存)" type="text"/>
+<!-- Right Action button -->
+<div class="flex items-center gap-2 shrink-0">
+<span class="text-[11px] text-text-muted font-mono hidden sm:inline">Ctrl+Enter</span>
+<button class="px-3 py-1 bg-primary text-white hover:bg-primary-hover rounded-[8px] font-label text-xs transition-colors flex items-center gap-1 shadow-xs active:scale-98">
+<span>保存</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Dedicated Quiet Filter Row (Directly above the list) -->
+<div class="flex items-center justify-between mb-3 px-0.5">
+<!-- Left-aligned Chips (13px, light borders, quiet aesthetic) -->
+<div class="flex items-center gap-2">
+<!-- Category Dropdown Chip -->
+<button class="flex items-center gap-1 px-2.5 py-1 bg-surface hover:bg-surface-subtle border border-border rounded-full text-label text-text-strong transition-colors">
+<span>全部类型</span>
+<span class="material-symbols-outlined text-[15px] text-text-muted">keyboard_arrow_down</span>
+</button>
+<!-- Sort Dropdown Chip -->
+<button class="flex items-center gap-1 px-2.5 py-1 bg-surface hover:bg-surface-subtle border border-border rounded-full text-label text-text-strong transition-colors">
+<span>按最近更新</span>
+<span class="material-symbols-outlined text-[15px] text-text-muted">keyboard_arrow_down</span>
+</button>
+<!-- Star Toggle Chip -->
+<button class="flex items-center gap-1 px-2.5 py-1 bg-surface hover:bg-surface-subtle border border-border rounded-full text-label text-text-muted hover:text-text-strong transition-colors">
+<span class="material-symbols-outlined text-[14px] text-warning">star</span>
+<span>仅星标</span>
+</button>
+<!-- View toggles -->
+<div class="flex items-center border border-border rounded-full bg-surface p-0.5 ml-1">
+<button class="p-1 rounded-full bg-surface-subtle text-primary" title="列表视图">
+<span class="material-symbols-outlined text-[15px]">view_list</span>
+</button>
+<button class="p-1 rounded-full text-text-muted hover:text-text-strong" title="网格视图">
+<span class="material-symbols-outlined text-[15px]">grid_view</span>
+</button>
+</div>
+</div>
+<!-- Right-aligned Count Badge -->
+<div class="text-xs font-label text-text-muted px-2.5 py-1 rounded-full bg-surface border border-border">
+            128 条备忘
+          </div>
+</div>
+<!-- Memo Rows (14px rounded cards, 12px gap, icon-only hover actions) -->
+<div class="flex flex-col gap-3">
+<!-- Row 1: Word (serendipity) -->
+<article class="group bg-surface border border-border rounded-14 p-4 hover:border-primary transition-all shadow-none flex items-start justify-between gap-4">
+<div class="flex items-start gap-3.5 min-w-0 flex-1">
+<!-- Left: Soft Teal Badge for Word -->
+<div class="w-9 h-9 rounded-[10px] bg-primary-soft text-primary flex items-center justify-center font-bold text-sm shrink-0 mt-0.5">
+                Aa
+              </div>
+<!-- Center Content -->
+<div class="flex flex-col gap-1 min-w-0 flex-1">
+<div class="flex items-baseline gap-2">
+<h3 class="font-card-title text-card-title font-semibold text-text-strong truncate">serendipity</h3>
+<span class="font-metadata text-metadata text-text-muted font-mono">/ˌser.ənˈdɪp.ə.ti/</span>
+</div>
+<p class="text-body font-body text-text-strong leading-relaxed">
+                  意外发现美好事物的运气；机缘巧合。<span class="text-text-muted">例句：We met by pure serendipity on a rainy afternoon in Kyoto.</span>
+</p>
+<div class="flex items-center gap-2 pt-1">
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#English</span>
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#Vocabulary</span>
+<span class="text-text-muted text-[11px]">·</span>
+<span class="text-text-muted text-[11px] font-metadata">经济学人 · 英语单词 · 10 分钟前</span>
+</div>
+</div>
+</div>
+<!-- Right: Icon-only actions (no bordered buttons) -->
+<div class="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-subtle rounded-md transition-colors" title="朗读发音">
+<span class="material-symbols-outlined text-[17px]">volume_up</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-warning hover:bg-surface-subtle rounded-md transition-colors" title="已星标">
+<span class="material-symbols-outlined text-[17px]" style="font-variation-settings: 'FILL' 1;">star</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-strong hover:bg-surface-subtle rounded-md transition-colors" title="编辑">
+<span class="material-symbols-outlined text-[17px]">edit</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-error hover:bg-error-container rounded-md transition-colors" title="删除">
+<span class="material-symbols-outlined text-[17px]">delete</span>
+</button>
+</div>
+</article>
+<!-- Row 2: Resource (PyTorch) -->
+<article class="group bg-surface border border-border rounded-14 p-4 hover:border-primary transition-all shadow-none flex items-start justify-between gap-4">
+<div class="flex items-start gap-3.5 min-w-0 flex-1">
+<!-- Left: Soft Blue-Gray Badge for Resource -->
+<div class="w-9 h-9 rounded-[10px] bg-[#EAEFF5] text-[#345377] flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[18px]">link</span>
+</div>
+<!-- Center Content -->
+<div class="flex flex-col gap-1 min-w-0 flex-1">
+<div class="flex items-center gap-1.5">
+<h3 class="font-card-title text-card-title font-semibold text-text-strong hover:text-primary cursor-pointer transition-colors flex items-center gap-1">
+                    PyTorch 深度学习实战指南
+                    <span class="material-symbols-outlined text-[14px] text-text-muted">open_in_new</span>
+</h3>
+</div>
+<p class="text-body font-body text-text-strong leading-relaxed">
+                  官方文档与基础架构解析：张量操作、自动求导与模型部署关键链路总结。梳理了自定义 Dataset 与 DataLoader 的多进程预取优化。
+                </p>
+<div class="flex items-center gap-2 pt-1">
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#AI</span>
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#Programming</span>
+<span class="text-text-muted text-[11px]">·</span>
+<span class="text-text-muted text-[11px] font-metadata">pytorch.org · 资料 · 2 小时前</span>
+</div>
+</div>
+</div>
+<!-- Right: Icon-only actions -->
+<div class="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-subtle rounded-md transition-colors" title="在新标签页打开">
+<span class="material-symbols-outlined text-[17px]">open_in_new</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-warning hover:bg-surface-subtle rounded-md transition-colors" title="加星标">
+<span class="material-symbols-outlined text-[17px]">star</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-strong hover:bg-surface-subtle rounded-md transition-colors" title="编辑">
+<span class="material-symbols-outlined text-[17px]">edit</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-error hover:bg-error-container rounded-md transition-colors" title="删除">
+<span class="material-symbols-outlined text-[17px]">delete</span>
+</button>
+</div>
+</article>
+<!-- Row 3: Idea (SQLite Architecture) -->
+<article class="group bg-surface border border-border rounded-14 p-4 hover:border-primary transition-all shadow-none flex items-start justify-between gap-4">
+<div class="flex items-start gap-3.5 min-w-0 flex-1">
+<!-- Left: Soft Warm-Amber Badge for Idea -->
+<div class="w-9 h-9 rounded-[10px] bg-[#FEF3E2] text-[#B36A1E] flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[18px]">lightbulb</span>
+</div>
+<!-- Center Content -->
+<div class="flex flex-col gap-1 min-w-0 flex-1">
+<div class="flex items-center gap-1.5">
+<h3 class="font-card-title text-card-title font-semibold text-text-strong">产品架构灵感：本地轻量 SQLite 缓存与增量同步</h3>
+</div>
+<p class="text-body font-body text-text-strong leading-relaxed">
+                  桌面端启动速度必须保持在 300ms 以内。坚持离线优先（Offline-first）设计，语音转录完成前仅存储波形元数据并建立 WAL 模式索引。
+                </p>
+<div class="flex items-center gap-2 pt-1">
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#Architecture</span>
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#MemoIsle</span>
+<span class="text-text-muted text-[11px]">·</span>
+<span class="text-text-muted text-[11px] font-metadata">个人便签 · 灵感 · 昨天 16:40</span>
+</div>
+</div>
+</div>
+<!-- Right: Icon-only actions -->
+<div class="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+<button class="w-7 h-7 flex items-center justify-center text-warning hover:bg-surface-subtle rounded-md transition-colors" title="已星标">
+<span class="material-symbols-outlined text-[17px]" style="font-variation-settings: 'FILL' 1;">star</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-strong hover:bg-surface-subtle rounded-md transition-colors" title="编辑">
+<span class="material-symbols-outlined text-[17px]">edit</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-error hover:bg-error-container rounded-md transition-colors" title="删除">
+<span class="material-symbols-outlined text-[17px]">delete</span>
+</button>
+</div>
+</article>
+<!-- Row 4: Word (ephemeral) -->
+<article class="group bg-surface border border-border rounded-14 p-4 hover:border-primary transition-all shadow-none flex items-start justify-between gap-4">
+<div class="flex items-start gap-3.5 min-w-0 flex-1">
+<!-- Left: Soft Teal Badge for Word -->
+<div class="w-9 h-9 rounded-[10px] bg-primary-soft text-primary flex items-center justify-center font-bold text-sm shrink-0 mt-0.5">
+                Aa
+              </div>
+<!-- Center Content -->
+<div class="flex flex-col gap-1 min-w-0 flex-1">
+<div class="flex items-baseline gap-2">
+<h3 class="font-card-title text-card-title font-semibold text-text-strong truncate">ephemeral</h3>
+<span class="font-metadata text-metadata text-text-muted font-mono">/ɪˈfem.ər.əl/</span>
+</div>
+<p class="text-body font-body text-text-strong leading-relaxed">
+                  短暂的，瞬息的。<span class="text-text-muted">例句：Fashions are ephemeral, but true style endures through the seasons.</span>
+</p>
+<div class="flex items-center gap-2 pt-1">
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#GRE</span>
+<span class="px-2 py-0.5 rounded-full bg-surface-subtle text-text-muted text-[11px] font-label">#Reading</span>
+<span class="text-text-muted text-[11px]">·</span>
+<span class="text-text-muted text-[11px] font-metadata">阅读生词 · 英语单词 · 3 天前</span>
+</div>
+</div>
+</div>
+<!-- Right: Icon-only actions -->
+<div class="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-subtle rounded-md transition-colors" title="朗读发音">
+<span class="material-symbols-outlined text-[17px]">volume_up</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-warning hover:bg-surface-subtle rounded-md transition-colors" title="加星标">
+<span class="material-symbols-outlined text-[17px]">star</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-strong hover:bg-surface-subtle rounded-md transition-colors" title="编辑">
+<span class="material-symbols-outlined text-[17px]">edit</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-error hover:bg-error-container rounded-md transition-colors" title="删除">
+<span class="material-symbols-outlined text-[17px]">delete</span>
+</button>
+</div>
+</article>
+</div>
+<!-- Peaceful End-of-List Hint -->
+<div class="mt-6 mb-4 py-5 border border-dashed border-border rounded-14 flex items-center justify-center text-center">
+<p class="text-xs font-label text-text-muted">
+            按 <kbd class="px-1.5 py-0.5 bg-surface border border-border rounded font-mono text-[11px]">Ctrl+N</kbd> 随时开启快速记录 · 支持划词导入与全局快捷键呼出
+          </p>
+</div>
+</div>
+</main>
+</div>
+</div>
+<!-- 4. BOTTOM STATUS BAR (Clean, Calm Desktop Footer) -->
+<footer class="h-7 bg-surface border-t border-border px-6 text-[12px] text-text-muted flex items-center justify-between shrink-0 font-metadata z-50">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+<span>就绪 · 128 条记录已在本地加密存储</span>
+</div>
+<div class="flex items-center gap-3">
+<span>快捷键: Ctrl+N 新建 · Ctrl+F 搜索 · Ctrl+R 开始复习</span>
+<span class="text-border">|</span>
+<span>WinUI 3 桌面端</span>
+</div>
+</footer>
+</body></html>

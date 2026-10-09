@@ -50,6 +50,17 @@ class MemoDatabaseHelper(context: Context) :
                 transcript TEXT,
                 transcript_status TEXT NOT NULL,
                 local_audio_path TEXT,
+                image_mime_type TEXT,
+                image_size_bytes INTEGER,
+                image_width INTEGER,
+                image_height INTEGER,
+                image_hash TEXT,
+                image_ocr_text TEXT,
+                image_ocr_status TEXT NOT NULL DEFAULT 'none',
+                image_ocr_error TEXT,
+                image_ocr_source TEXT,
+                image_auto_tags_json TEXT NOT NULL DEFAULT '[]',
+                image_ocr_updated_at TEXT,
                 tags_json TEXT NOT NULL,
                 collections_json TEXT NOT NULL DEFAULT '[]',
                 starred INTEGER NOT NULL DEFAULT 0,
@@ -57,11 +68,21 @@ class MemoDatabaseHelper(context: Context) :
                 version INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                sync_state TEXT NOT NULL
+                sync_state TEXT NOT NULL,
+                deleted_at TEXT
             )
             """.trimIndent(),
         )
         database.execSQL("CREATE INDEX index_memo_updated ON memo(updated_at DESC)")
+        database.execSQL(
+            """
+            CREATE TABLE sync_state (
+                state_id INTEGER PRIMARY KEY CHECK (state_id = 1),
+                cursor TEXT NOT NULL,
+                cursor_id TEXT
+            )
+            """.trimIndent(),
+        )
     }
 
     override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -142,6 +163,48 @@ class MemoDatabaseHelper(context: Context) :
             // 自定义分类需要同步显示名称，旧资料保持系统分类兼容显示。
             database.execSQL("ALTER TABLE memo ADD COLUMN resource_category_label TEXT")
         }
+        if (oldVersion < 9) {
+            database.execSQL("ALTER TABLE memo ADD COLUMN deleted_at TEXT")
+        }
+        if (oldVersion < 10) {
+            // 游标单独存储，旧版本升级后会自动执行一次全量同步建立游标。
+            database.execSQL(
+                """
+                CREATE TABLE sync_state (
+                    state_id INTEGER PRIMARY KEY CHECK (state_id = 1),
+                    cursor TEXT NOT NULL,
+                    cursor_id TEXT
+                )
+                """.trimIndent(),
+            )
+        }
+        if (oldVersion < 11) {
+            // 图片收藏只缓存元数据，原图和缩略图按需从服务端拉取或落到应用缓存目录。
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_mime_type TEXT")
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_size_bytes INTEGER")
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_width INTEGER")
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_height INTEGER")
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_hash TEXT")
+        }
+        if (oldVersion < 12) {
+            // 图片 OCR 结果由服务端识别，Android 只读缓存；旧图片保持未识别状态。
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_ocr_text TEXT")
+            database.execSQL(
+                "ALTER TABLE memo ADD COLUMN image_ocr_status TEXT " +
+                    "NOT NULL DEFAULT 'none'",
+            )
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_ocr_error TEXT")
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_ocr_source TEXT")
+            database.execSQL(
+                "ALTER TABLE memo ADD COLUMN image_auto_tags_json TEXT " +
+                    "NOT NULL DEFAULT '[]'",
+            )
+            database.execSQL("ALTER TABLE memo ADD COLUMN image_ocr_updated_at TEXT")
+        }
+        if (oldVersion < 13) {
+            // 首次支持删除通知时完整同步，清理旧服务端已经永久删除的缓存。
+            database.delete(TABLE_SYNC_STATE, null, null)
+        }
     }
 
     @Synchronized
@@ -220,6 +283,17 @@ class MemoDatabaseHelper(context: Context) :
             put(COLUMN_TRANSCRIPT, memo.transcript)
             put(COLUMN_TRANSCRIPT_STATUS, memo.transcriptStatus)
             put(COLUMN_LOCAL_AUDIO_PATH, memo.localAudioPath)
+            put(COLUMN_IMAGE_MIME_TYPE, memo.imageMimeType)
+            put(COLUMN_IMAGE_SIZE_BYTES, memo.imageSizeBytes)
+            put(COLUMN_IMAGE_WIDTH, memo.imageWidth)
+            put(COLUMN_IMAGE_HEIGHT, memo.imageHeight)
+            put(COLUMN_IMAGE_HASH, memo.imageHash)
+            put(COLUMN_IMAGE_OCR_TEXT, memo.imageOcrText)
+            put(COLUMN_IMAGE_OCR_STATUS, memo.imageOcrStatus)
+            put(COLUMN_IMAGE_OCR_ERROR, memo.imageOcrError)
+            put(COLUMN_IMAGE_OCR_SOURCE, memo.imageOcrSource)
+            put(COLUMN_IMAGE_AUTO_TAGS, JSONArray(memo.imageAutoTags).toString())
+            put(COLUMN_IMAGE_OCR_UPDATED_AT, memo.imageOcrUpdatedAt)
             put(COLUMN_TAGS, JSONArray(memo.tags).toString())
             put(COLUMN_COLLECTIONS, JSONArray(memo.collections).toString())
             put(COLUMN_STARRED, if (memo.starred) 1 else 0)
@@ -228,6 +302,7 @@ class MemoDatabaseHelper(context: Context) :
             put(COLUMN_CREATED_AT, memo.createdAt)
             put(COLUMN_UPDATED_AT, memo.updatedAt)
             put(COLUMN_SYNC_STATE, memo.syncState.name)
+            put(COLUMN_DELETED_AT, memo.deletedAt)
         }
 
     @Synchronized
@@ -247,14 +322,91 @@ class MemoDatabaseHelper(context: Context) :
     fun loadMemos(): List<Memo> = queryMemos(selection = null, arguments = null)
 
     @Synchronized
+    fun findByClientId(clientId: String): Memo? {
+        return queryMemos(
+            selection = "$COLUMN_CLIENT_ID = ?",
+            arguments = arrayOf(clientId),
+        ).firstOrNull()
+    }
+
+    /**
+     * 写入服务端快照时保留本地冲突草稿，等待用户明确选择处理方式。
+     */
+    @Synchronized
+    fun upsertRemote(memo: Memo): Unit {
+        val existing = findByClientId(memo.clientId)
+        if (existing?.syncState in setOf(
+                SyncState.PENDING,
+                SyncState.FAILED,
+                SyncState.CONFLICT,
+            )
+        ) {
+            return
+        }
+        // 服务端只返回音频元数据，本机录音路径必须跨增量刷新保留。
+        insertMemo(
+            writableDatabase,
+            memo.copy(localAudioPath = memo.localAudioPath ?: existing?.localAudioPath),
+        )
+    }
+
+    @Synchronized
     fun clearAll(): Unit {
         writableDatabase.delete(TABLE_MEMO, null, null)
+        writableDatabase.delete(TABLE_SYNC_STATE, null, null)
+    }
+
+    @Synchronized
+    fun loadSyncCursor(): MemoSyncCursor? {
+        return readableDatabase.query(
+            TABLE_SYNC_STATE,
+            arrayOf(COLUMN_CURSOR, COLUMN_CURSOR_ID),
+            "$COLUMN_STATE_ID = ?",
+            arrayOf(SYNC_STATE_ID.toString()),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) {
+                return null
+            }
+            val cursorIdIndex = cursor.getColumnIndexOrThrow(COLUMN_CURSOR_ID)
+            MemoSyncCursor(
+                timestamp = cursor.getString(
+                    cursor.getColumnIndexOrThrow(COLUMN_CURSOR),
+                ),
+                memoId = if (cursor.isNull(cursorIdIndex)) {
+                    null
+                } else {
+                    cursor.getString(cursorIdIndex)
+                },
+            )
+        }
+    }
+
+    @Synchronized
+    fun saveSyncCursor(syncCursor: MemoSyncCursor): Unit {
+        val values = ContentValues().apply {
+            put(COLUMN_STATE_ID, SYNC_STATE_ID)
+            put(COLUMN_CURSOR, syncCursor.timestamp)
+            if (syncCursor.memoId == null) {
+                putNull(COLUMN_CURSOR_ID)
+            } else {
+                put(COLUMN_CURSOR_ID, syncCursor.memoId)
+            }
+        }
+        writableDatabase.insertWithOnConflict(
+            TABLE_SYNC_STATE,
+            null,
+            values,
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
     }
 
     @Synchronized
     fun loadPending(): List<Memo> = queryMemos(
-        selection = "$COLUMN_SYNC_STATE != ?",
-        arguments = arrayOf(SyncState.SYNCED.name),
+        selection = "$COLUMN_SYNC_STATE IN (?, ?)",
+        arguments = arrayOf(SyncState.PENDING.name, SyncState.FAILED.name),
     )
 
     private fun queryMemos(selection: String?, arguments: Array<String>?): List<Memo> {
@@ -318,6 +470,25 @@ class MemoDatabaseHelper(context: Context) :
         val audioDurationIndex = getColumnIndexOrThrow(COLUMN_AUDIO_DURATION_MS)
         val transcriptIndex = getColumnIndexOrThrow(COLUMN_TRANSCRIPT)
         val localAudioPathIndex = getColumnIndexOrThrow(COLUMN_LOCAL_AUDIO_PATH)
+        val imageMimeTypeIndex = getColumnIndexOrThrow(COLUMN_IMAGE_MIME_TYPE)
+        val imageSizeIndex = getColumnIndexOrThrow(COLUMN_IMAGE_SIZE_BYTES)
+        val imageWidthIndex = getColumnIndexOrThrow(COLUMN_IMAGE_WIDTH)
+        val imageHeightIndex = getColumnIndexOrThrow(COLUMN_IMAGE_HEIGHT)
+        val imageHashIndex = getColumnIndexOrThrow(COLUMN_IMAGE_HASH)
+        val imageOcrTextIndex = getColumnIndexOrThrow(COLUMN_IMAGE_OCR_TEXT)
+        val imageOcrErrorIndex = getColumnIndexOrThrow(COLUMN_IMAGE_OCR_ERROR)
+        val imageOcrSourceIndex = getColumnIndexOrThrow(COLUMN_IMAGE_OCR_SOURCE)
+        val imageOcrUpdatedAtIndex = getColumnIndexOrThrow(COLUMN_IMAGE_OCR_UPDATED_AT)
+        val imageAutoTags = JSONArray(
+            getString(getColumnIndexOrThrow(COLUMN_IMAGE_AUTO_TAGS)),
+        ).let { values ->
+            buildList {
+                for (index in 0 until values.length()) {
+                    add(values.getString(index))
+                }
+            }
+        }
+        val deletedAtIndex = getColumnIndex(COLUMN_DELETED_AT)
         val syncStateName = getString(getColumnIndexOrThrow(COLUMN_SYNC_STATE))
         val collectionsArray = JSONArray(
             getString(getColumnIndexOrThrow(COLUMN_COLLECTIONS)),
@@ -418,6 +589,25 @@ class MemoDatabaseHelper(context: Context) :
             } else {
                 getString(localAudioPathIndex)
             },
+            imageMimeType = if (isNull(imageMimeTypeIndex)) null else getString(imageMimeTypeIndex),
+            imageSizeBytes = if (isNull(imageSizeIndex)) null else getInt(imageSizeIndex),
+            imageWidth = if (isNull(imageWidthIndex)) null else getInt(imageWidthIndex),
+            imageHeight = if (isNull(imageHeightIndex)) null else getInt(imageHeightIndex),
+            imageHash = if (isNull(imageHashIndex)) null else getString(imageHashIndex),
+            imageOcrText = if (isNull(imageOcrTextIndex)) null else getString(imageOcrTextIndex),
+            imageOcrStatus = getString(getColumnIndexOrThrow(COLUMN_IMAGE_OCR_STATUS)),
+            imageOcrError = if (isNull(imageOcrErrorIndex)) null else getString(imageOcrErrorIndex),
+            imageOcrSource = if (isNull(imageOcrSourceIndex)) {
+                null
+            } else {
+                getString(imageOcrSourceIndex)
+            },
+            imageAutoTags = imageAutoTags,
+            imageOcrUpdatedAt = if (isNull(imageOcrUpdatedAtIndex)) {
+                null
+            } else {
+                getString(imageOcrUpdatedAtIndex)
+            },
             tags = tags,
             collections = collections,
             starred = getInt(getColumnIndexOrThrow(COLUMN_STARRED)) != 0,
@@ -427,13 +617,19 @@ class MemoDatabaseHelper(context: Context) :
             updatedAt = getString(getColumnIndexOrThrow(COLUMN_UPDATED_AT)),
             syncState = runCatching { SyncState.valueOf(syncStateName) }
                 .getOrDefault(SyncState.FAILED),
+            deletedAt = deletedAtIndex.takeIf { it >= 0 && !isNull(it) }?.let(::getString),
         )
     }
 
     private companion object {
         const val DATABASE_NAME = "memoisle.db"
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 13
         const val TABLE_MEMO = "memo"
+        const val TABLE_SYNC_STATE = "sync_state"
+        const val COLUMN_STATE_ID = "state_id"
+        const val COLUMN_CURSOR = "cursor"
+        const val COLUMN_CURSOR_ID = "cursor_id"
+        const val SYNC_STATE_ID = 1
         const val COLUMN_CLIENT_ID = "client_id"
         const val COLUMN_REMOTE_ID = "remote_id"
         const val COLUMN_TYPE = "type"
@@ -470,6 +666,17 @@ class MemoDatabaseHelper(context: Context) :
         const val COLUMN_TRANSCRIPT = "transcript"
         const val COLUMN_TRANSCRIPT_STATUS = "transcript_status"
         const val COLUMN_LOCAL_AUDIO_PATH = "local_audio_path"
+        const val COLUMN_IMAGE_MIME_TYPE = "image_mime_type"
+        const val COLUMN_IMAGE_SIZE_BYTES = "image_size_bytes"
+        const val COLUMN_IMAGE_WIDTH = "image_width"
+        const val COLUMN_IMAGE_HEIGHT = "image_height"
+        const val COLUMN_IMAGE_HASH = "image_hash"
+        const val COLUMN_IMAGE_OCR_TEXT = "image_ocr_text"
+        const val COLUMN_IMAGE_OCR_STATUS = "image_ocr_status"
+        const val COLUMN_IMAGE_OCR_ERROR = "image_ocr_error"
+        const val COLUMN_IMAGE_OCR_SOURCE = "image_ocr_source"
+        const val COLUMN_IMAGE_AUTO_TAGS = "image_auto_tags_json"
+        const val COLUMN_IMAGE_OCR_UPDATED_AT = "image_ocr_updated_at"
         const val COLUMN_TAGS = "tags_json"
         const val COLUMN_COLLECTIONS = "collections_json"
         const val COLUMN_STARRED = "starred"
@@ -478,6 +685,7 @@ class MemoDatabaseHelper(context: Context) :
         const val COLUMN_CREATED_AT = "created_at"
         const val COLUMN_UPDATED_AT = "updated_at"
         const val COLUMN_SYNC_STATE = "sync_state"
+        const val COLUMN_DELETED_AT = "deleted_at"
         val ALL_COLUMNS = arrayOf(
             COLUMN_CLIENT_ID,
             COLUMN_REMOTE_ID,
@@ -515,6 +723,17 @@ class MemoDatabaseHelper(context: Context) :
             COLUMN_TRANSCRIPT,
             COLUMN_TRANSCRIPT_STATUS,
             COLUMN_LOCAL_AUDIO_PATH,
+            COLUMN_IMAGE_MIME_TYPE,
+            COLUMN_IMAGE_SIZE_BYTES,
+            COLUMN_IMAGE_WIDTH,
+            COLUMN_IMAGE_HEIGHT,
+            COLUMN_IMAGE_HASH,
+            COLUMN_IMAGE_OCR_TEXT,
+            COLUMN_IMAGE_OCR_STATUS,
+            COLUMN_IMAGE_OCR_ERROR,
+            COLUMN_IMAGE_OCR_SOURCE,
+            COLUMN_IMAGE_AUTO_TAGS,
+            COLUMN_IMAGE_OCR_UPDATED_AT,
             COLUMN_TAGS,
             COLUMN_COLLECTIONS,
             COLUMN_STARRED,
@@ -523,6 +742,7 @@ class MemoDatabaseHelper(context: Context) :
             COLUMN_CREATED_AT,
             COLUMN_UPDATED_AT,
             COLUMN_SYNC_STATE,
+            COLUMN_DELETED_AT,
         )
     }
 }

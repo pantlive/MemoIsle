@@ -190,10 +190,129 @@ def test_user_category_template_and_rule_api(client: TestClient) -> None:
     assert memo_response.status_code == 200
     assert memo_response.json()["resource_category"] == custom_category["code"]
     assert memo_response.json()["resource_category_label"] == "我的研究"
+    assert memo_response.json()["resource_categories"] == [custom_category["code"]]
 
     rules_response = client.get("/api/v1/resource-category-rules")
     assert rules_response.status_code == 200
     assert len(rules_response.json()) == 1
+
+    renamed = client.patch(
+        f"/api/v1/resource-categories/{custom_category['id']}",
+        json={
+            "expected_version": custom_category["version"],
+            "name": "研究归档",
+            "description": "长期项目",
+        },
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "研究归档"
+    renamed_memo = client.get(f"/api/v1/memos/{resource_response.json()['id']}")
+    assert renamed_memo.status_code == 200
+    assert renamed_memo.json()["resource_category_label"] == "研究归档"
+
+    deleted = client.delete(
+        f"/api/v1/resource-categories/{custom_category['id']}",
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    leftover_rules = client.get("/api/v1/resource-category-rules")
+    assert leftover_rules.status_code == 200
+    assert leftover_rules.json() == []
+    leftover_categories = client.get("/api/v1/resource-categories")
+    assert leftover_categories.status_code == 200
+    assert all(
+        item["id"] != custom_category["id"]
+        for item in leftover_categories.json()
+    )
+    cleared_memo = client.get(f"/api/v1/memos/{resource_response.json()['id']}")
+    assert cleared_memo.status_code == 200
+    assert cleared_memo.json()["resource_category"] is None
+    missing = client.delete(
+        f"/api/v1/resource-categories/{custom_category['id']}",
+    )
+    assert missing.status_code == 404
+
+
+def test_category_hierarchy_and_multi_assign(client: TestClient) -> None:
+    """自定义分类最多三层，资料可同时属于多个分类。"""
+
+    created = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "PyTorch 教程",
+            "body": "深度学习",
+            "source_url": "https://learn.example.com/pytorch",
+            "tags": [],
+        },
+    )
+    assert created.status_code == 201
+    memo_id = created.json()["id"]
+
+    programming = client.post(
+        "/api/v1/resource-categories",
+        json={"name": "编程", "parent_code": "learning"},
+    )
+    assert programming.status_code == 201
+    assert programming.json()["parent_code"] == "learning"
+    assert programming.json()["depth"] == 2
+    assert programming.json()["path"] == "学习资料 / 编程"
+
+    python = client.post(
+        "/api/v1/resource-categories",
+        json={
+            "name": "Python",
+            "parent_code": programming.json()["code"],
+        },
+    )
+    assert python.status_code == 201
+    assert python.json()["depth"] == 3
+
+    too_deep = client.post(
+        "/api/v1/resource-categories",
+        json={
+            "name": "异步",
+            "parent_code": python.json()["code"],
+        },
+    )
+    assert too_deep.status_code == 422
+
+    assigned = client.patch(
+        f"/api/v1/memos/{memo_id}",
+        json={
+            "expected_version": created.json()["version"],
+            "resource_categories": [
+                python.json()["code"],
+                "article",
+            ],
+        },
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["resource_category"] == python.json()["code"]
+    assert assigned.json()["resource_categories"] == [
+        python.json()["code"],
+        "article",
+    ]
+
+    filtered = client.get(
+        "/api/v1/memos",
+        params={"type": "resource", "category": "learning"},
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["items"][0]["id"] == memo_id
+
+    deleted_parent = client.delete(
+        f"/api/v1/resource-categories/{programming.json()['id']}",
+    )
+    assert deleted_parent.status_code == 200
+    leftover = client.get("/api/v1/resource-categories")
+    leftover_codes = {item["code"] for item in leftover.json()}
+    assert programming.json()["code"] not in leftover_codes
+    assert python.json()["code"] not in leftover_codes
+    remaining = client.get(f"/api/v1/memos/{memo_id}")
+    assert remaining.json()["resource_categories"] == ["article"]
+    assert remaining.json()["resource_category"] == "article"
 
 
 def test_enrichment_updates_metadata_category_and_search(tmp_path: Path) -> None:

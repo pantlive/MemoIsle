@@ -1,4 +1,4 @@
-export type MemoType = "word" | "resource" | "idea";
+export type MemoType = "word" | "resource" | "idea" | "image";
 export type AuthProvider = "google" | "wechat" | "apple";
 
 export interface AuthProviderInfo {
@@ -31,7 +31,6 @@ export interface AuthSession {
 
 export interface EmailRegisterResponse {
   user: AuthUser;
-  verification_email_sent: boolean;
 }
 export type MemoStatus = "inbox" | "active" | "archived" | "trashed";
 export type MemoSort =
@@ -42,6 +41,38 @@ export type MemoSort =
   | "title_asc"
   | "title_desc";
 export type ReviewFeedback = "forgot" | "fuzzy" | "remembered";
+export interface WordLookupSense {
+  index: number;
+  part_of_speech: string | null;
+  definition: string;
+  example: string | null;
+}
+
+export interface WordLookupResponse {
+  word: string;
+  lemma: string;
+  phonetic: string | null;
+  us_audio_url: string | null;
+  uk_audio_url: string | null;
+  senses: WordLookupSense[];
+  source_name?: string | null;
+  source_url?: string | null;
+}
+
+export interface WordImportError {
+  row: number;
+  message: string;
+}
+
+export interface WordImportResponse {
+  total_count: number;
+  imported_count: number;
+  duplicate_count: number;
+  skipped_count: number;
+  failed_count: number;
+  errors: WordImportError[];
+}
+
 export type ResourceCategory = string;
 export type ResourceCategoryRuleMatchType = "domain" | "url" | "text";
 export type ResourceKind =
@@ -62,6 +93,14 @@ export type ResourceProcessStatus =
   | "processing"
   | "ready"
   | "failed";
+export type ImageOcrStatus =
+  | "none"
+  | "pending"
+  | "processing"
+  | "ready"
+  | "failed"
+  | "disabled";
+export type ImageOcrSource = "local" | "llm";
 export type LinkHealthStatus =
   | "unchecked"
   | "healthy"
@@ -80,6 +119,60 @@ export type LinkHealthAction =
   | "update_metadata"
   | "delete";
 
+export interface ResourceClassificationAssessment {
+  status: "classified" | "uncertain";
+  reason_code: string;
+  confidence: number | null;
+  threshold: number;
+  candidates: Array<{ code: string; label: string; probability: number | null }>;
+  input_source: "metadata" | "public_excerpt" | "image_ocr";
+  input_excerpt: string | null;
+  model: string;
+  attempted_at: string;
+}
+
+export type ResourceClassificationReviewAction = "adopt" | "keep" | "assign";
+
+export interface ResourceClassificationConfirmation {
+  action: ResourceClassificationReviewAction;
+  confirmed_at: string;
+  category_code: string | null;
+  category_label: string | null;
+}
+
+export interface ResourceClassificationReviewItem {
+  id: string;
+  version: number;
+  title: string;
+  source_url: string;
+  current_category_label: string | null;
+  assessment: ResourceClassificationAssessment | null;
+  candidates: Array<{ code: string; label: string; probability: number | null; available: boolean }>;
+}
+
+export interface ResourceClassificationReviewList {
+  items: ResourceClassificationReviewItem[];
+  total_count: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ResourceClassificationReviewRequest {
+  action: ResourceClassificationReviewAction;
+  items: Array<{ memo_id: string; expected_version: number; candidate_code?: string }>;
+  category_code?: string;
+}
+
+export interface ResourceClassificationReviewResult {
+  updated_count: number;
+  skipped_count: number;
+  results: Array<{
+    memo_id: string;
+    status: "updated" | "skipped";
+    reason: "missing" | "conflict" | "not_pending" | "no_candidate" | "category_unavailable" | null;
+  }>;
+}
+
 export interface Memo {
   id: string;
   client_id: string;
@@ -97,15 +190,29 @@ export interface Memo {
   resource_metadata_error: string | null;
   resource_category: ResourceCategory | null;
   resource_category_label: string | null;
+  resource_categories?: ResourceCategory[];
   resource_category_status: ResourceProcessStatus;
   resource_category_confidence: number | null;
   resource_category_source: string | null;
+  resource_ai_classified_at: string | null;
+  resource_ai_review_required: boolean;
+  resource_text_excerpt?: string | null;
+  resource_ai_assessment?: ResourceClassificationAssessment | null;
+  resource_ai_confirmation_pending?: boolean;
+  resource_ai_confirmation?: ResourceClassificationConfirmation | null;
   resource_kind: ResourceKind | null;
   resource_reading_status: ResourceReadingStatus | null;
   resource_auto_tags: string[];
   resource_last_enriched_at: string | null;
   resource_import_folder: string | null;
   resource_import_batch_id: string | null;
+  ebook_provider: CloudProvider | null;
+  ebook_file_id: string | null;
+  ebook_path: string | null;
+  ebook_share_url: string | null;
+  ebook_format: string | null;
+  ebook_size_bytes: number | null;
+  ebook_snapshot: Record<string, unknown> | null;
   link_health_status: LinkHealthStatus;
   link_health_http_status: number | null;
   link_health_error: string | null;
@@ -126,12 +233,24 @@ export interface Memo {
   audio_mime_type: string | null;
   audio_size_bytes: number | null;
   audio_duration_ms: number | null;
+  image_mime_type: string | null;
+  image_size_bytes: number | null;
+  image_width: number | null;
+  image_height: number | null;
+  image_hash: string | null;
+  image_ocr_text: string | null;
+  image_ocr_status: ImageOcrStatus;
+  image_ocr_error: string | null;
+  image_ocr_source: ImageOcrSource | null;
+  image_auto_tags: string[];
+  image_ocr_updated_at: string | null;
   transcript: string | null;
   transcript_status: string;
   tags: string[];
   collections: string[];
   starred: boolean;
   status: MemoStatus;
+  deleted_at: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -142,11 +261,34 @@ export interface MemoListResponse {
   total_count: number;
 }
 
+export type MemoBatchAction = "trash" | "restore" | "permanent";
+export type ImageOrganizationAction = "ocr" | "classify" | "ocr_classify";
+export interface ImageOrganizationState {
+  pending_ocr_count: number;
+  pending_classification_count: number;
+  duplicate_group_count: number;
+  job: { id: string; action: ImageOrganizationAction; status: "pending" | "processing" | "completed" | "failed";
+    total_count: number; processed_count: number; succeeded_count: number; failed_count: number; skipped_count: number; error: string | null } | null;
+}
+export interface ImageDuplicateList {
+  groups: Array<{ image_hash: string; count: number; items: Array<{ id: string; title: string; version: number }> }>;
+  total_count: number;
+  limit: number;
+  offset: number;
+}
+export interface MemoBatchResult {
+  updated_count: number;
+  skipped_count: number;
+  results: Array<{ memo_id: string; status: "updated" | "skipped"; reason: "missing" | "conflict" | "not_applicable" | null }>;
+}
+
 export interface MemoCounts {
   total_count: number;
   word_count: number;
   resource_count: number;
   idea_count: number;
+  image_count: number;
+  inbox_count: number;
 }
 
 export interface ReviewQueueResponse {
@@ -154,6 +296,13 @@ export interface ReviewQueueResponse {
   word_count: number;
   resource_count: number;
   idea_count: number;
+  daily_limit: number;
+  scheduled_count: number;
+}
+
+export interface ReviewSettings {
+  daily_limit: number;
+  intervals_days: number[];
 }
 
 export interface ResourceCategoryOption {
@@ -164,6 +313,9 @@ export interface ResourceCategoryOption {
   is_system: boolean;
   is_active: boolean;
   version: number;
+  parent_code?: string | null;
+  depth?: number;
+  path?: string;
 }
 
 export interface ResourceCategoryRule {
@@ -183,6 +335,18 @@ export interface ResourceCategoryRule {
 export interface ResourceCategoryCreateRequest {
   name: string;
   description?: string;
+  parent_code?: string;
+}
+
+export interface ResourceCategorySuggestion {
+  name: string;
+  description: string | null;
+  parent_code: string | null;
+}
+
+export interface ResourceCategoryGenerateResponse {
+  model: string;
+  categories: ResourceCategorySuggestion[];
 }
 
 export interface ResourceCategoryUpdateRequest {
@@ -190,6 +354,7 @@ export interface ResourceCategoryUpdateRequest {
   name?: string;
   description?: string | null;
   is_active?: boolean;
+  parent_code?: string | null;
 }
 
 export interface ResourceCategoryRuleCreateRequest {
@@ -231,6 +396,7 @@ export interface MemoCreateRequest {
 
 export interface MemoUpdateRequest {
   expected_version: number;
+  type?: MemoType;
   title?: string;
   body?: string;
   source_url?: string;
@@ -239,6 +405,7 @@ export interface MemoUpdateRequest {
   word_meaning?: string;
   word_example?: string;
   resource_category?: ResourceCategory;
+  resource_categories?: ResourceCategory[];
   resource_kind?: ResourceKind;
   resource_reading_status?: ResourceReadingStatus;
   tags?: string[];
@@ -331,5 +498,124 @@ export interface BrowserOpenTabListResponse {
 
 export interface LinkHealthCenter {
   items: Memo[];
-  counts: Record<LinkHealthStatus, number>;
+  counts: Record<LinkHealthStatus, number> & { review_pending?: number };
+  settings: LinkHealthSettings;
+}
+
+export interface LinkHealthSettings {
+  enabled: boolean;
+  interval_hours: number;
+  paused_sites: string[];
+}
+
+export type CloudProvider = "aliyun" | "baidu";
+
+export type ModelProvider = "deepseek" | "jev";
+
+export interface ModelSetting {
+  provider: ModelProvider;
+  model: string;
+  base_url: string;
+  default_base_url: string;
+  custom_base_url: string | null;
+  enabled: boolean;
+  has_api_key: boolean;
+  key_hint: string;
+  credential_source: "account" | "environment" | "none";
+  has_custom_settings: boolean;
+  error: string | null;
+}
+
+export interface ModelSettingUpdate {
+  model: string;
+  enabled: boolean;
+  api_key?: string;
+  base_url?: string | null;
+}
+
+export interface ModelConnectionResult {
+  provider: ModelProvider;
+  model: string;
+  message: string;
+}
+
+
+export interface ResourceClassificationJob {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  model: string;
+  automatic: boolean;
+  total_count: number;
+  processed_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  skipped_count: number;
+  error: string | null;
+  error_code: string | null;
+  retry_count: number;
+  retry_limit: number;
+  next_retry_at: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface ResourceClassificationState {
+  pending_count: number;
+  classified_count: number;
+  protected_count: number;
+  deferred_count: number;
+  review_count: number;
+  job: ResourceClassificationJob | null;
+}
+
+export interface CloudAccount {
+  id: string;
+  provider: CloudProvider;
+  display_name: string;
+  credential_hint: string;
+  default_folder: string;
+  status: string;
+  last_checked_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CloudAccountCreateRequest {
+  provider: CloudProvider;
+  credential: string;
+  default_folder?: string | null;
+}
+
+export type EbookJobMode = "transfer" | "upload";
+
+export type EbookJobStatus = "pending" | "running" | "success" | "failed";
+
+export interface EbookJob {
+  id: string;
+  memo_id: string | null;
+  source_url: string;
+  provider: CloudProvider;
+  mode: EbookJobMode;
+  status: EbookJobStatus;
+  progress: number;
+  stage: string;
+  target_folder: string;
+  cloud_file_id: string | null;
+  cloud_path: string | null;
+  error: string | null;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+export interface EbookJobCreateRequest {
+  url: string;
+  provider?: CloudProvider | null;
+  share_password?: string | null;
+  target_folder?: string | null;
+  tags?: string[];
+  collections?: string[];
+  note?: string | null;
 }

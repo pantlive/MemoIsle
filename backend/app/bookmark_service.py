@@ -23,7 +23,7 @@ from app.schemas import (
     MemoType,
     ResourceProcessStatus,
 )
-from app.service import create_memo
+from app.service import ResourceDuplicateError, create_memo
 from app.url_normalization import canonicalize_resource_url
 
 
@@ -328,19 +328,34 @@ def process_bookmark_batch(
                 continue
             else:
                 cleaned_title = item.title.strip()[:200]
-                memo = create_memo(
-                    session,
-                    user_id,
-                    MemoCreate(
-                        client_id=client_id,
-                        type=MemoType.RESOURCE,
-                        title=cleaned_title or None,
-                        body=cleaned_title or "从 Chrome 书签导入",
-                        source_url=item.normalized_url,
-                        source_title=cleaned_title or None,
-                        tags=[],
-                    ),
-                )
+                try:
+                    memo = create_memo(
+                        session,
+                        user_id,
+                        MemoCreate(
+                            client_id=client_id,
+                            type=MemoType.RESOURCE,
+                            title=cleaned_title or None,
+                            body=cleaned_title or "从 Chrome 书签导入",
+                            source_url=item.normalized_url,
+                            source_title=cleaned_title or None,
+                            tags=[],
+                        ),
+                    )
+                except ResourceDuplicateError as error:
+                    # 并发导入期间另一请求先写入相同网址，按重复项记账而非失败。
+                    item.status = "duplicate"
+                    item.existing_memo_id = error.current.id
+                    item.error_code = "already_saved"
+                    item.updated_at = datetime.now(UTC)
+                    known_urls[item.normalized_url] = error.current.id
+                    _increment_batch_counter(
+                        session,
+                        batch.id,
+                        "duplicate_count",
+                    )
+                    session.commit()
+                    continue
 
                 if memo.client_id != str(client_id):
                     # 并发导入期间另一请求先写入相同网址，不能接管对方资料。
@@ -550,6 +565,9 @@ def undo_bookmark_batch(
             item.status = "retained"
             item.updated_at = now
             continue
+        if memo.status != MemoStatus.TRASHED:
+            memo.status_before_trash = memo.status.value
+            memo.deleted_at = now
         memo.status = MemoStatus.TRASHED
         memo.resource_import_batch_id = None
         memo.version += 1

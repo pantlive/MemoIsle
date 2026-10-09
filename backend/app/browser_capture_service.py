@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.models import BrowserBookmarkSnapshot, BrowserCapture, BrowserOpenTab
 from app.resource_processing import validate_public_resource_url
 from app.schemas import (
+    BrowserBookmarkDeltaSyncRequest,
     BrowserBookmarkSnapshotRead,
     BrowserBookmarkSyncRequest,
     BrowserCaptureContext,
@@ -25,10 +26,15 @@ from app.schemas import (
 
 PublicUrlValidator = Callable[[str], str]
 OPEN_TAB_STALE_AFTER = timedelta(minutes=10)
+MAX_BOOKMARK_SNAPSHOT_ITEMS = 5_000
 
 
 class BrowserCaptureOriginError(PermissionError):
     """扩展来源与声明的扩展标识不一致。"""
+
+
+class BrowserBookmarkRevisionConflictError(RuntimeError):
+    """书签增量变更基于过期快照，客户端需要重新上传完整快照。"""
 
 
 class BrowserCaptureNotFoundError(LookupError):
@@ -279,7 +285,65 @@ def sync_browser_bookmarks(
     snapshot.bookmarks = [item.model_dump(mode="json") for item in payload.items]
     snapshot.total_count = payload.total_count
     snapshot.truncated = payload.total_count > len(payload.items)
+    snapshot.revision = (snapshot.revision or 0) + 1
     snapshot.synced_at = now
+    session.commit()
+    return snapshot
+
+
+def sync_browser_bookmark_delta(
+    session: Session,
+    user_id: str,
+    payload: BrowserBookmarkDeltaSyncRequest,
+    request_origin: str | None,
+) -> BrowserBookmarkSnapshot:
+    """应用带版本校验的书签增量，并在版本冲突时要求完整重建。"""
+
+    expected_origin = f"chrome-extension://{payload.extension_id}"
+    if request_origin != expected_origin:
+        raise BrowserCaptureOriginError
+    snapshot = session.scalar(
+        select(BrowserBookmarkSnapshot).where(
+            BrowserBookmarkSnapshot.user_id == user_id,
+            BrowserBookmarkSnapshot.extension_id == payload.extension_id,
+        )
+    )
+    if snapshot is None or snapshot.revision != payload.base_revision:
+        raise BrowserBookmarkRevisionConflictError
+
+    # 使用有序字典语义保留原始书签顺序；移动文件夹会触发完整快照同步。
+    items_by_id: dict[str, dict[str, object]] = {}
+    item_order: list[str] = []
+    for raw_item in snapshot.bookmarks:
+        client_item_id = raw_item.get("client_item_id")
+        if not isinstance(client_item_id, str) or client_item_id in items_by_id:
+            continue
+        items_by_id[client_item_id] = raw_item
+        item_order.append(client_item_id)
+
+    for change in payload.changes:
+        client_item_id = change.client_item_id
+        if change.action == "remove":
+            items_by_id.pop(client_item_id, None)
+            if client_item_id in item_order:
+                item_order.remove(client_item_id)
+            continue
+        assert change.item is not None
+        if client_item_id not in items_by_id:
+            item_order.append(client_item_id)
+        items_by_id[client_item_id] = change.item.model_dump(mode="json")
+
+    next_items = [
+        items_by_id[client_item_id]
+        for client_item_id in item_order[:MAX_BOOKMARK_SNAPSHOT_ITEMS]
+    ]
+    if payload.total_count < len(next_items):
+        raise ValueError("书签总数不能小于增量快照项目数")
+    snapshot.bookmarks = next_items
+    snapshot.total_count = payload.total_count
+    snapshot.truncated = payload.total_count > len(next_items)
+    snapshot.revision = (snapshot.revision or 0) + 1
+    snapshot.synced_at = datetime.now(UTC)
     session.commit()
     return snapshot
 
