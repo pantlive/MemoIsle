@@ -1,6 +1,7 @@
 package com.memoisle.app
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -47,7 +48,7 @@ class VaultViewModel(
         private set
 
     /** 上次解锁时需要处理的提醒数，锁定后底部导航仍显示；退出登录时清零。 */
-    var lastReminderCount by mutableStateOf(0)
+    var lastReminderCount by mutableIntStateOf(0)
         private set
     private var key: SecretKey? = null
     private var material: VaultKeyMaterial? = null

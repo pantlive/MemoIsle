@@ -45,6 +45,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Badge
@@ -1569,21 +1573,39 @@ private fun MemoHeader(
             }
             Text(if (isRefreshing) "同步中" else "同步")
         }
-        TextButton(
-            onClick = onExport,
-            enabled = !isRefreshing && !isSaving && !isExporting,
-        ) {
-            if (isExporting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(8.dp))
+        // 导出和退出不常用，收进菜单；五个按钮并排时窄屏会把「退出」挤出屏幕。
+        var menuOpen by remember { mutableStateOf(false) }
+        Box {
+            TextButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.semantics { contentDescription = "更多操作" },
+            ) {
+                if (isExporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("⋯", fontWeight = FontWeight.Bold)
+                }
             }
-            Text(if (isExporting) "导出中" else "导出")
-        }
-        TextButton(onClick = onLogout) {
-            Text("退出")
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (isExporting) "导出中" else "导出数据") },
+                    enabled = !isRefreshing && !isSaving && !isExporting,
+                    onClick = {
+                        menuOpen = false
+                        onExport()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("退出登录") },
+                    onClick = {
+                        menuOpen = false
+                        onLogout()
+                    },
+                )
+            }
         }
     }
 }

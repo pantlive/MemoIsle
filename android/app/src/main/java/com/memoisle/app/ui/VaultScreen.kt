@@ -455,19 +455,25 @@ private fun ReminderCard(
                 Text("$entryCount 条需要处理", color = TextMuted, style = MaterialTheme.typography.bodySmall)
             }
             reminders.take(REMINDER_PREVIEW_LIMIT).forEach { reminder ->
-                Row(
+                // 名称在前、标签在后，与条目列表一致；标签宽度不同时名称仍左对齐。
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpen(reminder) }
                         .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    ReminderBadge(reminder)
-                    Column(Modifier.weight(1f)) {
-                        Text(reminder.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(reminder.message, color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            reminder.title,
+                            modifier = Modifier.weight(1f, fill = false),
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        ReminderBadge(reminder)
                     }
+                    Text(reminder.message, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (reminders.size > REMINDER_PREVIEW_LIMIT) {
@@ -864,7 +870,12 @@ private fun RecoveryCodeRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = code.used, onCheckedChange = { onToggle() })
-        Text("已用", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+        // 勾选表示已用；文字跟着状态变，未用的码不会被读成“已用”。
+        Text(
+            if (code.used) "已用" else "可用",
+            color = if (code.used) TextMuted else DeepTeal,
+            style = MaterialTheme.typography.bodySmall,
+        )
         Spacer(Modifier.width(8.dp))
         Text(
             code.code,
