@@ -62,7 +62,9 @@ def test_opened_desc_sort_ranks_most_opened_first(client: TestClient) -> None:
     never = create_resource(client, "https://example.com/never")
     for memo, times in ((often, 3), (rarely, 1), (recent, 1)):
         for _ in range(times):
-            assert client.post(f"/api/v1/resources/{memo['id']}/open").status_code == 200
+            assert (
+                client.post(f"/api/v1/resources/{memo['id']}/open").status_code == 200
+            )
 
     response = client.get(
         "/api/v1/memos",
@@ -125,7 +127,11 @@ def test_json_backup_roundtrip_keeps_open_stats(client: TestClient) -> None:
     )
     assert restored.status_code == 200, restored.text
     items = client.get("/api/v1/memos", params={"type": "resource"}).json()["items"]
-    match = next(item for item in items if item["source_url"] == "https://example.com/backup-open")
+    match = next(
+        item
+        for item in items
+        if item["source_url"] == "https://example.com/backup-open"
+    )
     assert match["resource_open_count"] == 4
     assert match["resource_last_opened_at"] == opened_at
     assert match["resource_quick_access_hidden"] is True
@@ -144,7 +150,12 @@ def test_quick_access_lists_opened_and_respects_hidden(client: TestClient) -> No
     listed = client.get("/api/v1/resources/quick-access")
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()] == [often["id"], once["id"]]
-    assert client.get("/api/v1/resources/quick-access", params={"limit": 1}).json()[0]["id"] == often["id"]
+    assert (
+        client.get("/api/v1/resources/quick-access", params={"limit": 1}).json()[0][
+            "id"
+        ]
+        == often["id"]
+    )
 
     hidden = client.put(
         f"/api/v1/resources/{often['id']}/quick-access",
@@ -152,15 +163,24 @@ def test_quick_access_lists_opened_and_respects_hidden(client: TestClient) -> No
     )
     assert hidden.status_code == 200
     assert hidden.json() == {"resource_quick_access_hidden": True}
-    assert [item["id"] for item in client.get("/api/v1/resources/quick-access").json()] == [once["id"]]
+    assert [
+        item["id"] for item in client.get("/api/v1/resources/quick-access").json()
+    ] == [once["id"]]
 
     # 移除不算修改，也不影响继续计数。
     current = client.get(f"/api/v1/memos/{often['id']}").json()
     assert current["version"] == often["version"]
     assert current["updated_at"] == often["updated_at"]
     assert current["resource_quick_access_hidden"] is True
-    assert client.post(f"/api/v1/resources/{often['id']}/open").json()["resource_open_count"] == 4
-    assert often["id"] not in [item["id"] for item in client.get("/api/v1/resources/quick-access").json()]
+    assert (
+        client.post(f"/api/v1/resources/{often['id']}/open").json()[
+            "resource_open_count"
+        ]
+        == 4
+    )
+    assert often["id"] not in [
+        item["id"] for item in client.get("/api/v1/resources/quick-access").json()
+    ]
 
     restored = client.put(
         f"/api/v1/resources/{often['id']}/quick-access",
@@ -170,7 +190,9 @@ def test_quick_access_lists_opened_and_respects_hidden(client: TestClient) -> No
     assert client.get("/api/v1/resources/quick-access").json()[0]["id"] == often["id"]
 
 
-def test_quick_access_excludes_trash_and_rejects_other_types(client: TestClient) -> None:
+def test_quick_access_excludes_trash_and_rejects_other_types(
+    client: TestClient,
+) -> None:
     """回收站里的网页不出现；非网页资料不能设置快速访问。"""
 
     resource = create_resource(client, "https://example.com/qa-trash")
@@ -180,16 +202,22 @@ def test_quick_access_excludes_trash_and_rejects_other_types(client: TestClient)
         params={"expected_version": resource["version"]},
     )
     assert client.get("/api/v1/resources/quick-access").json() == []
-    assert client.put(
-        f"/api/v1/resources/{resource['id']}/quick-access",
-        json={"hidden": True},
-    ).status_code == 404
+    assert (
+        client.put(
+            f"/api/v1/resources/{resource['id']}/quick-access",
+            json={"hidden": True},
+        ).status_code
+        == 404
+    )
 
     idea = client.post(
         "/api/v1/memos",
         json={"client_id": str(uuid4()), "type": "idea", "body": "不是网页"},
     ).json()
-    assert client.put(
-        f"/api/v1/resources/{idea['id']}/quick-access",
-        json={"hidden": True},
-    ).status_code == 400
+    assert (
+        client.put(
+            f"/api/v1/resources/{idea['id']}/quick-access",
+            json={"hidden": True},
+        ).status_code
+        == 400
+    )

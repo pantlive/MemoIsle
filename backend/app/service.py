@@ -13,7 +13,18 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from PIL import Image, ImageOps
-from sqlalchemy import Select, String, Update, and_, cast, delete, func, or_, select, update
+from sqlalchemy import (
+    Select,
+    String,
+    Update,
+    and_,
+    cast,
+    delete,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -704,7 +715,8 @@ def _execute_with_lock_retry(session: Session, statement: Update) -> None:
             return
         except OperationalError as error:
             session.rollback()
-            if not is_sqlite_lock_error(error) or attempt == SQLITE_LOCK_COMMIT_ATTEMPTS - 1:
+            last_attempt = attempt == SQLITE_LOCK_COMMIT_ATTEMPTS - 1
+            if not is_sqlite_lock_error(error) or last_attempt:
                 raise
             time.sleep(delay)
             delay = min(delay * 2, 0.8)
