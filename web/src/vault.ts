@@ -338,3 +338,107 @@ export const vaultKindLabels: Record<VaultKind, string> = {
   secret: "密钥",
   recovery: "恢复码",
 };
+
+// 加密备份：直接保存服务器上的密文和导出时的包裹参数，文件里没有任何明文。
+// 恢复时用导出那一刻的主密码解开，再用当前库密钥重新加密写入。
+export const VAULT_BACKUP_FORMAT = "memoisle-vault-backup";
+const MAX_BACKUP_BYTES = 20 * 1024 * 1024;
+
+export interface VaultBackupFile {
+  format: typeof VAULT_BACKUP_FORMAT;
+  version: 1;
+  exported_at: string;
+  kdf: string;
+  kdf_iterations: number;
+  kdf_salt: string;
+  wrapped_key: string;
+  wrap_iv: string;
+  items: { id: string; iv: string; ciphertext: string }[];
+}
+
+export function buildVaultBackup(status: VaultStatus, records: VaultItemRecord[]): VaultBackupFile {
+  if (!status.kdf || !status.kdf_iterations || !status.kdf_salt || !status.wrapped_key || !status.wrap_iv) {
+    throw new Error("密码库参数不完整，无法导出。");
+  }
+  return {
+    format: VAULT_BACKUP_FORMAT,
+    version: 1,
+    exported_at: new Date().toISOString(),
+    kdf: status.kdf,
+    kdf_iterations: status.kdf_iterations,
+    kdf_salt: status.kdf_salt,
+    wrapped_key: status.wrapped_key,
+    wrap_iv: status.wrap_iv,
+    items: records.map(({ id, iv, ciphertext }) => ({ id, iv, ciphertext })),
+  };
+}
+
+function isBase64(value: unknown): value is string {
+  if (typeof value !== "string" || !value) return false;
+  try {
+    atob(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function parseVaultBackup(text: string): VaultBackupFile {
+  if (text.length > MAX_BACKUP_BYTES) throw new Error("备份文件过大。");
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error("不是有效的 JSON 文件。");
+  }
+  if (raw?.format !== VAULT_BACKUP_FORMAT) {
+    throw new Error("这不是 MemoIsle 密码库备份文件。");
+  }
+  if (raw.version !== 1) throw new Error("备份文件版本不受支持，请更新 MemoIsle。");
+  const items = Array.isArray(raw.items) ? raw.items : null;
+  const keyFieldsValid = raw.kdf === VAULT_KDF
+    && typeof raw.kdf_iterations === "number"
+    && raw.kdf_iterations >= VAULT_ITERATIONS
+    && isBase64(raw.kdf_salt)
+    && isBase64(raw.wrapped_key)
+    && isBase64(raw.wrap_iv);
+  const itemsValid = items?.every((item) => (
+    typeof item === "object" && item !== null
+    && typeof (item as Record<string, unknown>).id === "string"
+    && isBase64((item as Record<string, unknown>).iv)
+    && isBase64((item as Record<string, unknown>).ciphertext)
+  ));
+  if (!keyFieldsValid || !items || !itemsValid) throw new Error("备份文件已损坏或格式不完整。");
+  return raw as unknown as VaultBackupFile;
+}
+
+export async function openVaultBackup(
+  password: string,
+  backup: VaultBackupFile,
+): Promise<{ items: VaultItemData[]; failed: number }> {
+  const key = await unlockVault(password, {
+    configured: true,
+    version: null,
+    item_count: backup.items.length,
+    kdf: backup.kdf,
+    kdf_iterations: backup.kdf_iterations,
+    kdf_salt: backup.kdf_salt,
+    wrapped_key: backup.wrapped_key,
+    wrap_iv: backup.wrap_iv,
+  });
+  const results = await Promise.allSettled(backup.items.map((item) => decryptVaultItem(key, {
+    ...item,
+    version: 1,
+    created_at: backup.exported_at,
+    updated_at: backup.exported_at,
+  })));
+  const items = results
+    .filter((result): result is PromiseFulfilledResult<VaultEntry> => result.status === "fulfilled")
+    .map((result) => result.value.data);
+  return { items, failed: results.length - items.length };
+}
+
+// 用于导入去重：同类型、同内容的条目视为重复。
+export function vaultItemFingerprint(data: VaultItemData): string {
+  return JSON.stringify(data);
+}

@@ -16,13 +16,18 @@ import {
 import {
   MIN_MASTER_PASSWORD_LENGTH,
   WrongMasterPasswordError,
+  buildVaultBackup,
   createVaultKey,
   decryptVaultItem,
   emptyVaultItem,
   encryptVaultItem,
+  openVaultBackup,
+  parseVaultBackup,
   rewrapVaultKey,
   unlockVault,
+  vaultItemFingerprint,
   vaultKindLabels,
+  type VaultBackupFile,
   type VaultEntry,
   type VaultItemData,
   type VaultKind,
@@ -49,6 +54,11 @@ const cryptoAvailable = (): boolean => (
   window.isSecureContext && typeof crypto !== "undefined" && crypto.subtle !== undefined
 );
 type KindFilter = VaultKind | "all";
+
+interface ImportState {
+  backup: VaultBackupFile;
+  fileName: string;
+}
 
 interface EditorState {
   entry: VaultEntry | null;
@@ -121,6 +131,14 @@ function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFo
   );
 }
 
+async function decryptVaultItemsOrThrow(key: CryptoKey, records: VaultItemRecord[]): Promise<void> {
+  try {
+    await Promise.all(records.map((record) => decryptVaultItem(key, record)));
+  } catch {
+    throw new Error("当前解锁状态和服务器上的密码库对不上（主密码可能刚在别处改过），请锁定后重新解锁再导出。");
+  }
+}
+
 function masterPasswordReady(password: string, confirm: string): boolean {
   return password.length >= MIN_MASTER_PASSWORD_LENGTH && password === confirm;
 }
@@ -145,6 +163,11 @@ export default function VaultPanel() {
   const [changeOpen, setChangeOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const clipboardTimer = useRef<number | null>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
+  const [importState, setImportState] = useState<ImportState | null>(null);
+  const [importPassword, setImportPassword] = useState("");
+  const [importProgress, setImportProgress] = useState("");
+  const [importError, setImportError] = useState("");
 
   const clearSecrets = () => {
     setPassword("");
@@ -385,6 +408,91 @@ export default function VaultPanel() {
     }
   };
 
+  const handleExportBackup = async () => {
+    const key = getVaultSessionKey();
+    if (!key) return;
+    setBusy(true);
+    try {
+      const [latest, records] = await Promise.all([getVaultStatus(), listVaultItems()]);
+      // 先用当前会话密钥试解每一条：主密码若在别处改过，包裹参数就和会话密钥对不上。
+      await decryptVaultItemsOrThrow(key, records);
+      const backup = buildVaultBackup(latest, records);
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `memoisle-vault-backup-${backup.exported_at.slice(0, 10)}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setNotice(`已导出加密备份（${records.length} 条）。恢复时需要输入现在的主密码，请妥善保管。`);
+    } catch (error) {
+      setNotice(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBackupFile = async (file: File) => {
+    try {
+      const backup = parseVaultBackup(await file.text());
+      setImportPassword("");
+      setImportError("");
+      setImportProgress("");
+      setImportState({ backup, fileName: file.name });
+    } catch (error) {
+      setNotice(`无法读取「${file.name}」：${describe(error)}`);
+    }
+  };
+
+  const handleImportBackup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const key = getVaultSessionKey();
+    if (!key || !importState || !importPassword) return;
+    setBusy(true);
+    setImportError("");
+    try {
+      setImportProgress("正在解密备份…");
+      const { items, failed } = await openVaultBackup(importPassword, importState.backup);
+      setImportPassword("");
+      const existing = new Set(entries.map((entry) => vaultItemFingerprint(entry.data)));
+      const fresh = items.filter((item) => {
+        const fingerprint = vaultItemFingerprint(item);
+        if (existing.has(fingerprint)) return false;
+        existing.add(fingerprint);
+        return true;
+      });
+      const saved: VaultEntry[] = [];
+      for (const [index, item] of fresh.entries()) {
+        setImportProgress(`正在加密写入 ${index + 1} / ${fresh.length}…`);
+        // 用新 ID 和当前库密钥重新加密，备份来自旧密码库或其他账号也不会冲突。
+        const id = crypto.randomUUID();
+        const record = await createVaultItem(id, await encryptVaultItem(key, id, item));
+        saved.push(await decryptVaultItem(key, record));
+      }
+      setEntries((current) => [...saved, ...current]);
+      setImportState(null);
+      const skipped = items.length - fresh.length;
+      setNotice([
+        `已导入 ${saved.length} 条`,
+        skipped > 0 ? `跳过 ${skipped} 条重复` : "",
+        failed > 0 ? `${failed} 条无法解密` : "",
+      ].filter(Boolean).join("，") + "。");
+    } catch (error) {
+      setImportError(
+        error instanceof WrongMasterPasswordError
+          ? "主密码不正确。请输入导出这份备份时使用的主密码。"
+          : describe(error),
+      );
+      // 中途失败时已写入的条目保留，重新读取一遍列表。
+      await loadEntries(key).catch(() => undefined);
+    } finally {
+      setImportProgress("");
+      setBusy(false);
+    }
+  };
+
   const closeEditor = useCallback(() => setEditor(null), []);
 
   const counts = useMemo(() => {
@@ -407,6 +515,24 @@ export default function VaultPanel() {
         </div>
         {phase === "unlocked" && (
           <span className="vault-heading-actions">
+            <button type="button" disabled={busy} onClick={() => void handleExportBackup()}>
+              导出备份
+            </button>
+            <button type="button" disabled={busy} onClick={() => backupInputRef.current?.click()}>
+              导入备份
+            </button>
+            <input
+              ref={backupInputRef}
+              type="file"
+              accept=".json,application/json"
+              hidden
+              aria-label="选择密码库备份文件"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void handleBackupFile(file);
+              }}
+            />
             <button type="button" onClick={() => { clearSecrets(); setFormError(""); setChangeOpen(true); }}>
               更改主密码
             </button>
@@ -565,7 +691,7 @@ export default function VaultPanel() {
           {entries.length === 0 && (
             <div className="state-panel empty-state">
               <h3>密码库还是空的</h3>
-              <p>可以保存网站账号密码、API Key 或 SSH 私钥，以及两步验证的恢复码。</p>
+              <p>可以保存网站账号密码、API Key 或 SSH 私钥，以及两步验证的恢复码。已有加密备份可以点右上角「导入备份」恢复。</p>
             </div>
           )}
           {entries.length > 0 && visibleEntries.length === 0 && (
@@ -630,6 +756,52 @@ export default function VaultPanel() {
           onClose={closeEditor}
           onCopy={(value, label) => void copyValue(value, label)}
         />
+      )}
+
+      {importState && (
+        <div className="dialog-backdrop">
+          <form
+            className="vault-item-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vault-import-title"
+            onSubmit={(event) => void handleImportBackup(event)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !busy) setImportState(null);
+            }}
+          >
+            <div className="dialog-header">
+              <h2 id="vault-import-title">导入加密备份</h2>
+              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setImportState(null)}>×</button>
+            </div>
+            <div className="vault-form">
+              <p className="vault-import-summary">
+                「{importState.fileName}」：{importState.backup.items.length} 条，
+                导出于 {new Date(importState.backup.exported_at).toLocaleString("zh-CN")}。
+                导入的条目会用当前密码库的密钥重新加密，和已有内容完全相同的条目会跳过。
+              </p>
+              <label className="vault-field">
+                <span className="vault-field-label"><span>导出这份备份时的主密码</span></span>
+                <input
+                  type="password"
+                  value={importPassword}
+                  onChange={(event) => setImportPassword(event.target.value)}
+                  autoComplete="off"
+                  autoFocus
+                  required
+                />
+              </label>
+              {importProgress && <p className="vault-hint" role="status">{importProgress}</p>}
+              {importError && <p className="vault-error" role="alert">{importError}</p>}
+              <div className="dialog-actions">
+                <button type="button" onClick={() => setImportState(null)} disabled={busy}>取消</button>
+                <button type="submit" className="primary" disabled={busy || !importPassword}>
+                  {busy ? "导入中…" : "导入"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       )}
 
       {changeOpen && (
