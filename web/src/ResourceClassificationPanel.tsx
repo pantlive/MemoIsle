@@ -4,6 +4,7 @@ import {
   getResourceClassificationState,
   resumeResourceClassification,
   retryClassifiedResources,
+  retryFolderClassifications,
   retryResourceClassificationReviews,
   startResourceClassification,
 } from "./api";
@@ -111,12 +112,31 @@ export default function ResourceClassificationPanel({
     }
   };
 
+  const handleRetryFolders = async (): Promise<void> => {
+    const count = state?.folder_retry_count ?? 0;
+    if (starting || running || !count) return;
+    if (!window.confirm(
+      `按书签原文件夹重新判断 ${count} 条网页？\n\n`
+      + "Jev 先把每个文件夹对应到已有分类，再逐条判断网页是否真的属于它：属于就沿用，"
+      + "不属于再走完整分类。每条网页至少请求一次 Jev，会产生费用。人工确认和规则分类的网页不动。",
+    )) return;
+    setStarting(true);
+    setError("");
+    try {
+      setState(await retryFolderClassifications());
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "按书签文件夹重新判断失败");
+    } finally {
+      setStarting(false);
+    }
+  };
+
   return (
     <section className="resource-classification-panel" aria-label="已有网页大模型分类">
       <div className="resource-classification-heading">
         <div>
           <strong>大模型分类已有网页</strong>
-          <p>结合网页标题、描述和可用的公开正文摘要，先由大模型列出可能标签，再按你的分类模板归类。新导入网页自动处理；确认失效的网页不参与分类，其余巡检状态仍会分类。已人工确认和自定义规则自动跳过。已完成的模型分类可用「重新分类已完成」再跑一轮。</p>
+          <p>结合网页标题、描述和可用的公开正文摘要，先由大模型列出可能标签，再按你的分类模板归类。新导入网页自动处理；确认失效的网页不参与分类，其余巡检状态仍会分类。已人工确认和自定义规则自动跳过。已完成的模型分类可用「重新分类已完成」再跑一轮。书签导入的网页会先由 Jev 判断原文件夹的归类是否正确，正确就沿用对应的分类。</p>
         </div>
       </div>
       <div className="resource-classification-actions">
@@ -136,6 +156,14 @@ export default function ResourceClassificationPanel({
           disabled={starting || running || !state || (state.classified_retry_count ?? 0) === 0}
         >
           重新分类已完成 {state?.classified_retry_count ?? 0}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleRetryFolders()}
+          disabled={starting || running || !state || (state.folder_retry_count ?? 0) === 0}
+          title="已导入的书签按原文件夹重新判断，人工确认和规则分类的不动"
+        >
+          按书签文件夹重新判断 {state?.folder_retry_count ?? 0}
         </button>
         <button
           type="button"

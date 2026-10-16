@@ -136,6 +136,14 @@ export interface ResourceClassificationAssessment {
   fallback_used?: boolean;
   // 对话模型列出的全部成立标签；Jev 定案后仍保留。
   proposed_categories?: Array<{ code: string; label: string; probability: number | null }>;
+  // 书签导入的网页：原文件夹对应的分类以及 Jev 是否认可（kept 沿用、rejected 不符、unmapped 无对应分类）。
+  bookmark_folder?: {
+    folder: string;
+    category_code: string | null;
+    category_label: string | null;
+    verdict: "kept" | "rejected" | "unmapped";
+    confidence: number | null;
+  };
 }
 
 export type ResourceClassificationReviewAction = "adopt" | "keep" | "assign";
@@ -596,6 +604,7 @@ export interface ResourceClassificationState {
   deferred_count: number;
   review_count: number;
   classified_retry_count: number;
+  folder_retry_count: number;
   job: ResourceClassificationJob | null;
 }
 

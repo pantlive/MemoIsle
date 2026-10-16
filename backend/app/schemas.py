@@ -445,6 +445,7 @@ class ResourceClassificationState(BaseModel):
     deferred_count: int = 0
     review_count: int = 0
     classified_retry_count: int = 0
+    folder_retry_count: int = 0
     job: ResourceClassificationJobRead | None
 
 

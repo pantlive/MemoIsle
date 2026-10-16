@@ -542,6 +542,10 @@ export async function retryClassifiedResources(): Promise<ResourceClassification
   return request<ResourceClassificationState>("/resource-classification/classified/retry", { method: "POST" });
 }
 
+export async function retryFolderClassifications(): Promise<ResourceClassificationState> {
+  return request<ResourceClassificationState>("/resource-classification/folders/retry", { method: "POST" });
+}
+
 export async function getResourceClassificationReviews(
   filters: { query: string; reason: string; candidate_code: string; max_confidence: string; offset: number },
 ): Promise<ResourceClassificationReviewList> {

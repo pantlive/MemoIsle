@@ -1132,3 +1132,34 @@ class VaultItem(Base):
         default=utc_now,
         onupdate=utc_now,
     )
+
+
+class BookmarkFolderCategory(Base):
+    """书签文件夹对应到哪个分类的缓存，每个文件夹只请 Jev 判断一次。
+
+    分类模板变化后指纹不同，旧结果自动失效。
+    """
+
+    __tablename__ = "bookmark_folder_category"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "folder_path",
+            "categories_fingerprint",
+            name="uq_bookmark_folder_category_user_folder",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    folder_path: Mapped[str] = mapped_column(String(1_000), nullable=False)
+    categories_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 为空表示文件夹含义不对应任何已有分类。
+    category_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )

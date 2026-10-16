@@ -8,11 +8,16 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.bookmark_folder_classification import (
+    check_bookmark_folder,
+    meaningful_folder_path,
+    with_folder_evidence,
+)
 from app.category_service import (
     category_code_exists,
     category_exemplars,
@@ -198,6 +203,7 @@ def classification_state(
             .where(*classified_filters(user_id)),
         )
         or 0,
+        folder_retry_count=len(folder_retry_ids(session, user_id)),
         job=ResourceClassificationJobRead.model_validate(job) if job else None,
     )
 
@@ -374,6 +380,79 @@ def retry_classified_classifications(
         return job
     raise ResourceClassificationStateError(
         "当前分类任务还在进行，请完成后再重新分类已完成网页",
+    )
+
+
+def folder_retry_filters(user_id: str) -> tuple[ColumnElement[bool], ...]:
+    """带书签文件夹、可交给模型的网页；人工确认、规则保护和确认失效的不动。"""
+
+    return (
+        *resource_filters(user_id),
+        Memo.resource_import_folder.is_not(None),
+        Memo.link_health_status != "failed",
+        Memo.resource_ai_confirmation.is_(None),
+        or_(
+            Memo.resource_category_source.is_(None),
+            Memo.resource_category_source.not_in(PROTECTED_SOURCES),
+        ),
+    )
+
+
+def folder_retry_ids(session: Session, user_id: str) -> list[str]:
+    """只收文件夹去掉浏览器根目录后仍有内容的网页，直接放在书签栏的没有可沿用的归类。"""
+
+    rows = session.execute(
+        select(Memo.id, Memo.resource_import_folder)
+        .where(*folder_retry_filters(user_id))
+        .order_by(Memo.created_at.asc(), Memo.id.asc()),
+    ).all()
+    return [memo_id for memo_id, folder in rows if meaningful_folder_path(folder)]
+
+
+def retry_folder_classifications(
+    session: Session,
+    user_id: str,
+    settings: Settings,
+) -> ResourceClassificationJob:
+    """把书签导入的网页按原文件夹重新判断一遍，保留原分类直到有新结果。"""
+
+    current = session.get(ResourceClassificationJob, user_id)
+    if current is not None and current.status in ACTIVE_STATUSES:
+        raise ResourceClassificationStateError(
+            "当前分类任务还在进行，请完成后再按书签文件夹重新判断",
+        )
+    memo_ids = folder_retry_ids(session, user_id)
+    if not memo_ids:
+        if current is None:
+            return _publish_job(session, user_id, None, settings, [], automatic=False)
+        return current
+    resolved = configured_settings(session, user_id, settings)
+    if not (resolved.jev_api_key and resolved.jev_model):
+        raise ResourceClassificationConfigurationError(
+            "按书签文件夹判断需要在设置 → 模型服务中配置并启用 Jev",
+        )
+    # 清掉完成标记，模型来源改成可进队列的来源；规则结果保留原来源。不改 version。
+    session.execute(
+        update(Memo)
+        .where(Memo.id.in_(memo_ids), *folder_retry_filters(user_id))
+        .values(
+            resource_ai_classified_at=None,
+            resource_category_source=case(
+                (Memo.resource_category_source.in_(AI_SOURCES), "fallback"),
+                else_=Memo.resource_category_source,
+            ),
+            resource_ai_confirmation_pending=False,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    job = _publish_job(
+        session, user_id, current, resolved, memo_ids, automatic=False
+    )
+    remaining = set(job.memo_ids[job.processed_count :])
+    if remaining.issuperset(memo_ids):
+        return job
+    raise ResourceClassificationStateError(
+        "当前分类任务还在进行，请完成后再按书签文件夹重新判断",
     )
 
 
@@ -840,6 +919,7 @@ def process_classification_job(
             continue
         metadata = fallback_metadata(memo)
         version = memo.version
+        folder_evidence = None
         try:
             resolved = configured_settings(session, user_id, settings)
             categories = classification_categories(session, user_id)
@@ -922,33 +1002,50 @@ def process_classification_job(
                     return processed
                 processed += 1
                 continue
+            raw_folder = memo.resource_import_folder
             session.rollback()
-            decision = classify_resource(
-                metadata,
-                llm_base_url=resolved.llm_base_url,
-                llm_api_key=resolved.llm_api_key,
-                llm_model=resolved.llm_model,
-                user_rules=classification_rules(session, user_id),
-                category_options=categories,
-                jev_api_key=resolved.jev_api_key,
-                jev_base_url=resolved.jev_base_url,
-                jev_model=resolved.jev_model,
-                jev_min_confidence=resolved.jev_min_confidence,
-                deepseek_api_key=resolved.deepseek_api_key,
-                deepseek_base_url=resolved.deepseek_base_url,
-                deepseek_model=resolved.deepseek_model,
-                deepseek_timeout_seconds=resolved.deepseek_timeout_seconds,
-                classification_min_confidence=(
-                    resolved.classification_min_confidence
-                ),
-                exemplars=category_exemplars(session, user_id, categories),
-                rejected_examples=category_rejected_examples(
-                    session, user_id, categories
-                ),
-                raise_service_errors=True,
-                # 批量分类以模型判定为准，不因关键词命中就跳过。
-                consult_model_always=True,
-            )
+            decision = None
+            if resolved.jev_api_key and resolved.jev_model:
+                # 书签原文件夹经 Jev 认可就沿用，不再请对话模型列标签。
+                decision, folder_evidence = check_bookmark_folder(
+                    session,
+                    user_id,
+                    raw_folder,
+                    metadata,
+                    categories,
+                    resolved.jev_api_key,
+                    resolved.jev_base_url,
+                    resolved.jev_model,
+                    resolved.jev_min_confidence,
+                )
+            if decision is None:
+                decision = classify_resource(
+                    metadata,
+                    llm_base_url=resolved.llm_base_url,
+                    llm_api_key=resolved.llm_api_key,
+                    llm_model=resolved.llm_model,
+                    user_rules=classification_rules(session, user_id),
+                    category_options=categories,
+                    jev_api_key=resolved.jev_api_key,
+                    jev_base_url=resolved.jev_base_url,
+                    jev_model=resolved.jev_model,
+                    jev_min_confidence=resolved.jev_min_confidence,
+                    deepseek_api_key=resolved.deepseek_api_key,
+                    deepseek_base_url=resolved.deepseek_base_url,
+                    deepseek_model=resolved.deepseek_model,
+                    deepseek_timeout_seconds=resolved.deepseek_timeout_seconds,
+                    classification_min_confidence=(
+                        resolved.classification_min_confidence
+                    ),
+                    exemplars=category_exemplars(session, user_id, categories),
+                    rejected_examples=category_rejected_examples(
+                        session, user_id, categories
+                    ),
+                    raise_service_errors=True,
+                    # 批量分类以模型判定为准，不因关键词命中就跳过。
+                    consult_model_always=True,
+                )
+                decision = with_folder_evidence(decision, folder_evidence)
         except (
             ResourceClassificationConfigurationError,
             httpx.HTTPError,
@@ -980,7 +1077,9 @@ def process_classification_job(
                 version,
                 None,
                 failed=True,
-                assessment=error.assessment
+                assessment={**error.assessment, "bookmark_folder": folder_evidence}
+                if isinstance(error, UncertainClassificationError) and folder_evidence
+                else error.assessment
                 if isinstance(error, UncertainClassificationError)
                 else empty_assessment(
                     "invalid_response",

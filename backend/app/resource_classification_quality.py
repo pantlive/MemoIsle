@@ -32,6 +32,16 @@ class ClassificationCandidate(TypedDict):
     probability: float | None
 
 
+class BookmarkFolderEvidence(TypedDict):
+    """书签原文件夹的复核结果：kept 沿用、rejected 不符、unmapped 无对应分类。"""
+
+    folder: str
+    category_code: str | None
+    category_label: str | None
+    verdict: Literal["kept", "rejected", "unmapped"]
+    confidence: float | None
+
+
 class ClassificationAssessment(TypedDict):
     """可安全保存和展示的单次模型判断。"""
 
@@ -49,6 +59,8 @@ class ClassificationAssessment(TypedDict):
     fallback_used: NotRequired[bool]
     # 对话模型列出的全部成立标签；Jev 定案后仍保留，供界面展示。
     proposed_categories: NotRequired[list[ClassificationCandidate]]
+    # 书签导入的网页：原文件夹对应的分类以及 Jev 是否认可。
+    bookmark_folder: NotRequired[BookmarkFolderEvidence]
 
 
 class UncertainClassificationError(ValueError):

@@ -18,6 +18,7 @@ from app.resource_classification_service import (
     classification_state,
     resume_classification_job,
     retry_classified_classifications,
+    retry_folder_classifications,
     retry_review_classifications,
     start_classification_job,
 )
@@ -100,6 +101,27 @@ def retry_classified_classifications_route(
 
     try:
         retry_classified_classifications(session, user_id, settings)
+    except ResourceClassificationConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ResourceClassificationStateError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return classification_state(session, user_id)
+
+
+@router.post(
+    "/folders/retry",
+    response_model=ResourceClassificationState,
+    status_code=202,
+)
+def retry_folder_classifications_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceClassificationState:
+    """让 Jev 按书签原文件夹重新判断已导入网页，人工确认和规则保护的跳过。"""
+
+    try:
+        retry_folder_classifications(session, user_id, settings)
     except ResourceClassificationConfigurationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ResourceClassificationStateError as error:

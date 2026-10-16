@@ -17,6 +17,19 @@ function listedClassificationTags(
   return { heading: "大模型列出的标签", tags: [] };
 }
 
+type FolderEvidence = NonNullable<ResourceClassificationAssessment["bookmark_folder"]>;
+
+function folderEvidenceText(evidence: FolderEvidence): string {
+  const confidence = evidence.confidence === null ? "" : `（置信度 ${(evidence.confidence * 100).toFixed(0)}%）`;
+  if (evidence.verdict === "kept") {
+    return `书签文件夹「${evidence.folder}」对应「${evidence.category_label}」，Jev 判定网页属于这个分类${confidence}，已沿用。`;
+  }
+  if (evidence.verdict === "rejected") {
+    return `书签文件夹「${evidence.folder}」对应「${evidence.category_label}」，但 Jev 判定网页不属于它${confidence}，已按完整流程重新分类。`;
+  }
+  return `书签文件夹「${evidence.folder}」没有对应的已有分类，已按完整流程分类。`;
+}
+
 const reasonLabels: Record<string, string> = {
   accepted: "模型判断达到自动分类要求。",
   low_confidence: "模型判断未达到自动分类要求，保留原分类。",
@@ -85,6 +98,10 @@ export default function ResourceClassificationInsight({
     <strong>分类依据</strong>
     <p>{reasonLabels[assessment.reason_code] || "本次判断未确定，保留原分类。"}</p>
     {fallbackUsed && <p className="classification-insight-fallback">系统兜底分类 · 这条没有命中你自己的细类</p>}
+    {assessment.bookmark_folder && <>
+      <strong>{assessment.bookmark_folder.verdict === "kept" ? "沿用书签文件夹" : "书签文件夹复核"}</strong>
+      <p className="classification-insight-folder">{folderEvidenceText(assessment.bookmark_folder)}</p>
+    </>}
     <p>{confidence}{` · 自动分类要求 ${(assessment.threshold * 100).toFixed(0)}%`}</p>
     {listed.tags.length > 0 && <>
       <strong>{listed.heading}</strong>
