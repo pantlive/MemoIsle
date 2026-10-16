@@ -6909,3 +6909,14 @@ button.template-node-copy {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.vault-shortcut-badge {
+  margin-left: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  padding: 0 6px;
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}

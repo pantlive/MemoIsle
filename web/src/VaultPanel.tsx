@@ -34,6 +34,7 @@ import {
   type VaultKind,
 } from "./vault";
 import VaultItemDialog from "./VaultItemDialog";
+import { saveVaultReminderCount } from "./vaultReminderBadge";
 import {
   collectVaultReminders,
   lastChangedAt,
@@ -330,6 +331,7 @@ export default function VaultPanel() {
     try {
       await resetVault();
       lockVaultSession();
+      saveVaultReminderCount(0);
       setResetOpen(false);
       setResetPhrase("");
       setNotice("密码库已清空，可以重新设置主密码。");
@@ -516,6 +518,11 @@ export default function VaultPanel() {
     }
     return result;
   }, [reminders]);
+
+  // 锁定后导航用这个数字提示还有几条需要处理。
+  useEffect(() => {
+    if (phase === "unlocked") saveVaultReminderCount(remindersByEntry.size);
+  }, [phase, remindersByEntry]);
 
   const counts = useMemo(() => {
     const result: Record<KindFilter, number> = {

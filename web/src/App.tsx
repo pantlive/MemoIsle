@@ -31,6 +31,7 @@ import QuickAccess from "./QuickAccess";
 import ShortcutHelpDialog from "./ShortcutHelpDialog";
 import VaultPanel from "./VaultPanel";
 import { lockVaultSession } from "./vaultSession";
+import { saveVaultReminderCount, useVaultReminderCount } from "./vaultReminderBadge";
 import SpeechPronunciation from "./SpeechPronunciation";
 import WordDictionaryPreview from "./WordDictionaryPreview";
 import WordPronunciation from "./WordPronunciation";
@@ -624,6 +625,7 @@ export default function App({ authUser, onLogout }: AppProps) {
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   // 密码库是独立页面，不属于任何内容类型；切换到任何内容视图都会离开它。
   const [vaultOpen, setVaultOpen] = useState(false);
+  const vaultReminderCount = useVaultReminderCount();
   const vaultOpenRef = useRef(vaultOpen);
   vaultOpenRef.current = vaultOpen;
   // 登录失效或切换账号时整个工作台卸载，库密钥不能留给下一个账号。
@@ -3751,6 +3753,11 @@ export default function App({ authUser, onLogout }: AppProps) {
                 {item.action === "health" && healthIssueCount > 0 && (
                   <span className="nav-count">{healthIssueCount}</span>
                 )}
+                {item.action === "vault" && vaultReminderCount > 0 && (
+                  <span className="nav-count" title={`上次解锁时有 ${vaultReminderCount} 条密码提醒`}>
+                    {vaultReminderCount}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -3763,6 +3770,7 @@ export default function App({ authUser, onLogout }: AppProps) {
             onClick={() => {
               // 退出登录前先锁定，内存里不留解锁后的库密钥。
               lockVaultSession();
+              saveVaultReminderCount(0);
               void onLogout();
             }}
             type="button"
@@ -3863,9 +3871,10 @@ export default function App({ authUser, onLogout }: AppProps) {
               setSelectedId(null);
               setVaultOpen(true);
             }}
-            aria-label="密码库"
+            aria-label={vaultReminderCount > 0 ? `密码库，${vaultReminderCount} 条提醒` : "密码库"}
           >
             <span aria-hidden="true">◈</span><span className="top-bar-label">密码库</span>
+            {vaultReminderCount > 0 && <span className="vault-shortcut-badge" aria-hidden="true">{vaultReminderCount}</span>}
           </button>
           <button className="compact-new" onClick={focusCapture}>＋ 新建</button>
         </header>
