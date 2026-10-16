@@ -14,6 +14,9 @@ export default defineConfig({
       "/api": {
         target: apiProxy,
         changeOrigin: true,
+        // 聚类生成最多两次模型请求，合计可能接近 180+80 秒。
+        timeout: 400_000,
+        proxyTimeout: 400_000,
       },
     },
   },

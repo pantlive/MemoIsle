@@ -3,6 +3,8 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   getResourceClassificationState,
   resumeResourceClassification,
+  retryClassifiedResources,
+  retryResourceClassificationReviews,
   startResourceClassification,
 } from "./api";
 import type { ResourceClassificationState } from "./types";
@@ -10,10 +12,13 @@ import ResourceClassificationReviewDialog from "./ResourceClassificationReviewDi
 
 interface ResourceClassificationPanelProps {
   onChanged: () => void;
+  // 面板折叠时，外层入口用待确认数提示用户。
+  onReviewCount?: (count: number) => void;
 }
 
 export default function ResourceClassificationPanel({
   onChanged,
+  onReviewCount,
 }: ResourceClassificationPanelProps): ReactNode {
   const [state, setState] = useState<ResourceClassificationState | null>(null);
   const [starting, setStarting] = useState(false);
@@ -24,6 +29,11 @@ export default function ResourceClassificationPanel({
   const onChangedRef = useRef(onChanged);
   const previousProgress = useRef("");
   onChangedRef.current = onChanged;
+
+  const reviewCount = state?.review_count ?? 0;
+  useEffect(() => {
+    onReviewCount?.(reviewCount);
+  }, [onReviewCount, reviewCount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,16 +85,57 @@ export default function ResourceClassificationPanel({
     }
   };
 
+  const handleRetryReview = async (): Promise<void> => {
+    if (starting || running || !state?.review_count) return;
+    setStarting(true);
+    setError("");
+    try {
+      setState(await retryResourceClassificationReviews());
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "重新分类待确认网页失败");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleRetryClassified = async (): Promise<void> => {
+    if (starting || running || !state?.classified_retry_count) return;
+    setStarting(true);
+    setError("");
+    try {
+      setState(await retryClassifiedResources());
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "重新分类已完成网页失败");
+    } finally {
+      setStarting(false);
+    }
+  };
+
   return (
     <section className="resource-classification-panel" aria-label="已有网页大模型分类">
       <div className="resource-classification-heading">
         <div>
           <strong>大模型分类已有网页</strong>
-          <p>结合网页标题、描述和可用的公开正文摘要，使用 Jev 按现有分类模板归类。新导入网页自动处理；巡检待确认的网页暂缓，完成巡检确认后再处理。已完成、已人工确认和自定义规则自动跳过。</p>
+          <p>结合网页标题、描述和可用的公开正文摘要，先由大模型列出可能标签，再按你的分类模板归类。新导入网页自动处理；确认失效的网页不参与分类，其余巡检状态仍会分类。已人工确认和自定义规则自动跳过。已完成的模型分类可用「重新分类已完成」再跑一轮。</p>
         </div>
-        <div className="resource-classification-actions">
+      </div>
+      <div className="resource-classification-actions">
         <button type="button" onClick={() => setReviewOpen(true)} disabled={!state}>
           分类确认 {state?.review_count ?? 0}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleRetryReview()}
+          disabled={starting || running || !state || (state.review_count ?? 0) === 0}
+        >
+          重新分类待确认 {state?.review_count ?? 0}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleRetryClassified()}
+          disabled={starting || running || !state || (state.classified_retry_count ?? 0) === 0}
+        >
+          重新分类已完成 {state?.classified_retry_count ?? 0}
         </button>
         <button
           type="button"
@@ -93,11 +144,10 @@ export default function ResourceClassificationPanel({
         >
           {starting ? canResume ? "正在继续…" : "正在启动…" : waitingForRetry ? "等待自动重试…" : running ? "正在分类…" : canResume ? "继续任务" : state?.pending_count === 0 ? "当前可分类网页已处理" : job ? "处理剩余网页" : "开始批量分类"}
         </button>
-        </div>
       </div>
       {state && <p className="resource-classification-counts">
         待处理 {state.pending_count} · 已完成模型分类 {state.classified_count} · 保留人工确认与规则分类 {state.protected_count}
-        {` · 暂缓分类（待巡检确认）${state.deferred_count}`}
+        {` · 暂缓分类（确认失效）${state.deferred_count}`}
       </p>}
       {job && <div role="status" className="resource-classification-progress">
         {running && <progress value={job.processed_count} max={Math.max(1, job.total_count)} aria-label="网页分类进度" />}

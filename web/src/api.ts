@@ -36,6 +36,7 @@ import type {
   ModelSetting,
   ModelSettingUpdate,
   ResourceCategoryCreateRequest,
+  ResourceCategoryGenerateMode,
   ResourceCategoryGenerateResponse,
   ResourceCategoryOption,
   ResourceCategoryRule,
@@ -55,6 +56,7 @@ import type {
   WordImportResponse,
   WordLookupResponse,
 } from "./types";
+import extensionManifest from "../../extension/manifest.json";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 const ACCESS_TOKEN_STORAGE_KEY = "memoisle_access_token";
@@ -183,6 +185,23 @@ export class ApiError extends Error {
   }
 }
 
+function readApiErrorDetail(
+  detail: string | { message?: string } | Array<{ msg?: string }> | undefined,
+  fallback: string,
+): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const msg = detail.find((item) => typeof item?.msg === "string")?.msg;
+    return msg ? msg.replace(/^Value error, /, "") : fallback;
+  }
+  if (detail && typeof detail.message === "string") {
+    return detail.message;
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const accessToken = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -203,15 +222,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         message?: string;
         code?: string;
         current?: Memo;
-      };
+      } | Array<{ msg?: string }>;
     } | null;
     const detail = payload?.detail;
-    const message =
-      typeof detail === "string"
-        ? detail
-        : detail?.message ?? `请求失败（${response.status}）`;
-    const code = typeof detail === "object" ? detail?.code : undefined;
-    const current = typeof detail === "object" ? detail?.current : undefined;
+    const message = readApiErrorDetail(detail, `请求失败（${response.status}）`);
+    const code = detail && !Array.isArray(detail) && typeof detail === "object"
+      ? detail.code
+      : undefined;
+    const current = detail && !Array.isArray(detail) && typeof detail === "object"
+      ? detail.current
+      : undefined;
     throw new ApiError(message, response.status, code, current);
   }
   return (await response.json()) as T;
@@ -511,6 +531,14 @@ export async function resumeResourceClassification(): Promise<ResourceClassifica
   return request<ResourceClassificationState>("/resource-classification/resume", { method: "POST" });
 }
 
+export async function retryResourceClassificationReviews(): Promise<ResourceClassificationState> {
+  return request<ResourceClassificationState>("/resource-classification/review/retry", { method: "POST" });
+}
+
+export async function retryClassifiedResources(): Promise<ResourceClassificationState> {
+  return request<ResourceClassificationState>("/resource-classification/classified/retry", { method: "POST" });
+}
+
 export async function getResourceClassificationReviews(
   filters: { query: string; reason: string; candidate_code: string; max_confidence: string; offset: number },
 ): Promise<ResourceClassificationReviewList> {
@@ -531,14 +559,16 @@ export async function confirmResourceClassificationReviews(
 }
 
 export async function generateResourceCategories(
-  instructions: string,
+  instructions = "",
+  mode: ResourceCategoryGenerateMode = "subcategories",
 ): Promise<ResourceCategoryGenerateResponse> {
   return request<ResourceCategoryGenerateResponse>("/resource-categories/generate", {
     method: "POST",
-    body: JSON.stringify({ instructions }),
+    body: JSON.stringify({ instructions, max_categories: 12, mode }),
   });
 }
 
+// payload 原样透传，包含 definition / include_examples / exclude_examples 三个口径字段。
 export async function createResourceCategory(
   payload: ResourceCategoryCreateRequest,
 ): Promise<ResourceCategoryOption> {
@@ -548,6 +578,7 @@ export async function createResourceCategory(
   });
 }
 
+// payload 原样透传（含三个口径字段），expected_version 由调用方一并带上。
 export async function updateResourceCategory(
   categoryId: string,
   payload: ResourceCategoryUpdateRequest,
@@ -594,6 +625,33 @@ export async function deleteResourceCategoryRule(
 ): Promise<{ deleted: boolean }> {
   return request<{ deleted: boolean }>(`/resource-category-rules/${ruleId}`, {
     method: "DELETE",
+  });
+}
+
+export interface ResourceOpenStats {
+  resource_open_count: number;
+  resource_last_opened_at: string;
+}
+
+// keepalive 让请求在页面随后跳走或关闭时仍能发出。
+export async function recordResourceOpen(memoId: string): Promise<ResourceOpenStats> {
+  return request<ResourceOpenStats>(`/resources/${memoId}/open`, {
+    method: "POST",
+    keepalive: true,
+  });
+}
+
+export async function listQuickAccess(limit = 8): Promise<Memo[]> {
+  return request<Memo[]>(`/resources/quick-access?limit=${limit}`);
+}
+
+export async function setQuickAccessHidden(
+  memoId: string,
+  hidden: boolean,
+): Promise<{ resource_quick_access_hidden: boolean }> {
+  return request(`/resources/${memoId}/quick-access`, {
+    method: "PUT",
+    body: JSON.stringify({ hidden }),
   });
 }
 
@@ -659,14 +717,30 @@ export async function exchangeBrowserCapture(
 export async function listOpenBrowserTabs(): Promise<BrowserOpenTab[]> {
   // 刷新页面后已有登录态不会触发重新登录，读取前主动恢复扩展同步。
   await syncBrowserExtension();
-  const response = await request<BrowserOpenTabListResponse>(
-    "/browser-tabs/open",
-  );
-  return response.items;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await request<BrowserOpenTabListResponse>(
+      "/browser-tabs/open",
+      { signal: controller.signal },
+    );
+    return response.items;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("读取当前浏览器网页超时，请确认扩展已连接后重试。");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export function browserExtensionDownloadUrl(): string {
   return `${API_BASE_URL}/browser-extension/download`;
+}
+
+export function browserExtensionArchiveFilename(): string {
+  return `memoisle-browser-extension-${extensionManifest.version}.zip`;
 }
 
 export async function getLinkHealthCenter(

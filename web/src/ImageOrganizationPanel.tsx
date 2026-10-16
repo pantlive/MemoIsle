@@ -47,7 +47,7 @@ export default function ImageOrganizationPanel({ selected, onChanged }: { select
   const job = state?.job;
   return <section className="image-organization-panel" aria-label="图片批量整理">
     <strong>图片批量整理</strong>
-    <p>OCR 在本机识别中英文。Jev 只接收识别文字和图片标题，按现有分类模板归类；已处理和手动分类跳过。没有可识别文字的图片可手动选择分类。</p>
+    <p>OCR 在本机识别中英文。分类时只使用识别文字和图片标题，按现有分类模板归类；已处理和手动分类跳过。没有可识别文字的图片可手动选择分类。</p>
     {state && <p>待识别 {state.pending_ocr_count} · 待模板分类 {state.pending_classification_count} · 完全重复 {state.duplicate_group_count} 组</p>}
     <div className="memo-batch-actions">
       <button type="button" disabled={busy || running || !state || state.pending_ocr_count === 0} onClick={() => void start("ocr", "all")}>识别全部未处理图片</button>

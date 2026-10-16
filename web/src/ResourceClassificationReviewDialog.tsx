@@ -1,6 +1,11 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import { confirmResourceClassificationReviews, getResourceCategories, getResourceClassificationReviews } from "./api";
+import {
+  confirmResourceClassificationReviews,
+  getResourceCategories,
+  getResourceClassificationReviews,
+  retryResourceClassificationReviews,
+} from "./api";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
 import type { ResourceCategoryOption, ResourceClassificationReviewAction, ResourceClassificationReviewList } from "./types";
 
@@ -8,6 +13,7 @@ const reasons: Record<string, string> = {
   low_confidence: "置信度不足",
   unknown_category: "模板中无此类别",
   invalid_response: "分类数据无效",
+  no_match: "口径都不匹配",
   legacy: "未保存候选",
 };
 const skipReasons: Record<string, string> = {
@@ -113,9 +119,27 @@ export default function ResourceClassificationReviewDialog({
       <div className="dialog-header">
         <div>
           <h2 id="classification-review-title">分类确认中心</h2>
-          <p>复核模型未确定的网页。人工确认后不再自动分类；巡检待确认的网页需先完成巡检。</p>
+          <p>复核模型未确定的网页。也可以把全部待确认网页重新交给大模型按分类模板归类；人工确认后不再自动分类。确认失效的网页不进入分类确认。</p>
         </div>
-        <button type="button" className="icon-button" aria-label="关闭分类确认中心" onClick={onClose} disabled={busy}>×</button>
+        <div className="classification-review-header-actions">
+          <button
+            type="button"
+            disabled={disabled || (list?.total_count ?? 0) === 0}
+            onClick={() => {
+              if (disabled || (list?.total_count ?? 0) === 0) return;
+              setBusy(true);
+              setError("");
+              setNotice("");
+              void retryResourceClassificationReviews().then(() => {
+                onChangedRef.current();
+                onClose();
+              }).catch((retryError: unknown) => {
+                setError(retryError instanceof Error ? retryError.message : "重新分类待确认网页失败");
+              }).finally(() => setBusy(false));
+            }}
+          >重新分类全部待确认 {list?.total_count ?? 0}</button>
+          <button type="button" className="icon-button" aria-label="关闭分类确认中心" onClick={onClose} disabled={busy}>×</button>
+        </div>
       </div>
       <div className="classification-review-filters">
         <label>搜索待确认网页<input type="search" maxLength={200} value={query} disabled={busy}

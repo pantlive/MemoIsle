@@ -39,7 +39,8 @@ export type MemoSort =
   | "created_desc"
   | "created_asc"
   | "title_asc"
-  | "title_desc";
+  | "title_desc"
+  | "opened_desc";
 export type ReviewFeedback = "forgot" | "fuzzy" | "remembered";
 export interface WordLookupSense {
   index: number;
@@ -129,6 +130,12 @@ export interface ResourceClassificationAssessment {
   input_excerpt: string | null;
   model: string;
   attempted_at: string;
+  // 模型写下的判定依据；fallback_used 为 true 表示这条用了系统兜底分类。
+  // reason_code 为 "no_match" 时表示所有自定义分类口径都不匹配。
+  reason?: string;
+  fallback_used?: boolean;
+  // 对话模型列出的全部成立标签；Jev 定案后仍保留。
+  proposed_categories?: Array<{ code: string; label: string; probability: number | null }>;
 }
 
 export type ResourceClassificationReviewAction = "adopt" | "keep" | "assign";
@@ -249,6 +256,11 @@ export interface Memo {
   tags: string[];
   collections: string[];
   starred: boolean;
+  // 网页资料的打开统计，快速访问按它排序；不随版本号变化。
+  resource_open_count: number;
+  resource_last_opened_at: string | null;
+  // 用户从快速访问移除后仍继续计数。
+  resource_quick_access_hidden: boolean;
   status: MemoStatus;
   deleted_at: string | null;
   version: number;
@@ -310,6 +322,10 @@ export interface ResourceCategoryOption {
   code: ResourceCategory;
   name: string;
   description: string | null;
+  // 分类口径、属于与不属于的例子，是模型判定的主要依据。
+  definition?: string | null;
+  include_examples?: string | null;
+  exclude_examples?: string | null;
   is_system: boolean;
   is_active: boolean;
   version: number;
@@ -336,13 +352,20 @@ export interface ResourceCategoryCreateRequest {
   name: string;
   description?: string;
   parent_code?: string;
+  definition?: string | null;
+  include_examples?: string | null;
+  exclude_examples?: string | null;
 }
 
 export interface ResourceCategorySuggestion {
   name: string;
   description: string | null;
   parent_code: string | null;
+  existing_code?: string | null;
+  examples?: string[];
 }
+
+export type ResourceCategoryGenerateMode = "subcategories" | "top_level";
 
 export interface ResourceCategoryGenerateResponse {
   model: string;
@@ -353,6 +376,9 @@ export interface ResourceCategoryUpdateRequest {
   expected_version: number;
   name?: string;
   description?: string | null;
+  definition?: string | null;
+  include_examples?: string | null;
+  exclude_examples?: string | null;
   is_active?: boolean;
   parent_code?: string | null;
 }
@@ -524,6 +550,8 @@ export interface ModelSetting {
   credential_source: "account" | "environment" | "none";
   has_custom_settings: boolean;
   error: string | null;
+  min_confidence: number;
+  default_min_confidence: number;
 }
 
 export interface ModelSettingUpdate {
@@ -531,6 +559,8 @@ export interface ModelSettingUpdate {
   enabled: boolean;
   api_key?: string;
   base_url?: string | null;
+  /** 留空（null）恢复服务器默认阈值。 */
+  min_confidence?: number | null;
 }
 
 export interface ModelConnectionResult {
@@ -565,6 +595,7 @@ export interface ResourceClassificationState {
   protected_count: number;
   deferred_count: number;
   review_count: number;
+  classified_retry_count: number;
   job: ResourceClassificationJob | null;
 }
 

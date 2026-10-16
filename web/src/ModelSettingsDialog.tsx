@@ -18,6 +18,8 @@ interface ModelSettingForm {
   apiKey: string;
   baseUrl: string;
   enabled: boolean;
+  /** 以文本保存，便于校验；空表示恢复默认阈值。 */
+  minConfidence: string;
   message: string;
 }
 
@@ -45,6 +47,7 @@ function createForm(saved: ModelSetting): ModelSettingForm {
     apiKey: "",
     baseUrl: saved.custom_base_url ?? "",
     enabled: saved.enabled,
+    minConfidence: String(saved.min_confidence ?? saved.default_min_confidence),
     message: saved.error ?? "",
   };
 }
@@ -96,6 +99,12 @@ export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProp
       updateForm(provider, { message: "请填写模型名称" });
       return;
     }
+    const thresholdText = form.minConfidence.trim();
+    const threshold = thresholdText === "" ? null : Number(thresholdText);
+    if (threshold !== null && (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)) {
+      updateForm(provider, { message: "置信度阈值需要是 0 到 1 之间的小数" });
+      return;
+    }
     setBusy(provider);
     updateForm(provider, { message: "" });
     const payload = {
@@ -105,6 +114,8 @@ export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProp
       base_url: form.baseUrl.trim() || null,
       // 空白表示保留已有密钥，前端不读取或持久化保存的明文。
       ...(form.apiKey.trim() ? { api_key: form.apiKey.trim() } : {}),
+      // 空值恢复服务器默认阈值。
+      min_confidence: threshold,
     };
     try {
       if (action === "test") {
@@ -231,6 +242,23 @@ export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProp
                     当前使用服务器密钥；填写后优先使用你保存的密钥。
                   </p>
                 )}
+                <label>
+                  <span>自动分类置信度阈值</span>
+                  <input
+                    inputMode="decimal"
+                    value={form.minConfidence}
+                    placeholder={String(form.saved.default_min_confidence)}
+                    disabled={busy !== null}
+                    onChange={(event) => updateForm(provider, {
+                      minConfidence: event.target.value, message: "",
+                    })}
+                  />
+                </label>
+                <p className="cloud-dialog-hint">
+                  低于这个置信度的判定会进「分类确认中心」，不会直接改分类。
+                  填 0 到 1 之间的小数，留空恢复默认
+                  {String(form.saved.default_min_confidence)}。调低会多自动分类、少人工确认。
+                </p>
                 <label className="model-settings-enable">
                   <input
                     type="checkbox"

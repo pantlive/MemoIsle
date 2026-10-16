@@ -13,7 +13,12 @@ import BrandLogo from "./BrandLogo";
 import CategoryGenerator from "./CategoryGenerator";
 import ResourceClassificationPanel from "./ResourceClassificationPanel";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
+import DataMenu from "./DataMenu";
 import MemoBatchToolbar from "./MemoBatchToolbar";
+import { normalizeWebUrl, sourceHost } from "./webUrl";
+import ResourcePreviewDialog, { type ResourceEditChanges } from "./ResourcePreviewDialog";
+import CategoryTemplatePanel from "./CategoryTemplatePanel";
+import { categoryDepth } from "./categoryTree";
 import ImageOrganizationPanel from "./ImageOrganizationPanel";
 import CloudAccountDialog from "./CloudAccountDialog";
 import ModelSettingsDialog from "./ModelSettingsDialog";
@@ -22,6 +27,8 @@ import { parseClipboardWord } from "./clipboardWord";
 import LinkHealthDialog from "./LinkHealthDialog";
 import { pendingHealthIssueCount } from "./linkHealth";
 import ReviewPanel, { type ReviewQueueFilter } from "./ReviewPanel";
+import QuickAccess from "./QuickAccess";
+import ShortcutHelpDialog from "./ShortcutHelpDialog";
 import SpeechPronunciation from "./SpeechPronunciation";
 import WordDictionaryPreview from "./WordDictionaryPreview";
 import WordPronunciation from "./WordPronunciation";
@@ -46,13 +53,10 @@ import {
 } from "./offlineDrafts";
 import {
   ApiError,
+  browserExtensionArchiveFilename,
   browserExtensionDownloadUrl,
-  createResourceCategory,
-  createResourceCategoryRule,
   createImageMemo,
   createMemo,
-  deleteResourceCategory,
-  deleteResourceCategoryRule,
   downloadUserData,
   emptyTrash,
   exchangeBrowserCapture,
@@ -60,6 +64,9 @@ import {
   getResourceCategoryRules,
   getMemoCounts,
   getMemo,
+  listQuickAccess,
+  recordResourceOpen,
+  setQuickAccessHidden,
   getLinkHealthCenter,
   getReviewSettings,
   getReviewQueue,
@@ -79,7 +86,6 @@ import {
   skipReview,
   trashMemo,
   updateReviewSettings,
-  updateResourceCategory,
   updateMemo,
   uploadMemoAudio,
   uploadMemoImage,
@@ -102,7 +108,6 @@ import type {
   ResourceCategory,
   ResourceCategoryOption,
   ResourceCategoryRule,
-  ResourceCategoryRuleMatchType,
   ReviewFeedback,
   ReviewQueueResponse,
   ReviewSettings,
@@ -187,6 +192,8 @@ const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
 });
 
+const MAX_MEMO_CATEGORIES = 8;
+
 const defaultResourceCategories: ResourceCategoryOption[] = [
   ["learning", "学习资料"],
   ["article", "文章阅读"],
@@ -207,10 +214,6 @@ const defaultResourceCategories: ResourceCategoryOption[] = [
   depth: 1,
   path: name,
 }));
-
-function categoryDepth(category: ResourceCategoryOption): number {
-  return category.depth ?? 1;
-}
 
 function memoCategoryCodes(memo: Memo): string[] {
   if (memo.resource_categories && memo.resource_categories.length > 0) {
@@ -248,86 +251,9 @@ function memoCategoryLabels(
 ): string[] {
   return memoCategoryCodes(memo).map((code) => {
     const option = categories.find((category) => category.code === code);
-    return option?.name || memo.resource_category_label || code;
+    return option?.path || option?.name || memo.resource_category_label || code;
   });
 }
-
-type CategoryTreeNode = ResourceCategoryOption & {
-  children: CategoryTreeNode[];
-};
-
-function buildCategoryTree(
-  categories: ResourceCategoryOption[],
-): CategoryTreeNode[] {
-  const nodes = new Map<string, CategoryTreeNode>();
-  for (const category of categories) {
-    nodes.set(category.code, { ...category, children: [] });
-  }
-  const roots: CategoryTreeNode[] = [];
-  for (const category of categories) {
-    const node = nodes.get(category.code);
-    if (!node) {
-      continue;
-    }
-    const parent = category.parent_code
-      ? nodes.get(category.parent_code)
-      : undefined;
-    if (parent) {
-      parent.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-  return roots;
-}
-
-function CategorySettingsBranch({
-  nodes,
-  expandedCodes,
-  addingChildToCode,
-  renderRow,
-  renderChildComposer,
-}: {
-  nodes: CategoryTreeNode[];
-  expandedCodes: Set<string>;
-  addingChildToCode: string | null;
-  renderRow: (node: CategoryTreeNode) => ReactNode;
-  renderChildComposer: (node: CategoryTreeNode) => ReactNode;
-}) {
-  return (
-    <div className="category-manager-tree">
-      {nodes.map((node) => {
-        const addingChild = addingChildToCode === node.code;
-        const expanded = expandedCodes.has(node.code) || addingChild;
-        const showChildren =
-          expanded && (node.children.length > 0 || addingChild);
-        return (
-          <div className="category-manager-node" key={node.code}>
-            {renderRow(node)}
-            {showChildren ? (
-              <div className="category-manager-children">
-                {addingChild ? renderChildComposer(node) : null}
-                <CategorySettingsBranch
-                  nodes={node.children}
-                  expandedCodes={expandedCodes}
-                  addingChildToCode={addingChildToCode}
-                  renderRow={renderRow}
-                  renderChildComposer={renderChildComposer}
-                />
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-const resourceRuleMatchLabels: Record<ResourceCategoryRuleMatchType, string> = {
-  domain: "网站域名",
-  url: "网址包含",
-  text: "标题或描述包含",
-};
 
 const viewCopy = {
   all: {
@@ -418,23 +344,6 @@ function describeError(error: unknown): string {
   return "操作失败，请稍后重试。";
 }
 
-function normalizeWebUrl(value: string): string | null {
-  const cleaned = value.trim();
-  if (!cleaned) {
-    return null;
-  }
-  const candidate = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
-  try {
-    const parsed = new URL(candidate);
-    if (!parsed.hostname || !["http:", "https:"].includes(parsed.protocol)) {
-      return null;
-    }
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
 function readWebMentionQuery(value: string): string | null {
   const match = value.match(/(^|\s)@([^\s]*)$/);
   return match ? match[2] : null;
@@ -470,17 +379,6 @@ function highlightMentionMatch(text: string, query: string): ReactNode {
       {text.slice(index + needle.length)}
     </>
   );
-}
-
-function sourceHost(sourceUrl: string | null): string {
-  if (!sourceUrl) {
-    return "网页资料";
-  }
-  try {
-    return new URL(sourceUrl).hostname.replace(/^www\./, "");
-  } catch {
-    return sourceUrl;
-  }
 }
 
 // 判断地址是否为 MemoIsle 本站页面，一键收藏时需跳过自身标签页。
@@ -630,6 +528,10 @@ function MemoImageThumb({
   return <img className={className ?? "image-thumb"} src={url} alt={alt} />;
 }
 
+function resourceRowElements(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".memo-list .memo-row[data-memo-id]"));
+}
+
 export default function App({ authUser, onLogout }: AppProps) {
   const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
@@ -655,38 +557,18 @@ export default function App({ authUser, onLogout }: AppProps) {
   const [batchSelection, setBatchSelection] = useState<Map<string, Memo>>(new Map());
   const [batchBusy, setBatchBusy] = useState(false);
   const [memoSort, setMemoSort] = useState<MemoSort>("updated_desc");
+  const [quickAccessItems, setQuickAccessItems] = useState<Memo[]>([]);
+  // 撤销按钮只跟随对应的那条提示，提示被替换后自动失效。
+  const [quickAccessUndo, setQuickAccessUndo] = useState<{ memo: Memo; message: string } | null>(null);
   const [resourceViewMode, setResourceViewMode] =
     useState<ResourceViewMode>("list");
   const [resourceCategories, setResourceCategories] = useState(
     defaultResourceCategories,
   );
-  const categoryTree = useMemo(
-    () => buildCategoryTree(resourceCategories),
-    [resourceCategories],
-  );
-  const [expandedCategoryCodes, setExpandedCategoryCodes] = useState<
-    Set<string>
-  >(() => new Set());
   const [categoryRules, setCategoryRules] = useState<ResourceCategoryRule[]>([]);
   const [categorySettingsOpen, setCategorySettingsOpen] = useState(false);
   const [categorySettingsLoading, setCategorySettingsLoading] = useState(false);
-  const [categorySubmitting, setCategorySubmitting] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryDescription, setNewCategoryDescription] = useState("");
-  const [newCategoryParent, setNewCategoryParent] = useState("");
-  const [addingChildToCode, setAddingChildToCode] = useState<string | null>(null);
-  const [newChildName, setNewChildName] = useState("");
-  const [newChildDescription, setNewChildDescription] = useState("");
-  const childNameRef = useRef<HTMLInputElement>(null);
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState("");
-  const [editingCategoryDescription, setEditingCategoryDescription] = useState("");
-  const [newRuleName, setNewRuleName] = useState("");
-  const [newRuleCategory, setNewRuleCategory] = useState("");
-  const [newRuleMatchType, setNewRuleMatchType] =
-    useState<ResourceCategoryRuleMatchType>("domain");
-  const [newRulePattern, setNewRulePattern] = useState("");
-  const [newRulePriority, setNewRulePriority] = useState("100");
+  const categorySettingsRef = useRef<HTMLElement>(null);
   const [bookmarkImportOpen, setBookmarkImportOpen] = useState(false);
   const [cloudAccountOpen, setCloudAccountOpen] = useState(false);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -722,16 +604,26 @@ export default function App({ authUser, onLogout }: AppProps) {
   >(null);
   const [openBrowserTabs, setOpenBrowserTabs] = useState<BrowserOpenTab[]>([]);
   const [openBrowserTabsLoading, setOpenBrowserTabsLoading] = useState(false);
+  const [openBrowserTabsError, setOpenBrowserTabsError] = useState<string | null>(
+    null,
+  );
   const [webAttachmentHelp, setWebAttachmentHelp] = useState(false);
   const [webCommandOpen, setWebCommandOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [exportFormat, setExportFormat] = useState<DataExportFormat>("json");
   const [updatingResourceId, setUpdatingResourceId] = useState<string | null>(null);
   const [typeChangingId, setTypeChangingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resourcePreviewMemo, setResourcePreviewMemo] = useState<Memo | null>(null);
+  const [resourcePreviewEditing, setResourcePreviewEditing] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  // 列表在数据刷新或弹窗关闭后要恢复焦点的行；"first" 表示新页面的第一行。
+  const pendingRowFocusRef = useRef<string[] | "first" | null>(null);
+  const previewReturnIdRef = useRef<string[] | null>(null);
+  const resourceListKeyRef = useRef<(event: KeyboardEvent) => boolean>(() => false);
+  const [classificationToolsOpen, setClassificationToolsOpen] = useState(false);
+  const [classificationReviewCount, setClassificationReviewCount] = useState(0);
   const [editorTitle, setEditorTitle] = useState("");
   const [editorBody, setEditorBody] = useState("");
   const [editorPhonetic, setEditorPhonetic] = useState("");
@@ -1107,6 +999,58 @@ export default function App({ authUser, onLogout }: AppProps) {
     }
   }, []);
 
+  const loadQuickAccess = useCallback(async () => {
+    try {
+      setQuickAccessItems(await listQuickAccess(8));
+    } catch {
+      // 快速访问只是入口，读取失败时保留上次结果。
+    }
+  }, []);
+
+  // 打开原网页后计数；本地列表立即更新，快速访问重新排序。
+  const handleResourceOpened = useCallback((memo: Memo) => {
+    if (memo.type !== "resource") return;
+    void recordResourceOpen(memo.id)
+      .then((stats) => {
+        const patch = (item: Memo) => (item.id === memo.id ? { ...item, ...stats } : item);
+        setMemos((current) => current.map(patch));
+        setResourcePreviewMemo((current) => (current ? patch(current) : current));
+        void loadQuickAccess();
+      })
+      .catch(() => {
+        // 计数失败不影响打开网页本身；条目可能已删除，刷新入口。
+        void loadQuickAccess();
+      });
+  }, [loadQuickAccess]);
+
+  const changeQuickAccessHidden = useCallback(async (memo: Memo, hidden: boolean) => {
+    const patch = (item: Memo) => (
+      item.id === memo.id ? { ...item, resource_quick_access_hidden: hidden } : item
+    );
+    if (hidden) {
+      // 先从界面移走，失败再放回。
+      setQuickAccessItems((current) => current.filter((item) => item.id !== memo.id));
+    }
+    try {
+      await setQuickAccessHidden(memo.id, hidden);
+      setMemos((current) => current.map(patch));
+      setResourcePreviewMemo((current) => (current ? patch(current) : current));
+      setUndoMemo(null);
+      if (hidden) {
+        const text = `已从快速访问移除「${memo.title}」，仍会继续记录打开次数。`;
+        setMessage(text);
+        setQuickAccessUndo({ memo, message: text });
+      } else {
+        setMessage(`「${memo.title}」已重新显示在快速访问。`);
+        setQuickAccessUndo(null);
+      }
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      void loadQuickAccess();
+    }
+  }, [loadQuickAccess]);
+
   const loadReviewQueue = useCallback(async (filter: ReviewQueueFilter = reviewFilter) => {
     try {
       setReviewQueue(
@@ -1139,32 +1083,6 @@ export default function App({ authUser, onLogout }: AppProps) {
     }
   };
 
-  const expandCategoryBranch = useCallback((code: string) => {
-    setExpandedCategoryCodes((current) => {
-      const next = new Set(current);
-      let parentCode: string | null | undefined = code;
-      while (parentCode) {
-        next.add(parentCode);
-        parentCode = resourceCategories.find(
-          (category) => category.code === parentCode,
-        )?.parent_code;
-      }
-      return next;
-    });
-  }, [resourceCategories]);
-
-  const toggleCategoryExpanded = (code: string) => {
-    setExpandedCategoryCodes((current) => {
-      const next = new Set(current);
-      if (next.has(code)) {
-        next.delete(code);
-      } else {
-        next.add(code);
-      }
-      return next;
-    });
-  };
-
   const refreshCategorySettings = useCallback(async () => {
     setCategorySettingsLoading(true);
     try {
@@ -1181,224 +1099,6 @@ export default function App({ authUser, onLogout }: AppProps) {
     }
   }, []);
 
-  useEffect(() => {
-    if (addingChildToCode) {
-      childNameRef.current?.focus();
-    }
-  }, [addingChildToCode]);
-
-  const startAddChildCategory = (category: CategoryTreeNode | ResourceCategoryOption) => {
-    setEditingCategoryId(null);
-    expandCategoryBranch(category.code);
-    setAddingChildToCode(category.code);
-    setNewChildName("");
-    setNewChildDescription("");
-  };
-
-  const handleCreateChildCategory = async (parentCode: string) => {
-    const name = newChildName.trim();
-    if (!name || categorySubmitting) {
-      if (!name) {
-        setMessage("分类名称不能为空。");
-      }
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      const category = await createResourceCategory({
-        name,
-        description: newChildDescription.trim() || undefined,
-        parent_code: parentCode,
-      });
-      await refreshCategorySettings();
-      expandCategoryBranch(parentCode);
-      setAddingChildToCode(null);
-      setNewChildName("");
-      setNewChildDescription("");
-      setNewRuleCategory(category.code);
-      setMessage(`已在“${category.path}”下创建子分类。`);
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
-  const handleCreateCategory = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = newCategoryName.trim();
-    if (!name || categorySubmitting) {
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      const category = await createResourceCategory({
-        name,
-        description: newCategoryDescription.trim() || undefined,
-        parent_code: newCategoryParent || undefined,
-      });
-      await refreshCategorySettings();
-      if (category.parent_code) {
-        expandCategoryBranch(category.parent_code);
-      }
-      setNewCategoryName("");
-      setNewCategoryDescription("");
-      setNewCategoryParent("");
-      setNewRuleCategory(category.code);
-      setMessage(
-        category.parent_code
-          ? `已在“${category.path}”下创建子分类。`
-          : `已创建“${category.name}”，现在可以为它添加规则。`,
-      );
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
-  const handleToggleCategory = async (category: ResourceCategoryOption) => {
-    if (!category.id || categorySubmitting) {
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      const updated = await updateResourceCategory(category.id, {
-        expected_version: category.version,
-        is_active: !category.is_active,
-      });
-      await refreshCategorySettings();
-      setMessage(
-        updated.is_active
-          ? `已启用“${updated.name}”。`
-          : `已停用“${updated.name}”，已有资料会重新判断。`,
-      );
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
-  const startEditCategory = (category: ResourceCategoryOption) => {
-    if (!category.id) {
-      return;
-    }
-    if (category.parent_code) {
-      expandCategoryBranch(category.parent_code);
-    }
-    setEditingCategoryId(category.id);
-    setEditingCategoryName(category.name);
-    setEditingCategoryDescription(category.description ?? "");
-  };
-
-  const handleSaveCategory = async (category: ResourceCategoryOption) => {
-    const name = editingCategoryName.trim();
-    if (!category.id || !name || categorySubmitting) {
-      if (!name) {
-        setMessage("分类名称不能为空。");
-      }
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      const updated = await updateResourceCategory(category.id, {
-        expected_version: category.version,
-        name,
-        description: editingCategoryDescription.trim() || null,
-      });
-      await refreshCategorySettings();
-      setEditingCategoryId(null);
-      setMessage(`已更新“${updated.name}”。`);
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
-  const handleDeleteCategory = async (category: ResourceCategoryOption) => {
-    if (!category.id || categorySubmitting) {
-      return;
-    }
-    const confirmed = window.confirm(
-      `删除分类“${category.path || category.name}”？子分类和相关规则会一并删除，已用这些分类的网页会重新判断。`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      await deleteResourceCategory(category.id);
-      await refreshCategorySettings();
-      if (newRuleCategory === category.code) {
-        setNewRuleCategory("");
-      }
-      if (editingCategoryId === category.id) {
-        setEditingCategoryId(null);
-      }
-      setMessage(`已删除“${category.name}”。`);
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
-  const handleCreateCategoryRule = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
-    event.preventDefault();
-    const pattern = newRulePattern.trim();
-    const priority = Number.parseInt(newRulePriority, 10);
-    if (
-      !newRuleCategory ||
-      !pattern ||
-      !Number.isInteger(priority) ||
-      priority < 0 ||
-      categorySubmitting
-    ) {
-      setMessage("请选择分类并填写有效的规则内容和优先级。");
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      const rule = await createResourceCategoryRule({
-        name: newRuleName.trim() || undefined,
-        category_code: newRuleCategory,
-        match_type: newRuleMatchType,
-        pattern,
-        priority,
-      });
-      setCategoryRules((current) => [...current, rule]);
-      setNewRuleName("");
-      setNewRulePattern("");
-      setMessage("分类规则已保存，已有网页资料正在按新规则整理。");
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
-  const handleDeleteCategoryRule = async (rule: ResourceCategoryRule) => {
-    if (categorySubmitting) {
-      return;
-    }
-    setCategorySubmitting(true);
-    try {
-      await deleteResourceCategoryRule(rule.id);
-      setCategoryRules((current) =>
-        current.filter((item) => item.id !== rule.id),
-      );
-      setMessage("分类规则已删除，相关资料会重新判断。");
-    } catch (error) {
-      setMessage(describeError(error));
-    } finally {
-      setCategorySubmitting(false);
-    }
-  };
-
   const refreshOpenBrowserTabs = useCallback(async (showLoading = true) => {
     if (showLoading) {
       setOpenBrowserTabsLoading(true);
@@ -1406,8 +1106,9 @@ export default function App({ authUser, onLogout }: AppProps) {
     try {
       const tabs = await listOpenBrowserTabs();
       setOpenBrowserTabs(tabs);
-    } catch {
-      // 当前浏览器标签页读取失败时仍保留粘贴网址和一次性捕获入口。
+      setOpenBrowserTabsError(null);
+    } catch (error) {
+      setOpenBrowserTabsError(describeError(error));
       if (showLoading) {
         setOpenBrowserTabs([]);
       }
@@ -1814,6 +1515,16 @@ export default function App({ authUser, onLogout }: AppProps) {
   }, [activeType, refreshCategorySettings]);
 
   useEffect(() => {
+    if (!categorySettingsOpen) {
+      return;
+    }
+    categorySettingsRef.current?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [categorySettingsOpen]);
+
+  useEffect(() => {
     if (!webCommandOpen) {
       return;
     }
@@ -1916,7 +1627,8 @@ export default function App({ authUser, onLogout }: AppProps) {
             : activeType === "image" ? imageCategoryFilter || undefined : undefined,
           starred: resourceView && resourceStarredOnly ? true : undefined,
           status: trashView ? "trashed" : inboxView ? "inbox" : undefined,
-          sort: memoSort,
+          // 「最常打开」只对网页资料有意义，其他视图沿用默认排序。
+          sort: memoSort === "opened_desc" && !resourceView ? "updated_desc" : memoSort,
           limit: pageSize,
           offset: (resourcePage - 1) * pageSize,
         }),
@@ -2008,6 +1720,13 @@ export default function App({ authUser, onLogout }: AppProps) {
   }, [activeType, loadReviewQueue]);
 
   useEffect(() => {
+    // 数量变化说明有条目新增、删除或恢复，快速访问跟着刷新。
+    if (activeType === "all" || activeType === "resource") {
+      void loadQuickAccess();
+    }
+  }, [activeType, memoCounts, loadQuickAccess]);
+
+  useEffect(() => {
     let active = true;
     void getReviewSettings()
       .then((settings) => {
@@ -2061,8 +1780,23 @@ export default function App({ authUser, onLogout }: AppProps) {
       }
       const target = event.target as HTMLElement | null;
       const isEditing =
-        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
-      if (isEditing) {
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        Boolean(target?.isContentEditable);
+      if (isEditing || event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      // 弹窗打开时由弹窗自己处理按键。
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcutHelpOpen(true);
+        return;
+      }
+      if (activeTypeRef.current === "resource" && resourceListKeyRef.current(event)) {
         return;
       }
       if (event.key.toLowerCase() === "n") {
@@ -2126,9 +1860,7 @@ export default function App({ authUser, onLogout }: AppProps) {
     }
   };
 
-  const handleExport = async (
-    format: DataExportFormat = exportFormat,
-  ): Promise<void> => {
+  const handleExport = async (format: DataExportFormat): Promise<void> => {
     if (isExporting || isImporting) {
       return;
     }
@@ -2957,8 +2689,173 @@ export default function App({ authUser, onLogout }: AppProps) {
     }
   };
 
+  const closeResourcePreview = useCallback(() => setResourcePreviewMemo(null), []);
+  const closeShortcutHelp = useCallback(() => setShortcutHelpOpen(false), []);
+  const openPreviewSource = useCallback(() => {
+    if (resourcePreviewMemo) handleResourceOpened(resourcePreviewMemo);
+  }, [resourcePreviewMemo, handleResourceOpened]);
+
+  const openResourcePreview = (memo: Memo, editing = false) => {
+    // 记下当前行和相邻行，关闭弹窗后焦点回到原处；原行被删除时落到相邻行。
+    const index = memos.findIndex((item) => item.id === memo.id);
+    previewReturnIdRef.current = [memo.id, memos[index + 1]?.id, memos[index - 1]?.id]
+      .filter((id): id is string => Boolean(id));
+    setResourcePreviewEditing(editing);
+    setResourcePreviewMemo(memo);
+  };
+
+  const focusPendingRow = useCallback(() => {
+    const pending = pendingRowFocusRef.current;
+    if (!pending) return;
+    pendingRowFocusRef.current = null;
+    const rows = resourceRowElements();
+    const row = pending === "first"
+      ? rows[0]
+      : pending
+        .map((id) => rows.find((item) => item.dataset.memoId === id))
+        .find(Boolean);
+    row?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (resourcePreviewMemo) return;
+    setResourcePreviewEditing(false);
+    if (!previewReturnIdRef.current) return;
+    pendingRowFocusRef.current = previewReturnIdRef.current;
+    previewReturnIdRef.current = null;
+    window.requestAnimationFrame(focusPendingRow);
+  }, [resourcePreviewMemo, focusPendingRow]);
+
+  useEffect(() => {
+    // 翻页或删除后等新列表渲染完成再落焦点。
+    if (loadState === "ready") focusPendingRow();
+  }, [memos, loadState, focusPendingRow]);
+
+  // 网页资料列表的单键快捷键；返回 true 表示已处理。
+  resourceListKeyRef.current = (event: KeyboardEvent): boolean => {
+    if (loadState !== "ready") return false;
+    const rows = resourceRowElements();
+    const active = document.activeElement as HTMLElement | null;
+    const currentRow = active?.closest<HTMLElement>(".memo-list .memo-row[data-memo-id]") ?? null;
+    const onRow = currentRow !== null && active === currentRow;
+    const index = currentRow ? rows.indexOf(currentRow) : -1;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    const changePage = (delta: number) => {
+      const page = resourcePage + delta;
+      if (batchBusy || page < 1 || page > resourcePageCount) return;
+      pendingRowFocusRef.current = "first";
+      setResourcePage(page);
+    };
+
+    if (key === "j" || (key === "ArrowDown" && currentRow)) {
+      event.preventDefault();
+      rows[index < 0 ? 0 : Math.min(index + 1, rows.length - 1)]?.focus();
+      return true;
+    }
+    if (key === "k" || (key === "ArrowUp" && currentRow)) {
+      event.preventDefault();
+      rows[Math.max(index - 1, 0)]?.focus();
+      return true;
+    }
+    if (key === "]" || (key === "ArrowRight" && onRow)) {
+      event.preventDefault();
+      changePage(1);
+      return true;
+    }
+    if (key === "[" || (key === "ArrowLeft" && onRow)) {
+      event.preventDefault();
+      changePage(-1);
+      return true;
+    }
+    if (!onRow) return false;
+    const memo = memos.find((item) => item.id === currentRow.dataset.memoId);
+    if (!memo || memo.type !== "resource") return false;
+    switch (key) {
+      case "e":
+        openResourcePreview(memo, true);
+        break;
+      case "o":
+        if (memo.source_url) {
+          window.open(memo.source_url, "_blank", "noopener,noreferrer");
+          handleResourceOpened(memo);
+        }
+        break;
+      case "c":
+        void handleCopyResourceLink(memo);
+        break;
+      case "s":
+        void updateResourceOrganization(memo, { starred: !memo.starred });
+        break;
+      case "x":
+        if (!batchBusy) toggleBatchMemo(memo);
+        break;
+      case "Delete": {
+        const fallback = [memo.id, rows[index + 1]?.dataset.memoId, rows[index - 1]?.dataset.memoId]
+          .filter((id): id is string => Boolean(id));
+        void handleMoveToTrash(memo).then(() => {
+          pendingRowFocusRef.current = fallback;
+          window.requestAnimationFrame(focusPendingRow);
+        });
+        break;
+      }
+      default:
+        return false;
+    }
+    event.preventDefault();
+    return true;
+  };
+
+  const saveResourceEdits = async (
+    memo: Memo,
+    changes: ResourceEditChanges,
+  ): Promise<string | null> => {
+    setUpdatingResourceId(memo.id);
+    try {
+      const updated = await updateMemo(memo.id, {
+        expected_version: memo.version,
+        ...changes,
+      });
+      setMemos((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setResourcePreviewMemo(updated);
+      setMessage("网页资料已保存。");
+      return null;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        // 别处已改过这条资料：换成最新版本，让用户在新内容上重新编辑。
+        try {
+          const latest = await getMemo(memo.id);
+          setResourcePreviewMemo(latest);
+          setMemos((current) =>
+            current.map((item) => (item.id === latest.id ? latest : item)),
+          );
+        } catch {
+          void loadCurrentMemos(false);
+        }
+        return "这条资料刚在别处被修改过，已载入最新内容，请重新编辑。";
+      }
+      return describeError(error);
+    } finally {
+      setUpdatingResourceId(null);
+    }
+  };
+
+  const handleResourceTagSearch = (tag: string) => {
+    setResourcePreviewMemo(null);
+    if (activeType !== "resource") {
+      switchType("resource");
+    }
+    setResourceQuery(tag);
+    setResourcePage(1);
+  };
+
   const toggleMemoCategory = (memo: Memo, code: string) => {
     const current = memoCategoryCodes(memo);
+    if (!current.includes(code) && current.length >= MAX_MEMO_CATEGORIES) {
+      setMessage("最多 8 个分类");
+      return;
+    }
     const next = current.includes(code)
       ? current.filter((item) => item !== code)
       : [...current, code];
@@ -3038,6 +2935,7 @@ export default function App({ authUser, onLogout }: AppProps) {
     setReviewBusy(true);
     try {
       window.open(memo.source_url, "_blank", "noopener,noreferrer");
+      handleResourceOpened(memo);
       await updateMemo(memo.id, {
         expected_version: memo.version,
         resource_reading_status: "reading",
@@ -3854,7 +3752,8 @@ export default function App({ authUser, onLogout }: AppProps) {
               aria-label="搜索全部内容"
               value={searchQuery}
               onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder="搜索全部内容（/）"
+              // 网页资料页的 / 聚焦本页搜索框，顶栏不再标注快捷键。
+              placeholder={activeType === "resource" ? "搜索全部内容" : "搜索全部内容（/）"}
               maxLength={200}
             />
             {searchQuery && (
@@ -3871,11 +3770,11 @@ export default function App({ authUser, onLogout }: AppProps) {
             className="model-settings-open"
             onClick={() => setModelSettingsOpen(true)}
             aria-label="打开设置"
-          >⚙ 设置</button>
+          ><span aria-hidden="true">⚙</span><span className="top-bar-label">设置</span></button>
           <a
-            className="extension-download-button"
+            className="top-bar-button extension-download-button"
             href={browserExtensionDownloadUrl()}
-            download="memoisle-browser-extension.zip"
+            download={browserExtensionArchiveFilename()}
             title="下载后解压，并在 Chrome 或 Edge 中加载已解压的扩展"
           >↓ 下载扩展</a>
           <div className="data-export-controls">
@@ -3907,51 +3806,28 @@ export default function App({ authUser, onLogout }: AppProps) {
                 }
               }}
             />
-            <button
-              className="data-import-button"
-              type="button"
-              onClick={() => libraryImportInputRef.current?.click()}
-              disabled={isImporting || isExporting}
-              title="导入 JSON 或 CSV 备份，恢复灵感、单词和网页资料"
-            >{isImporting ? "导入中…" : "↑ 导入备份"}</button>
-            <button
-              className="data-import-button"
-              type="button"
-              onClick={() => wordImportInputRef.current?.click()}
-              disabled={isImporting || isExporting}
-              title="导入 JSON 或 CSV 单词"
-            >{isImporting ? "导入中…" : "↑ 导入单词"}</button>
-            <select
-              aria-label="导出格式"
-              value={exportFormat}
-              onChange={(event) => setExportFormat(event.target.value as DataExportFormat)}
-              disabled={isExporting || isImporting}
-            >
-              <option value="json">JSON</option>
-              <option value="csv">CSV</option>
-              <option value="markdown">Markdown</option>
-            </select>
-            <button
-              className="data-export-button"
-              type="button"
-              onClick={() => void handleExport()}
-              disabled={isExporting || isImporting}
-              title="下载当前账号的数据副本"
-            >{isExporting ? "导出中…" : "↓ 导出"}</button>
+            <DataMenu
+              busyLabel={isImporting ? "导入中…" : isExporting ? "导出中…" : ""}
+              onImportLibrary={() => libraryImportInputRef.current?.click()}
+              onImportWords={() => wordImportInputRef.current?.click()}
+              onExport={(format) => void handleExport(format)}
+            />
           </div>
           <button
             className={`trash-shortcut${activeType === "inbox" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("inbox")}
+            aria-label="收件箱"
           >
-            ▣ 收件箱
+            <span aria-hidden="true">▣</span><span className="top-bar-label">收件箱</span>
           </button>
           <button
             className={`trash-shortcut${activeType === "trash" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("trash")}
+            aria-label="回收站"
           >
-            ♻ 回收站
+            <span aria-hidden="true">♻</span><span className="top-bar-label">回收站</span>
           </button>
           <button className="compact-new" onClick={focusCapture}>＋ 新建</button>
         </header>
@@ -3995,6 +3871,14 @@ export default function App({ authUser, onLogout }: AppProps) {
                 >{trashBulkAction === "empty" ? "正在清空…" : "一键清空"}</button>
               </div>
             </section>
+          )}
+
+          {activeType === "all" && !searchQuery.trim() && (
+            <QuickAccess
+              items={quickAccessItems}
+              onOpen={handleResourceOpened}
+              onRemove={(memo) => void changeQuickAccessHidden(memo, true)}
+            />
           )}
 
           {activeType === "all" && !searchQuery.trim() && reviewQueue && (
@@ -4209,7 +4093,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                 <div className="web-attachment-help-actions">
                   <a
                     href={browserExtensionDownloadUrl()}
-                    download="memoisle-browser-extension.zip"
+                    download={browserExtensionArchiveFilename()}
                   >下载扩展</a>
                   <button
                     type="button"
@@ -4380,7 +4264,17 @@ export default function App({ authUser, onLogout }: AppProps) {
                       <span>没有标题或网址包含“{webMentionQuery}”的打开网页</span>
                     </div>
                   )}
-                  {!openBrowserTabsLoading && openBrowserTabs.length === 0 && (
+                  {!openBrowserTabsLoading &&
+                    openBrowserTabs.length === 0 &&
+                    openBrowserTabsError && (
+                    <div className="capture-command-empty">
+                      <span>无法读取当前浏览器网页：{openBrowserTabsError}</span>
+                      <button type="button" onClick={showBrowserPageHelp}>查看连接方式</button>
+                    </div>
+                  )}
+                  {!openBrowserTabsLoading &&
+                    openBrowserTabs.length === 0 &&
+                    !openBrowserTabsError && (
                     <div className="capture-command-empty">
                       <span>未发现当前浏览器打开的网页</span>
                       <button type="button" onClick={showBrowserPageHelp}>查看连接方式</button>
@@ -4449,8 +4343,8 @@ export default function App({ authUser, onLogout }: AppProps) {
           {activeType === "resource" && (
             <div className="resource-library-tools">
               <div>
-                <strong>批量整理已有收藏</strong>
-                <span>从当前浏览器直接读取书签，自动去重、分类并支持整批撤销。</span>
+                <strong>整理工具</strong>
+                <span>导入书签、巡检失效链接、管理分类</span>
               </div>
               <span className="resource-tool-actions">
                 <button type="button" onClick={() => setHealthCenterOpen(true)}>
@@ -4467,364 +4361,72 @@ export default function App({ authUser, onLogout }: AppProps) {
                 </button>
                 <button
                   type="button"
+                  aria-expanded={categorySettingsOpen}
+                  aria-controls="category-settings-panel"
                   onClick={() => setCategorySettingsOpen((open) => !open)}
                 >
                   ⚙ 分类模板
+                </button>
+                <button
+                  type="button"
+                  aria-expanded={classificationToolsOpen}
+                  aria-controls="classification-tools"
+                  onClick={() => setClassificationToolsOpen((open) => !open)}
+                >
+                  ✦ 智能分类{classificationReviewCount > 0 ? ` · 待确认 ${classificationReviewCount}` : ""}
                 </button>
               </span>
             </div>
           )}
 
+          {activeType === "resource" && categorySettingsOpen && (
+            <section
+              id="category-settings-panel"
+              ref={categorySettingsRef}
+              className="category-settings-panel"
+              aria-label="自定义分类模板和规则"
+            >
+              <CategoryTemplatePanel
+                categories={resourceCategories}
+                rules={categoryRules}
+                loading={categorySettingsLoading}
+                onRefresh={refreshCategorySettings}
+              />
+            </section>
+          )}
+
+          {/* 折叠时保持挂载，后台分类进度与待确认数仍会刷新。 */}
           {activeType === "resource" && (
-            <ResourceClassificationPanel onChanged={() => {
-              void loadCurrentMemos(false);
-              void refreshMemoCounts();
-            }} />
+            <div id="classification-tools" hidden={!classificationToolsOpen}>
+              <ResourceClassificationPanel
+                onChanged={() => {
+                  void loadCurrentMemos(false);
+                  void refreshMemoCounts();
+                }}
+                onReviewCount={setClassificationReviewCount}
+              />
+              <CategoryGenerator
+                categories={resourceCategories}
+                onAdded={refreshCategorySettings}
+              />
+            </div>
           )}
 
           {activeType === "image" && <ImageOrganizationPanel
             selected={memos.filter((memo) => batchSelection.has(memo.id)).map((memo) => batchSelection.get(memo.id)!)}
             onChanged={() => { void loadCurrentMemos(false); void refreshMemoCounts(); }} />}
 
-          {activeType === "resource" && categorySettingsOpen && (
-            <section
-              className="category-settings-panel"
-              aria-label="自定义分类模板和规则"
-            >
-              <div className="category-settings-heading">
-                <div>
-                  <strong>我的分类模板</strong>
-                  <span>大类下面可以有小类，最多三层。有子分类的条目默认收起，点 ▸ 展开。</span>
-                </div>
-                {categorySettingsLoading && <small>正在读取……</small>}
-              </div>
-              <div className="category-settings-grid">
-                <div className="category-template-column">
-                  <CategoryGenerator
-                    categories={resourceCategories}
-                    onAdded={refreshCategorySettings}
-                  />
-                  <h3>自定义分类</h3>
-                  <form
-                    className="category-create-form"
-                    onSubmit={handleCreateCategory}
-                  >
-                    <select
-                      value={newCategoryParent}
-                      onChange={(event) => setNewCategoryParent(event.target.value)}
-                      aria-label="父分类"
-                    >
-                      <option value="">顶级分类</option>
-                      {resourceCategories
-                        .filter((category) => categoryDepth(category) < 3)
-                        .map((category) => (
-                          <option key={category.code} value={category.code}>
-                            {category.path || category.name}
-                          </option>
-                        ))}
-                    </select>
-                    <input
-                      value={newCategoryName}
-                      onChange={(event) => setNewCategoryName(event.target.value)}
-                      placeholder="例如：待研究项目"
-                      maxLength={50}
-                    />
-                    <input
-                      value={newCategoryDescription}
-                      onChange={(event) =>
-                        setNewCategoryDescription(event.target.value)
-                      }
-                      placeholder="给大模型的分类说明（可选）"
-                      maxLength={300}
-                    />
-                    <button type="submit" disabled={categorySubmitting}>
-                      添加分类
-                    </button>
-                  </form>
-                  <div className="custom-category-list">
-                    <CategorySettingsBranch
-                      nodes={categoryTree}
-                      expandedCodes={expandedCategoryCodes}
-                      addingChildToCode={addingChildToCode}
-                      renderChildComposer={(parent) => (
-                        <form
-                          className="custom-category-row custom-category-edit"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            void handleCreateChildCategory(parent.code);
-                          }}
-                        >
-                          <input
-                            ref={childNameRef}
-                            value={newChildName}
-                            onChange={(event) =>
-                              setNewChildName(event.target.value)
-                            }
-                            placeholder={`在「${parent.name}」下新建子分类`}
-                            maxLength={50}
-                            aria-label="子分类名称"
-                          />
-                          <input
-                            value={newChildDescription}
-                            onChange={(event) =>
-                              setNewChildDescription(event.target.value)
-                            }
-                            placeholder="分类说明（可选）"
-                            maxLength={300}
-                            aria-label="子分类说明"
-                          />
-                          <span className="custom-category-actions">
-                            <button type="submit" disabled={categorySubmitting}>
-                              保存
-                            </button>
-                            <button
-                              type="button"
-                              disabled={categorySubmitting}
-                              onClick={() => setAddingChildToCode(null)}
-                            >
-                              取消
-                            </button>
-                          </span>
-                        </form>
-                      )}
-                      renderRow={(category) => (
-                        <div className="custom-category-row">
-                          {editingCategoryId !== null &&
-                          editingCategoryId === category.id ? (
-                            <form
-                              className="custom-category-edit"
-                              onSubmit={(event) => {
-                                event.preventDefault();
-                                void handleSaveCategory(category);
-                              }}
-                            >
-                              <input
-                                value={editingCategoryName}
-                                onChange={(event) =>
-                                  setEditingCategoryName(event.target.value)
-                                }
-                                placeholder="分类名称"
-                                maxLength={50}
-                                aria-label="分类名称"
-                              />
-                              <input
-                                value={editingCategoryDescription}
-                                onChange={(event) =>
-                                  setEditingCategoryDescription(event.target.value)
-                                }
-                                placeholder="给大模型的分类说明（可选）"
-                                maxLength={300}
-                                aria-label="分类说明"
-                              />
-                              <span className="custom-category-actions">
-                                <button type="submit" disabled={categorySubmitting}>
-                                  保存
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={categorySubmitting}
-                                  onClick={() => setEditingCategoryId(null)}
-                                >
-                                  取消
-                                </button>
-                              </span>
-                            </form>
-                          ) : (
-                            <>
-                              {category.children.length > 0 ||
-                              addingChildToCode === category.code ? (
-                                <button
-                                  type="button"
-                                  className="category-expand-toggle"
-                                  aria-expanded={
-                                    expandedCategoryCodes.has(category.code) ||
-                                    addingChildToCode === category.code
-                                  }
-                                  aria-label={
-                                    expandedCategoryCodes.has(category.code) ||
-                                    addingChildToCode === category.code
-                                      ? `折叠${category.name}`
-                                      : `展开${category.name}`
-                                  }
-                                  onClick={() => {
-                                    if (addingChildToCode === category.code) {
-                                      setAddingChildToCode(null);
-                                    }
-                                    toggleCategoryExpanded(category.code);
-                                  }}
-                                >
-                                  {expandedCategoryCodes.has(category.code) ||
-                                  addingChildToCode === category.code
-                                    ? "▾"
-                                    : "▸"}
-                                </button>
-                              ) : (
-                                <span className="category-expand-spacer" />
-                              )}
-                              <span>
-                                <strong>
-                                  {category.is_system
-                                    ? `${category.name}（系统）`
-                                    : category.name}
-                                </strong>
-                                {category.children.length > 0 ? (
-                                  <small>
-                                    {expandedCategoryCodes.has(category.code)
-                                      ? `${category.children.length} 个子分类`
-                                      : `${category.children.length} 个子分类，点击展开`}
-                                  </small>
-                                ) : category.description ? (
-                                  <small>{category.description}</small>
-                                ) : null}
-                              </span>
-                              <span className="custom-category-actions">
-                                {categoryDepth(category) < 3 && (
-                                  <button
-                                    type="button"
-                                    disabled={categorySubmitting}
-                                    onClick={() => startAddChildCategory(category)}
-                                  >
-                                    添加子分类
-                                  </button>
-                                )}
-                                {!category.is_system && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      disabled={categorySubmitting}
-                                      onClick={() => startEditCategory(category)}
-                                    >
-                                      编辑
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={categorySubmitting}
-                                      onClick={() => void handleToggleCategory(category)}
-                                    >
-                                      {category.is_active ? "停用" : "启用"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={categorySubmitting}
-                                      onClick={() => void handleDeleteCategory(category)}
-                                    >
-                                      删除
-                                    </button>
-                                  </>
-                                )}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    />
-                  </div>
-                </div>
-                <div className="category-rule-column">
-                  <h3>自动分类规则</h3>
-                  <form
-                    className="category-rule-form"
-                    onSubmit={handleCreateCategoryRule}
-                  >
-                    <input
-                      value={newRuleName}
-                      onChange={(event) => setNewRuleName(event.target.value)}
-                      placeholder="规则名称（可选）"
-                      maxLength={100}
-                    />
-                    <div className="category-rule-fields">
-                      <select
-                        value={newRuleCategory}
-                        onChange={(event) => setNewRuleCategory(event.target.value)}
-                      >
-                        <option value="">选择分类</option>
-                        {resourceCategories
-                          .filter((category) => category.is_active)
-                          .map((category) => (
-                            <option key={category.code} value={category.code}>
-                              {category.path || category.name}
-                            </option>
-                          ))}
-                      </select>
-                      <select
-                        value={newRuleMatchType}
-                        onChange={(event) =>
-                          setNewRuleMatchType(
-                            event.target.value as ResourceCategoryRuleMatchType,
-                          )
-                        }
-                      >
-                        {Object.entries(resourceRuleMatchLabels).map(
-                          ([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </div>
-                    <div className="category-rule-fields">
-                      <input
-                        value={newRulePattern}
-                        onChange={(event) => setNewRulePattern(event.target.value)}
-                        placeholder={
-                          newRuleMatchType === "domain"
-                            ? "例如：github.com"
-                            : newRuleMatchType === "url"
-                              ? "例如：/research/"
-                              : "例如：深度学习"
-                        }
-                        maxLength={500}
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        max="10000"
-                        value={newRulePriority}
-                        onChange={(event) => setNewRulePriority(event.target.value)}
-                        aria-label="规则优先级"
-                        title="数字越小优先级越高"
-                      />
-                    </div>
-                    <button type="submit" disabled={categorySubmitting}>
-                      保存规则
-                    </button>
-                  </form>
-                  <div className="category-rule-list">
-                    {categoryRules.map((rule) => (
-                      <div className="category-rule-row" key={rule.id}>
-                        <span>
-                          <strong>{rule.category_label}</strong>
-                          <small>
-                            {resourceRuleMatchLabels[rule.match_type]}：{rule.pattern}
-                            {rule.priority !== 100 ? ` · 优先级 ${rule.priority}` : ""}
-                          </small>
-                        </span>
-                        <button
-                          type="button"
-                          disabled={categorySubmitting}
-                          onClick={() => void handleDeleteCategoryRule(rule)}
-                        >
-                          删除
-                        </button>
-                      </div>
-                    ))}
-                    {categoryRules.length === 0 && (
-                      <p className="category-settings-empty">
-                        还没有规则，域名规则最适合先整理常用网站。
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
           {message && (
             <div className="status-message" role="status">
               <span>{message}</span>
               {undoMemo && !duplicateWord && !duplicateResource && (
                 <button type="button" onClick={() => void handleUndoSave()}>撤销</button>
+              )}
+              {quickAccessUndo?.message === message && (
+                <button
+                  type="button"
+                  onClick={() => void changeQuickAccessHidden(quickAccessUndo.memo, false)}
+                >撤销</button>
               )}
               {duplicateWord && (
                 <span className="status-actions">
@@ -4842,13 +4444,22 @@ export default function App({ authUser, onLogout }: AppProps) {
             </div>
           )}
 
+          {activeType === "resource" && !resourceQuery.trim() && resourcePage === 1 && (
+            <QuickAccess
+              compact
+              items={quickAccessItems.slice(0, 4)}
+              onOpen={handleResourceOpened}
+              onRemove={(memo) => void changeQuickAccessHidden(memo, true)}
+            />
+          )}
+
           {activeType !== "review" && (
           <section className="recent-section" aria-labelledby="recent-title">
             <div className="section-heading">
               <h2 id="recent-title">
                 {viewQuery.trim()
                   ? `“${viewQuery.trim()}”的搜索结果`
-                  : copy.title}
+                  : activeType === "resource" ? "收藏列表" : copy.title}
               </h2>
               <div className="section-actions">
                 {activeType === "image" && <select aria-label="筛选图片分类" value={imageCategoryFilter}
@@ -4860,7 +4471,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                 <label>
                   <span className="sr-only">排序方式</span>
                   <select
-                    value={memoSort}
+                    value={memoSort === "opened_desc" && activeType !== "resource" ? "updated_desc" : memoSort}
                     onChange={(event) => {
                       setMemoSort(event.target.value as MemoSort);
                       setResourcePage(1);
@@ -4872,6 +4483,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                     <option value="created_asc">最早收藏</option>
                     <option value="title_asc">标题 A–Z</option>
                     <option value="title_desc">标题 Z–A</option>
+                    {activeType === "resource" && <option value="opened_desc">最常打开</option>}
                   </select>
                 </label>
                 {activeType === "resource" && (
@@ -4889,6 +4501,14 @@ export default function App({ authUser, onLogout }: AppProps) {
                       title="卡片视图"
                     >▦</button>
                   </span>
+                )}
+                {activeType === "resource" && (
+                  <button
+                    type="button"
+                    className="shortcut-help-button"
+                    onClick={() => setShortcutHelpOpen(true)}
+                    title="查看键盘快捷键（?）"
+                  >⌨ 快捷键</button>
                 )}
                 <button onClick={() => void loadCurrentMemos()}>刷新</button>
               </div>
@@ -4938,7 +4558,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                           setResourceCategoryFilter(category.code);
                           setResourcePage(1);
                         }}
-                      >{category.name}</button>
+                      >{category.path || category.name}</button>
                     ))}
                   <label className="star-filter-toggle">
                     <input
@@ -5060,9 +4680,10 @@ export default function App({ authUser, onLogout }: AppProps) {
                       (memo.id === selectedId ? " selected" : "")
                     }
                     key={memo.id}
+                    data-memo-id={memo.id}
                     onClick={() => {
                       if (activeType !== "trash" && memo.type === "resource") {
-                        setResourcePreviewMemo(memo);
+                        openResourcePreview(memo);
                       } else if (activeType !== "trash") {
                         selectMemo(memo);
                       }
@@ -5074,7 +4695,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         if (memo.type === "resource") {
-                          setResourcePreviewMemo(memo);
+                          openResourcePreview(memo);
                         } else {
                           selectMemo(memo);
                         }
@@ -5108,7 +4729,13 @@ export default function App({ authUser, onLogout }: AppProps) {
                           href={memo.source_url}
                           target="_blank"
                           rel="noreferrer"
-                          onClick={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleResourceOpened(memo);
+                          }}
+                          onAuxClick={(event) => {
+                            if (event.button === 1) handleResourceOpened(memo);
+                          }}
                         >
                           {memo.title}
                         </a>
@@ -5127,22 +4754,25 @@ export default function App({ authUser, onLogout }: AppProps) {
                               ? memo.body || "图片收藏"
                               : memo.body}
                       </span>
+                      {memo.type === "resource" && memo.tags.length > 0 && (
+                        <div className="resource-user-tags" aria-label="我的标签">
+                          {memo.tags.map((tag) => (
+                            <span key={tag} className="resource-user-tag">#{tag}</span>
+                          ))}
+                        </div>
+                      )}
                       {memo.type === "resource" && <ResourceClassificationInsight memo={memo} compact />}
                       <small className="memo-meta-line">
                         {memo.type === "resource"
                           ? (
                             <>
-                              {memo.source_url ? (
-                                <a
-                                  className="memo-url-link"
-                                  href={memo.source_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  {sourceHost(memo.source_url)} ↗
-                                </a>
-                              ) : sourceHost(memo.source_url)}
+                              {/* 标题已是原网页链接；无标题时标题就是站点名，不再重复。 */}
+                              {memo.title !== sourceHost(memo.source_url) && (
+                                <span className="memo-source-host">{sourceHost(memo.source_url)}</span>
+                              )}
+                              {memo.resource_open_count > 0 && (
+                                <span className="memo-open-count">打开 {memo.resource_open_count} 次</span>
+                              )}
                               {memo.ebook_path && (
                                 <span
                                   className="memo-ebook-badge"
@@ -5239,9 +4869,8 @@ export default function App({ authUser, onLogout }: AppProps) {
                               {resourceCategories
                                 .filter((category) => category.is_active)
                                 .map((category) => {
-                                  const selected = memoCategoryCodes(memo).includes(
-                                    category.code,
-                                  );
+                                  const selectedCodes = memoCategoryCodes(memo);
+                                  const selected = selectedCodes.includes(category.code);
                                   return (
                                     <label
                                       key={category.code}
@@ -5252,15 +4881,22 @@ export default function App({ authUser, onLogout }: AppProps) {
                                       <input
                                         type="checkbox"
                                         checked={selected}
-                                        disabled={updatingResourceId === memo.id}
+                                        disabled={
+                                          updatingResourceId === memo.id
+                                          || (
+                                            !selected
+                                            && selectedCodes.length >= MAX_MEMO_CATEGORIES
+                                          )
+                                        }
                                         onChange={() =>
                                           toggleMemoCategory(memo, category.code)
                                         }
                                       />
-                                      {category.name}
+                                      {category.path || category.name}
                                     </label>
                                   );
                                 })}
+                              <small>最多 8 个分类</small>
                             </div>
                           </details>
                           <button
@@ -5731,112 +5367,26 @@ export default function App({ authUser, onLogout }: AppProps) {
       )}
 
       {resourcePreviewMemo && (
-        <div className="dialog-backdrop">
-          <section
-            className="resource-preview-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="resource-preview-title"
-          >
-            <div className="dialog-header">
-              <div>
-                <span className="type-label">↗ 网页资料</span>
-                <h2 id="resource-preview-title">{resourcePreviewMemo.title}</h2>
-              </div>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="关闭网页资料预览"
-                onClick={() => setResourcePreviewMemo(null)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="resource-preview-content">
-              <label>
-                内容类型
-                <select
-                  value={resourcePreviewMemo.type}
-                  disabled={typeChangingId === resourcePreviewMemo.id}
-                  onChange={(event) =>
-                    void handleChangeMemoType(
-                      resourcePreviewMemo,
-                      event.target.value as MemoType,
-                    )
-                  }
-                >
-                  <option value="resource">网页资料</option>
-                  <option value="idea">灵感</option>
-                  <option value="word">英语单词</option>
-                </select>
-              </label>
-              {resourcePreviewMemo.resource_description && (
-                <p>{resourcePreviewMemo.resource_description}</p>
-              )}
-              <ResourceClassificationInsight memo={resourcePreviewMemo} />
-              {resourcePreviewMemo.body !== resourcePreviewMemo.source_url && (
-                <div className="resource-preview-note">
-                  <span>个人备注</span>
-                  <p>{resourcePreviewMemo.body}</p>
-                </div>
-              )}
-              <a
-                className="resource-preview-url"
-                href={resourcePreviewMemo.source_url ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {resourcePreviewMemo.source_url || "暂无来源网址"}
-              </a>
-              <span className="resource-preview-meta">
-                {resourcePreviewMemo.resource_site_name ||
-                  sourceHost(resourcePreviewMemo.source_url)}
-                {resourcePreviewMemo.link_health_status !== "unchecked" &&
-                  ` · 巡检：${resourcePreviewMemo.link_health_status}`}
-              </span>
-            </div>
-            <div className="dialog-actions resource-preview-actions">
-              <button
-                type="button"
-                onClick={() => void handleCopyResourceLink(resourcePreviewMemo)}
-                disabled={!resourcePreviewMemo.source_url}
-              >
-                复制链接
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleArchiveResource(resourcePreviewMemo)}
-                disabled={updatingResourceId === resourcePreviewMemo.id}
-              >
-                {updatingResourceId === resourcePreviewMemo.id ? "处理中…" : "归档"}
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                onClick={() => void handleMoveToTrash(resourcePreviewMemo)}
-              >
-                回收站
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => {
-                  if (resourcePreviewMemo.source_url) {
-                    window.open(
-                      resourcePreviewMemo.source_url,
-                      "_blank",
-                      "noopener,noreferrer",
-                    );
-                  }
-                }}
-                disabled={!resourcePreviewMemo.source_url}
-              >
-                打开原网页
-              </button>
-            </div>
-          </section>
-        </div>
+        <ResourcePreviewDialog
+          memo={resourcePreviewMemo}
+          categoryLabels={memoCategoryLabels(resourcePreviewMemo, resourceCategories)}
+          busy={updatingResourceId === resourcePreviewMemo.id}
+          typeChanging={typeChangingId === resourcePreviewMemo.id}
+          onClose={closeResourcePreview}
+          onSave={(changes) => saveResourceEdits(resourcePreviewMemo, changes)}
+          onCopyLink={() => void handleCopyResourceLink(resourcePreviewMemo)}
+          onArchive={() => void handleArchiveResource(resourcePreviewMemo)}
+          onTrash={() => void handleMoveToTrash(resourcePreviewMemo)}
+          onChangeType={(type) => void handleChangeMemoType(resourcePreviewMemo, type)}
+          onTagSearch={handleResourceTagSearch}
+          onOpenSource={openPreviewSource}
+          onQuickAccessHiddenChange={(hidden) =>
+            void changeQuickAccessHidden(resourcePreviewMemo, hidden)}
+          initialEditing={resourcePreviewEditing}
+        />
       )}
+
+      {shortcutHelpOpen && <ShortcutHelpDialog onClose={closeShortcutHelp} />}
 
       {conflictMemo && (
         <div className="conflict-backdrop">

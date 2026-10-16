@@ -32,16 +32,18 @@ export default function MemoBatchToolbar({ rows, selected, trash, onSelection, o
       setError(actionError instanceof Error ? actionError.message : "处理选中条目失败");
     } finally { setBusy(false); onBusy(false); }
   };
-  return <section className="memo-batch-toolbar" aria-label="选中条目操作">
+  // 没选中条目也没有结果提示时只留「全选」，不占一整张卡片。
+  const idle = items.length === 0 && !notice && !error;
+  return <section className={idle ? "memo-batch-toolbar idle" : "memo-batch-toolbar"} aria-label="选中条目操作">
     <div className="memo-batch-actions">
       <label><input type="checkbox" disabled={busy || rows.length === 0} checked={rows.length > 0 && items.length === rows.length}
         onChange={(event) => onSelection(event.target.checked ? new Map(rows.map((row) => [row.id, row])) : new Map())} />全选当前页</label>
-      <span>已选 {items.length} 条</span>
-      {trash ? <>
+      {!idle && <span>已选 {items.length} 条</span>}
+      {!idle && (trash ? <>
         <button type="button" disabled={busy || items.length === 0} onClick={() => void act("restore")}>还原选中</button>
         <button type="button" disabled={busy || items.length === 0} onClick={() => void act("permanent")}>永久删除选中</button>
-      </> : <button type="button" disabled={busy || items.length === 0} onClick={() => void act("trash")}>选中移入回收站</button>}
-      <button type="button" disabled={busy || items.length === 0} onClick={() => onSelection(new Map())}>取消选择</button>
+      </> : <button type="button" disabled={busy || items.length === 0} onClick={() => void act("trash")}>选中移入回收站</button>)}
+      {!idle && <button type="button" disabled={busy || items.length === 0} onClick={() => onSelection(new Map())}>取消选择</button>}
     </div>
     {notice && <p role="status">{notice}</p>}
     {details.length > 0 && <details open><summary>跳过原因</summary><ul>{details.map((text, index) => <li key={index}>{text}</li>)}</ul></details>}
