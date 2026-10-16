@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import WordPronunciation from "./WordPronunciation";
+import { sourceHost } from "./webUrl";
 import type {
   Memo,
   MemoType,
@@ -50,17 +51,6 @@ function formatReviewTime(value: string | null, empty: string): string {
     return empty;
   }
   return reviewTimeFormatter.format(new Date(value));
-}
-
-function sourceHost(sourceUrl: string | null): string {
-  if (!sourceUrl) {
-    return "网页资料";
-  }
-  try {
-    return new URL(sourceUrl).hostname.replace(/^www\./, "");
-  } catch {
-    return sourceUrl;
-  }
 }
 
 const reviewIntervalLabels = [

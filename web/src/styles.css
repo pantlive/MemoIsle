@@ -172,7 +172,8 @@ textarea:focus-visible {
 
 .account-block {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* 头像、账号、退出排在同一行，账号过长时省略。 */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
   margin-top: auto;
@@ -189,6 +190,7 @@ textarea:focus-visible {
 }
 
 .account-logout {
+  white-space: nowrap;
   border: 0;
   border-radius: 8px;
   background: var(--surface-subtle);
