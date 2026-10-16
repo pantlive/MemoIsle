@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import MetaData, create_engine, inspect, text
+from sqlalchemy import MetaData, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
+
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+SQLITE_LOCK_COMMIT_ATTEMPTS = 8
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -31,15 +37,42 @@ class Database:
     def __init__(self, database_url: str) -> None:
         self.database_url = database_url
         self._prepare_sqlite_directory(database_url)
-        engine_options: dict[str, Any] = {"pool_pre_ping": True}
+        engine_options: dict[str, Any] = {}
         if database_url.startswith("sqlite"):
-            engine_options["connect_args"] = {"check_same_thread": False}
+            # NullPool 避免后台循环各自建引擎后堆积连接；timeout 与 busy_timeout 对齐。
+            engine_options["connect_args"] = {
+                "check_same_thread": False,
+                "timeout": SQLITE_BUSY_TIMEOUT_MS / 1000,
+            }
+            engine_options["poolclass"] = NullPool
+        else:
+            engine_options["pool_pre_ping"] = True
         self.engine: Engine = create_engine(database_url, **engine_options)
+        if database_url.startswith("sqlite"):
+            self._enable_sqlite_concurrency()
         self.session_factory = sessionmaker(
             bind=self.engine,
             class_=Session,
             expire_on_commit=False,
         )
+
+    def _enable_sqlite_concurrency(self) -> None:
+        """让后台巡检与接口写入不再互相锁死。
+
+        SQLite 默认的回滚日志模式下，一个长时间读取（例如巡检占用连接读链接）
+        会挡住所有写入，前台保存直接报 “database is locked”。WAL 让读不阻塞写，
+        busy_timeout 让偶发的同时写入等待而不是立刻失败。
+        """
+
+        @event.listens_for(self.engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection: Any, _record: Any) -> None:
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            finally:
+                cursor.close()
 
     @staticmethod
     def _prepare_sqlite_directory(database_url: str) -> None:
@@ -292,6 +325,17 @@ class Database:
             "starred": (
                 "ALTER TABLE memo ADD COLUMN starred BOOLEAN NOT NULL DEFAULT 0"
             ),
+            "resource_open_count": (
+                "ALTER TABLE memo ADD COLUMN resource_open_count INTEGER "
+                "NOT NULL DEFAULT 0"
+            ),
+            "resource_last_opened_at": (
+                "ALTER TABLE memo ADD COLUMN resource_last_opened_at DATETIME"
+            ),
+            "resource_quick_access_hidden": (
+                "ALTER TABLE memo ADD COLUMN resource_quick_access_hidden BOOLEAN "
+                "NOT NULL DEFAULT 0"
+            ),
             "deleted_at": "ALTER TABLE memo ADD COLUMN deleted_at DATETIME",
             "status_before_trash": (
                 "ALTER TABLE memo ADD COLUMN status_before_trash VARCHAR(20)"
@@ -371,6 +415,12 @@ class Database:
                     "ALTER TABLE model_provider_setting "
                     "ADD COLUMN base_url VARCHAR(2048)",
                 ))
+            if "min_confidence" not in model_setting_columns:
+                # 空值继续使用服务器默认阈值，兼容升级前保存的账号配置。
+                connection.execute(text(
+                    "ALTER TABLE model_provider_setting "
+                    "ADD COLUMN min_confidence FLOAT",
+                ))
             for column_name, statement in user_migrations.items():
                 if column_name not in user_columns:
                     # 迁移语句来自固定映射，不拼接外部输入。
@@ -402,8 +452,7 @@ class Database:
                     "AND (resource_category_source IS NULL OR "
                     "resource_category_source NOT IN "
                     "('manual','user_rule','jev','llm')) "
-                    "AND link_health_status = 'healthy' "
-                    "AND resource_ai_review_required = 0 "
+                    "AND link_health_status != 'failed' "
                     "AND (json_extract(resource_ai_assessment, '$.status') "
                     "= 'uncertain' "
                     "OR EXISTS (SELECT 1 FROM resource_classification_job AS job, "
@@ -526,6 +575,15 @@ class Database:
                             "ADD COLUMN parent_code VARCHAR(50)"
                         )
                     )
+                # 分类口径：老模板补空列，判定时按“只给类名”降级处理。
+                for name in ("definition", "include_examples", "exclude_examples"):
+                    if name not in template_columns:
+                        connection.execute(
+                            text(
+                                "ALTER TABLE resource_category_template "
+                                f"ADD COLUMN {name} TEXT"
+                            )
+                        )
             if "resource_categories" in columns:
                 connection.execute(
                     text(
@@ -584,3 +642,29 @@ class Database:
         """释放数据库连接池。"""
 
         self.engine.dispose()
+
+
+def is_sqlite_lock_error(error: BaseException) -> bool:
+    """识别 SQLite 写锁冲突，便于提交层重试。"""
+
+    message = str(error).lower()
+    return "database is locked" in message or "database is busy" in message
+
+
+def commit_with_retry(
+    session: Session,
+    attempts: int = SQLITE_LOCK_COMMIT_ATTEMPTS,
+) -> None:
+    """提交会话；遇到 SQLite 锁时回滚后短暂重试，避免前台保存直接 500。"""
+
+    delay = 0.05
+    for attempt in range(attempts):
+        try:
+            session.commit()
+            return
+        except OperationalError as error:
+            if not is_sqlite_lock_error(error) or attempt == attempts - 1:
+                raise
+            session.rollback()
+            time.sleep(delay)
+            delay = min(delay * 2, 0.8)

@@ -15,6 +15,8 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.category_service import (
     category_code_exists,
+    category_exemplars,
+    category_rejected_examples,
     classification_categories,
     classification_rules,
 )
@@ -40,8 +42,8 @@ from app.resource_processing import (
     ResourceFetchError,
     ResourceMetadata,
     UnsafeResourceUrlError,
+    classify_resource,
     classify_resource_by_user_rules,
-    classify_resource_with_jev,
     fetch_resource_metadata,
 )
 from app.resource_service import fallback_metadata, metadata_fingerprint
@@ -62,7 +64,7 @@ class ResourceClassificationConfigurationError(ValueError):
 
 
 class ResourceClassificationStateError(ValueError):
-    """当前账号没有可继续的暂停任务。"""
+    """当前任务状态不允许这次操作。"""
 
 
 def never_stop() -> bool:
@@ -87,8 +89,7 @@ def pending_filters(automatic: bool = False) -> tuple[ColumnElement[bool], ...]:
     """规则分类不算完成模型处理；手动分类和明确用户规则优先保留。"""
 
     common = (
-        Memo.link_health_status == "healthy",
-        Memo.resource_ai_review_required.is_(False),
+        Memo.link_health_status != "failed",
         Memo.resource_ai_classified_at.is_(None),
         Memo.resource_ai_confirmation.is_(None),
         or_(
@@ -100,12 +101,30 @@ def pending_filters(automatic: bool = False) -> tuple[ColumnElement[bool], ...]:
 
 
 def confirmation_filters(user_id: str) -> tuple[ColumnElement[bool], ...]:
-    """分类复核仅包含可处理的未确定网页，巡检确认独立进行。"""
+    """分类复核仅包含可处理的未确定网页，确认失效的网页不进入复核。"""
 
     return (
         *resource_filters(user_id),
         *pending_filters(),
         Memo.resource_ai_confirmation_pending.is_(True),
+    )
+
+
+def classified_filters(user_id: str) -> tuple[ColumnElement[bool], ...]:
+    """可再次交给模型的已完成分类，不含人工确认、规则保护和确认失效。"""
+
+    return (
+        *resource_filters(user_id),
+        Memo.link_health_status != "failed",
+        Memo.resource_ai_confirmation.is_(None),
+        or_(
+            Memo.resource_ai_classified_at.is_not(None),
+            Memo.resource_category_source.in_(AI_SOURCES),
+        ),
+        or_(
+            Memo.resource_category_source.is_(None),
+            Memo.resource_category_source.not_in(PROTECTED_SOURCES),
+        ),
     )
 
 
@@ -156,10 +175,7 @@ def classification_state(
             .select_from(Memo)
             .where(
                 *filters,
-                or_(
-                    Memo.link_health_status != "healthy",
-                    Memo.resource_ai_review_required.is_(True),
-                ),
+                Memo.link_health_status == "failed",
             ),
         )
         or 0
@@ -176,6 +192,12 @@ def classification_state(
             .where(*confirmation_filters(user_id)),
         )
         or 0,
+        classified_retry_count=session.scalar(
+            select(func.count())
+            .select_from(Memo)
+            .where(*classified_filters(user_id)),
+        )
+        or 0,
         job=ResourceClassificationJobRead.model_validate(job) if job else None,
     )
 
@@ -185,18 +207,43 @@ def configured_settings(
     user_id: str,
     settings: Settings,
 ) -> Settings:
-    """验证分类模型可用；服务故障时不会改用规则伪装为完成。"""
+    """验证分类模型可用；DeepSeek 或 Jev 配置任一即可。"""
 
     resolved = resolve_model_settings(session, user_id, settings)
-    if not resolved.jev_api_key or not resolved.jev_model:
+    has_deepseek = bool(resolved.deepseek_api_key and resolved.deepseek_model)
+    has_jev = bool(resolved.jev_api_key and resolved.jev_model)
+    if not has_deepseek and not has_jev:
         raise ResourceClassificationConfigurationError(
-            "请在设置 → 模型服务中配置并启用 Jev",
+            "请在设置 → 模型服务中配置并启用 DeepSeek 或 Jev",
         )
-    if len(classification_categories(session, user_id)) > 255:
-        raise ResourceClassificationConfigurationError(
-            "Jev 一次最多支持 255 个启用分类，请减少启用的模板",
-        )
+    if has_jev and not has_deepseek:
+        if len(classification_categories(session, user_id)) > 255:
+            raise ResourceClassificationConfigurationError(
+                "Jev 一次最多支持 255 个启用分类，请减少启用的模板",
+            )
     return resolved
+
+
+def uses_deepseek(settings: Settings) -> bool:
+    """判定通道优先级：先按口径走 DeepSeek，再退回 Jev。"""
+
+    return bool(settings.deepseek_api_key and settings.deepseek_model)
+
+
+def classification_model(settings: Settings) -> str:
+    """当前实际生效的判定模型名，用于保存证据。"""
+
+    return settings.deepseek_model if uses_deepseek(settings) else settings.jev_model
+
+
+def classification_threshold(settings: Settings) -> float:
+    """当前实际生效的置信度阈值。"""
+
+    return (
+        settings.classification_min_confidence
+        if uses_deepseek(settings)
+        else settings.jev_min_confidence
+    )
 
 
 def start_classification_job(
@@ -221,11 +268,131 @@ def start_classification_job(
         ).all()
     )
     resolved = configured_settings(session, user_id, settings) if memo_ids else settings
+    return _publish_job(
+        session, user_id, current, resolved, memo_ids, automatic=automatic
+    )
+
+
+def retry_review_classifications(
+    session: Session,
+    user_id: str,
+    settings: Settings,
+) -> ResourceClassificationJob:
+    """把待确认网页重新送进模型队列，不沿用暂停任务里已处理过的失败项。"""
+
+    current = session.get(ResourceClassificationJob, user_id)
+    if current is not None and current.status in ACTIVE_STATUSES:
+        raise ResourceClassificationStateError(
+            "当前分类任务还在进行，请完成后再重新分类待确认网页",
+        )
+    memo_ids = list(
+        session.scalars(
+            select(Memo.id)
+            .where(*confirmation_filters(user_id))
+            .order_by(Memo.created_at.asc(), Memo.id.asc()),
+        ).all()
+    )
+    if not memo_ids:
+        if current is None:
+            return _publish_job(session, user_id, None, settings, [], automatic=False)
+        return current
+    resolved = configured_settings(session, user_id, settings)
+    # 同一事务里离开确认列表并发布队列；不改 version，后台写入才不会对不上。
+    session.execute(
+        update(Memo)
+        .where(Memo.id.in_(memo_ids), *confirmation_filters(user_id))
+        .values(
+            resource_ai_confirmation_pending=False,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    job = _publish_job(
+        session, user_id, current, resolved, memo_ids, automatic=False
+    )
+    remaining = set(job.memo_ids[job.processed_count :])
+    if remaining.issuperset(memo_ids):
+        return job
+    session.execute(
+        update(Memo)
+        .where(
+            Memo.id.in_(memo_ids),
+            Memo.resource_ai_confirmation_pending.is_(False),
+            *resource_filters(user_id),
+            *pending_filters(),
+        )
+        .values(
+            resource_ai_confirmation_pending=True,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    raise ResourceClassificationStateError(
+        "当前分类任务还在进行，请完成后再重新分类待确认网页",
+    )
+
+
+def retry_classified_classifications(
+    session: Session,
+    user_id: str,
+    settings: Settings,
+) -> ResourceClassificationJob:
+    """把已完成的模型分类重新送进队列，保留原分类直到有新结果。"""
+
+    current = session.get(ResourceClassificationJob, user_id)
+    if current is not None and current.status in ACTIVE_STATUSES:
+        raise ResourceClassificationStateError(
+            "当前分类任务还在进行，请完成后再重新分类已完成网页",
+        )
+    memo_ids = list(
+        session.scalars(
+            select(Memo.id)
+            .where(*classified_filters(user_id))
+            .order_by(Memo.created_at.asc(), Memo.id.asc()),
+        ).all()
+    )
+    if not memo_ids:
+        if current is None:
+            return _publish_job(session, user_id, None, settings, [], automatic=False)
+        return current
+    resolved = configured_settings(session, user_id, settings)
+    # 清掉完成标记并改成可进队列的来源；不改 version，后台写入才不会对不上。
+    session.execute(
+        update(Memo)
+        .where(Memo.id.in_(memo_ids), *classified_filters(user_id))
+        .values(
+            resource_ai_classified_at=None,
+            resource_category_source="fallback",
+            resource_ai_confirmation_pending=False,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    job = _publish_job(
+        session, user_id, current, resolved, memo_ids, automatic=False
+    )
+    remaining = set(job.memo_ids[job.processed_count :])
+    if remaining.issuperset(memo_ids):
+        return job
+    raise ResourceClassificationStateError(
+        "当前分类任务还在进行，请完成后再重新分类已完成网页",
+    )
+
+
+def _publish_job(
+    session: Session,
+    user_id: str,
+    current: ResourceClassificationJob | None,
+    settings: Settings,
+    memo_ids: list[str],
+    *,
+    automatic: bool,
+) -> ResourceClassificationJob:
+    """覆盖未在运行的任务队列。"""
+
     now = datetime.now(UTC)
     values = {
         "id": str(uuid4()),
         "status": "pending" if memo_ids else "completed",
-        "model": resolved.jev_model,
+        "model": settings.jev_model,
         "automatic": automatic,
         "memo_ids": memo_ids,
         "total_count": len(memo_ids),
@@ -251,7 +418,7 @@ def start_classification_job(
             # 账号主键约束处理首次并发启动，沿用已经发布的任务。
             session.rollback()
     else:
-        session.execute(
+        result = session.execute(
             update(ResourceClassificationJob)
             .where(
                 ResourceClassificationJob.user_id == user_id,
@@ -260,7 +427,10 @@ def start_classification_job(
             )
             .values(**values),
         )
-        session.commit()
+        if result.rowcount != 1:
+            session.rollback()
+        else:
+            session.commit()
     session.expire_all()
     job = session.get(ResourceClassificationJob, user_id)
     assert job is not None
@@ -337,7 +507,7 @@ def prepare_classification_metadata(
     memo: Memo,
     settings: Settings,
 ) -> ResourceMetadata | None:
-    """补充公开正文并缓存；发现新的巡检问题时暂缓，不调用模型。"""
+    """补充公开正文并缓存；新的巡检问题写入巡检中心，仅确认失效跳过模型。"""
 
     metadata = fallback_metadata(memo)
     if (
@@ -409,7 +579,9 @@ def prepare_classification_metadata(
         .values(**values)
     )
     session.commit()
-    if health_status or result.rowcount != 1:
+    if result.rowcount != 1:
+        return None
+    if health_status == "failed":
         return None
     session.expire_all()
     current = session.get(Memo, memo_id)
@@ -751,13 +923,31 @@ def process_classification_job(
                 processed += 1
                 continue
             session.rollback()
-            decision = classify_resource_with_jev(
+            decision = classify_resource(
                 metadata,
-                categories,
-                resolved.jev_api_key or "",
-                resolved.jev_base_url,
-                resolved.jev_model,
-                resolved.jev_min_confidence,
+                llm_base_url=resolved.llm_base_url,
+                llm_api_key=resolved.llm_api_key,
+                llm_model=resolved.llm_model,
+                user_rules=classification_rules(session, user_id),
+                category_options=categories,
+                jev_api_key=resolved.jev_api_key,
+                jev_base_url=resolved.jev_base_url,
+                jev_model=resolved.jev_model,
+                jev_min_confidence=resolved.jev_min_confidence,
+                deepseek_api_key=resolved.deepseek_api_key,
+                deepseek_base_url=resolved.deepseek_base_url,
+                deepseek_model=resolved.deepseek_model,
+                deepseek_timeout_seconds=resolved.deepseek_timeout_seconds,
+                classification_min_confidence=(
+                    resolved.classification_min_confidence
+                ),
+                exemplars=category_exemplars(session, user_id, categories),
+                rejected_examples=category_rejected_examples(
+                    session, user_id, categories
+                ),
+                raise_service_errors=True,
+                # 批量分类以模型判定为准，不因关键词命中就跳过。
+                consult_model_always=True,
             )
         except (
             ResourceClassificationConfigurationError,
@@ -794,8 +984,8 @@ def process_classification_job(
                 if isinstance(error, UncertainClassificationError)
                 else empty_assessment(
                     "invalid_response",
-                    resolved.jev_min_confidence,
-                    resolved.jev_model,
+                    classification_threshold(resolved),
+                    classification_model(resolved),
                     bool(metadata.text_excerpt),
                     metadata.text_excerpt,
                 ),

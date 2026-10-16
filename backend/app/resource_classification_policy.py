@@ -2,7 +2,7 @@
 
 from app.models import Memo
 
-# 与巡检中心待处理筛选一致；忽略的条目同样暂缓模型调用。
+# 与巡检中心待处理筛选一致；分类队列只排除确认失效。
 REVIEW_HEALTH_STATUSES = frozenset(
     {
         "failed",
@@ -15,9 +15,9 @@ REVIEW_HEALTH_STATUSES = frozenset(
 
 
 def health_allows_ai_classification(memo: Memo) -> bool:
-    """网页可正常访问且没有未完成的人工确认，才允许调用分类模型。"""
+    """确认失效的网页不进入模型分类，其余巡检状态仍可分类。"""
 
-    return memo.link_health_status == "healthy" and not memo.resource_ai_review_required
+    return memo.link_health_status != "failed"
 
 
 def apply_classification_health_gate(

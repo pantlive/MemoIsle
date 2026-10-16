@@ -156,3 +156,4 @@ def test_deletion_notifications_are_account_scoped(client: TestClient) -> None:
         ).status_code
         == 201
     )
+

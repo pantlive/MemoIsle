@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
@@ -12,8 +13,12 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.database import commit_with_retry
 from app.models import BrowserBookmarkSnapshot, BrowserCapture, BrowserOpenTab
-from app.resource_processing import validate_public_resource_url
+from app.resource_processing import (
+    validate_browser_tab_url,
+    validate_public_resource_url,
+)
 from app.schemas import (
     BrowserBookmarkDeltaSyncRequest,
     BrowserBookmarkSnapshotRead,
@@ -27,6 +32,9 @@ from app.schemas import (
 PublicUrlValidator = Callable[[str], str]
 OPEN_TAB_STALE_AFTER = timedelta(minutes=10)
 MAX_BOOKMARK_SNAPSHOT_ITEMS = 5_000
+TAB_SYNC_LOCK_TIMEOUT_SECONDS = 1.0
+TAB_SYNC_COMMIT_ATTEMPTS = 3
+_TAB_SYNC_LOCK = threading.Lock()
 
 
 class BrowserCaptureOriginError(PermissionError):
@@ -178,22 +186,15 @@ def sync_open_browser_tabs(
     user_id: str,
     payload: BrowserTabSyncRequest,
     request_origin: str | None,
-    url_validator: PublicUrlValidator = validate_public_resource_url,
+    url_validator: PublicUrlValidator = validate_browser_tab_url,
 ) -> int:
     """同步当前浏览器所有可收藏的 HTTP(S) 标签页。"""
 
     expected_origin = f"chrome-extension://{payload.extension_id}"
     if request_origin != expected_origin:
         raise BrowserCaptureOriginError
-    now = datetime.now(UTC)
-    existing_pages = session.scalars(
-        select(BrowserOpenTab).where(
-            BrowserOpenTab.user_id == user_id,
-            BrowserOpenTab.extension_id == payload.extension_id,
-        )
-    ).all()
+    prepared: list[tuple[int, int | None, str, str, str | None]] = []
     seen_tab_ids: set[int] = set()
-    synced_count = 0
     for tab in payload.tabs:
         if tab.tab_id in seen_tab_ids:
             continue
@@ -209,26 +210,44 @@ def sync_open_browser_tabs(
             except (OSError, ValueError):
                 # 图标不可用不应阻止当前打开网页进入选择器。
                 favicon_url = None
-        _upsert_open_tab(
-            session,
-            user_id,
-            payload.extension_id,
-            tab.tab_id,
-            tab.window_id,
-            page_url,
-            tab.page_title,
-            favicon_url,
-            now,
+        prepared.append(
+            (tab.tab_id, tab.window_id, page_url, tab.page_title, favicon_url),
         )
         seen_tab_ids.add(tab.tab_id)
-        synced_count += 1
 
-    # 快照中缺失的标签页已关闭，Web 下次输入 @ 时不会继续展示。
-    for page in existing_pages:
-        if page.tab_id not in seen_tab_ids:
-            page.status = "closed"
-    session.commit()
-    return synced_count
+    now = datetime.now(UTC)
+    # 抢不到锁说明已有快照在写；丢掉这次以免占住请求线程。
+    if not _TAB_SYNC_LOCK.acquire(timeout=TAB_SYNC_LOCK_TIMEOUT_SECONDS):
+        return 0
+    try:
+        with session.no_autoflush:
+            existing_pages = session.scalars(
+                select(BrowserOpenTab).where(
+                    BrowserOpenTab.user_id == user_id,
+                    BrowserOpenTab.extension_id == payload.extension_id,
+                )
+            ).all()
+            for tab_id, window_id, page_url, page_title, favicon_url in prepared:
+                _upsert_open_tab(
+                    session,
+                    user_id,
+                    payload.extension_id,
+                    tab_id,
+                    window_id,
+                    page_url,
+                    page_title,
+                    favicon_url,
+                    now,
+                )
+
+            # 快照中缺失的标签页已关闭，Web 下次输入 @ 时不会继续展示。
+            for page in existing_pages:
+                if page.tab_id not in seen_tab_ids:
+                    page.status = "closed"
+            commit_with_retry(session, attempts=TAB_SYNC_COMMIT_ATTEMPTS)
+    finally:
+        _TAB_SYNC_LOCK.release()
+    return len(prepared)
 
 
 def list_open_browser_tabs(

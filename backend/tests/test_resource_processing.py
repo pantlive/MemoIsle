@@ -17,6 +17,7 @@ from app.resource_processing import (
     classify_resource,
     classify_resource_by_rules,
     fetch_resource_metadata,
+    validate_browser_tab_url,
     validate_public_resource_url,
 )
 from app.resource_service import enrich_resource
@@ -33,6 +34,27 @@ def test_private_resource_url_is_rejected() -> None:
             "http://internal.example/secret",
             resolver=lambda _host, _port: ["127.0.0.1"],
         )
+
+
+def test_browser_tab_url_skips_dns_and_rejects_literal_private_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """标签页快照不能做 DNS，否则扩展连刷会堵死收藏请求。"""
+
+    def boom(_hostname: str, _port: int, **_kwargs: object) -> list[object]:
+        raise AssertionError("tab snapshot must not resolve DNS")
+
+    monkeypatch.setattr("app.resource_processing.socket.getaddrinfo", boom)
+    assert (
+        validate_browser_tab_url("https://example.com/guide")
+        == "https://example.com/guide"
+    )
+    with pytest.raises(UnsafeResourceUrlError, match="non_public_ip"):
+        validate_browser_tab_url("http://127.0.0.1/private")
+    with pytest.raises(UnsafeResourceUrlError, match="local_hostname"):
+        validate_browser_tab_url("http://localhost/admin")
+    with pytest.raises(UnsafeResourceUrlError, match="invalid_scheme"):
+        validate_browser_tab_url("chrome://extensions")
 
 
 def test_fetch_metadata_validates_redirect_and_extracts_html() -> None:
@@ -313,6 +335,98 @@ def test_category_hierarchy_and_multi_assign(client: TestClient) -> None:
     remaining = client.get(f"/api/v1/memos/{memo_id}")
     assert remaining.json()["resource_categories"] == ["article"]
     assert remaining.json()["resource_category"] == "article"
+
+
+def test_delete_category_rewrites_image_memos(client: TestClient) -> None:
+    """删除自定义分类时，图片上的同一编码也要清掉。"""
+
+    created = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "image",
+            "title": "课堂照片",
+            "body": "板书",
+        },
+    )
+    assert created.status_code == 201
+    custom = client.post("/api/v1/resource-categories", json={"name": "课堂笔记"})
+    assert custom.status_code == 201
+    assigned = client.patch(
+        f"/api/v1/memos/{created.json()['id']}",
+        json={
+            "expected_version": created.json()["version"],
+            "resource_categories": [custom.json()["code"], "article"],
+        },
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["resource_categories"] == [
+        custom.json()["code"],
+        "article",
+    ]
+
+    deleted = client.delete(f"/api/v1/resource-categories/{custom.json()['id']}")
+    assert deleted.status_code == 200
+    remaining = client.get(f"/api/v1/memos/{created.json()['id']}")
+    assert remaining.json()["resource_categories"] == ["article"]
+    assert remaining.json()["resource_category"] == "article"
+
+
+def test_user_rule_extra_categories_bump_version(client: TestClient) -> None:
+    """附加分类变化也要增加 version，避免打开中的编辑器用旧快照覆盖。"""
+
+    created = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "title": "规则网页",
+            "body": "备注",
+            "source_url": "https://rules.example.com/page",
+        },
+    )
+    assert created.status_code == 201
+    primary = client.post("/api/v1/resource-categories", json={"name": "规则主类"})
+    extra = client.post("/api/v1/resource-categories", json={"name": "规则附加"})
+    other = client.post("/api/v1/resource-categories", json={"name": "规则另一附加"})
+    assert primary.status_code == extra.status_code == other.status_code == 201
+    first_rule = client.post(
+        "/api/v1/resource-category-rules",
+        json={
+            "category_code": primary.json()["code"],
+            "match_type": "domain",
+            "pattern": "rules.example.com",
+            "priority": 10,
+        },
+    )
+    second_rule = client.post(
+        "/api/v1/resource-category-rules",
+        json={
+            "category_code": extra.json()["code"],
+            "match_type": "domain",
+            "pattern": "rules.example.com",
+            "priority": 20,
+        },
+    )
+    assert first_rule.status_code == second_rule.status_code == 201
+
+    before = client.get(f"/api/v1/memos/{created.json()['id']}").json()
+    assert before["resource_category"] == primary.json()["code"]
+    assert extra.json()["code"] in before["resource_categories"]
+
+    changed = client.patch(
+        f"/api/v1/resource-category-rules/{second_rule.json()['id']}",
+        json={
+            "expected_version": second_rule.json()["version"],
+            "category_code": other.json()["code"],
+        },
+    )
+    assert changed.status_code == 200
+    after = client.get(f"/api/v1/memos/{created.json()['id']}").json()
+    assert after["resource_category"] == primary.json()["code"]
+    assert other.json()["code"] in after["resource_categories"]
+    assert extra.json()["code"] not in after["resource_categories"]
+    assert after["version"] > before["version"]
 
 
 def test_enrichment_updates_metadata_category_and_search(tmp_path: Path) -> None:

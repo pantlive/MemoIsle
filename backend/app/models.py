@@ -344,7 +344,7 @@ class Memo(Base):
     resource_ai_classified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
-    # 等待人工确认的网页即使自动巡检恢复，也不能直接调用模型。
+    # 巡检中心待确认标记；分类队列只排除确认失效，不看此字段。
     resource_ai_review_required: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
@@ -358,7 +358,7 @@ class Memo(Base):
     resource_ai_assessment: Mapped[dict[str, object] | None] = mapped_column(
         JSON, nullable=True,
     )
-    # 分类复核与网页巡检分别记录，避免把巡检待确认网页送入分类确认队列。
+    # 分类复核与网页巡检分别记录；确认失效的网页不进入分类确认队列。
     resource_ai_confirmation_pending: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
@@ -526,6 +526,17 @@ class Memo(Base):
         default=list,
     )
     starred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 网页资料的打开统计只是使用记录，更新时不改动版本号和 updated_at。
+    resource_open_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
+    resource_last_opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # 用户从快速访问移除后继续计数，只是不再出现在快速访问里。
+    resource_quick_access_hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+    )
     status: Mapped[MemoStatus] = mapped_column(
         Enum(
             MemoStatus,
@@ -824,6 +835,10 @@ class ResourceCategoryTemplate(Base):
     parent_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # 分类口径：模型判定这个类别时的判据、正例与边界反例，每行一条。
+    definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    include_examples: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exclude_examples: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
@@ -888,6 +903,8 @@ class ModelProviderSetting(Base):
     # 空值继续使用服务器默认地址，兼容升级前保存的账号配置。
     base_url: Mapped[str | None] = mapped_column(String(2048))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 自动分类的置信度阈值；空值继续使用服务器默认值。
+    min_confidence: Mapped[float | None] = mapped_column(Float)
     credential_cipher: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now,

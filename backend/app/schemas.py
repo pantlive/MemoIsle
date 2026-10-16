@@ -71,6 +71,8 @@ class ModelSettingUpdate(BaseModel):
     enabled: bool = True
     api_key: SecretStr | None = None
     base_url: str | None = Field(default=None, max_length=2_048)
+    # 低于该置信度的分类结果进人工确认中心；留空沿用原值。
+    min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("base_url")
     @classmethod
@@ -104,6 +106,9 @@ class ModelSettingRead(BaseModel):
     credential_source: Literal["account", "environment", "none"]
     has_custom_settings: bool
     error: str | None = None
+    # 生效的自动分类置信度阈值，以及服务器默认值。
+    min_confidence: float = 0.7
+    default_min_confidence: float = 0.7
 
 
 class ModelConnectionResult(BaseModel):
@@ -336,6 +341,7 @@ class MemoSort(StrEnum):
     CREATED_ASC = "created_asc"
     TITLE_ASC = "title_asc"
     TITLE_DESC = "title_desc"
+    OPENED_DESC = "opened_desc"
 
 
 class ReviewFeedback(StrEnum):
@@ -436,6 +442,7 @@ class ResourceClassificationState(BaseModel):
     protected_count: int
     deferred_count: int = 0
     review_count: int = 0
+    classified_retry_count: int = 0
     job: ResourceClassificationJobRead | None
 
 
@@ -482,7 +489,8 @@ class ResourceClassificationReviewRequest(BaseModel):
 
     action: Literal["adopt", "keep", "assign"]
     items: list[ResourceClassificationReviewSelection] = Field(
-        min_length=1, max_length=100,
+        min_length=1,
+        max_length=100,
     )
     category_code: str | None = Field(default=None, max_length=100)
 
@@ -504,9 +512,16 @@ class ResourceClassificationReviewResultItem(BaseModel):
 
     memo_id: UUID
     status: Literal["updated", "skipped"]
-    reason: Literal[
-        "missing", "conflict", "not_pending", "no_candidate", "category_unavailable",
-    ] | None = None
+    reason: (
+        Literal[
+            "missing",
+            "conflict",
+            "not_pending",
+            "no_candidate",
+            "category_unavailable",
+        ]
+        | None
+    ) = None
 
 
 class ResourceClassificationReviewResult(BaseModel):
@@ -597,12 +612,12 @@ class MemoCreate(BaseModel):
 
         return normalize_source_url(value)
 
-    @field_validator("source_title")
+    @field_validator("title", "source_title", mode="before")
     @classmethod
-    def normalize_source_title(cls, value: str | None) -> str | None:
-        """清理可选来源标题。"""
+    def normalize_titles(cls, value: object) -> object:
+        """浏览器标题常超过字段上限，截断后仍可收藏。"""
 
-        return normalize_optional_text(value)
+        return truncate_optional_text(value, 200)
 
     @model_validator(mode="after")
     def validate_resource_url(self) -> MemoCreate:
@@ -661,6 +676,13 @@ class MemoUpdate(BaseModel):
 
         return normalize_source_url(value)
 
+    @field_validator("title", "source_title", mode="before")
+    @classmethod
+    def normalize_titles(cls, value: object) -> object:
+        """更新时同样截断过长标题，避免编辑网页资料时 422。"""
+
+        return truncate_optional_text(value, 200)
+
     @field_validator("resource_category")
     @classmethod
     def normalize_resource_category(cls, value: str | None) -> str | None:
@@ -680,9 +702,7 @@ class MemoUpdate(BaseModel):
             return None
         return list(
             dict.fromkeys(
-                code
-                for item in value
-                if (code := normalize_optional_text(item))
+                code for item in value if (code := normalize_optional_text(item))
             ),
         )
 
@@ -782,6 +802,9 @@ class MemoRead(BaseModel):
     tags: list[str]
     collections: list[str]
     starred: bool
+    resource_open_count: int = 0
+    resource_last_opened_at: datetime | None = None
+    resource_quick_access_hidden: bool = False
     status: MemoStatus
     deleted_at: datetime | None = None
     version: int
@@ -813,6 +836,7 @@ class MemoRead(BaseModel):
         "link_last_success_at",
         "link_next_check_at",
         "image_ocr_updated_at",
+        "resource_last_opened_at",
     )
     def serialize_utc_datetime(self, value: datetime | None) -> str | None:
         """SQLite 返回无时区时间时，按服务端统一的 UTC 约定输出。"""
@@ -821,6 +845,32 @@ class MemoRead(BaseModel):
             return None
         resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
         return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class ResourceOpenRead(BaseModel):
+    """记录一次网页资料打开后的统计。"""
+
+    resource_open_count: int
+    resource_last_opened_at: datetime
+
+    @field_serializer("resource_last_opened_at")
+    def serialize_opened_at(self, value: datetime) -> str:
+        """与条目时间字段一致，统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class ResourceQuickAccessUpdate(BaseModel):
+    """从快速访问移除或恢复一条网页资料。"""
+
+    hidden: bool
+
+
+class ResourceQuickAccessRead(BaseModel):
+    """快速访问显示状态。"""
+
+    resource_quick_access_hidden: bool
 
 
 class MemoListResponse(BaseModel):
@@ -848,6 +898,9 @@ class ResourceCategoryRead(BaseModel):
     code: str
     name: str
     description: str | None
+    definition: str | None = None
+    include_examples: str | None = None
+    exclude_examples: str | None = None
     is_system: bool
     is_active: bool
     version: int
@@ -861,38 +914,60 @@ class ResourceCategoryCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=50)
     description: str | None = Field(default=None, max_length=300)
+    definition: str | None = Field(default=None, max_length=600)
+    include_examples: str | None = Field(default=None, max_length=800)
+    exclude_examples: str | None = Field(default=None, max_length=800)
     parent_code: str | None = Field(default=None, max_length=50)
 
-    @field_validator("name", "description", "parent_code")
+    @field_validator(
+        "name",
+        "description",
+        "definition",
+        "include_examples",
+        "exclude_examples",
+        "parent_code",
+    )
     @classmethod
     def normalize_text(cls, value: str | None) -> str | None:
-        """清理分类名称、说明和父分类。"""
+        """清理分类名称、说明、口径与父分类。"""
 
         return normalize_optional_text(value)
 
 
-class ResourceCategoryGenerateRequest(BaseModel):
-    """根据用户整理要求生成分类模板建议。"""
+class ResourceCategoryGenerateMode(StrEnum):
+    """聚类分两步：先确认顶级分类，够用后再细分。"""
 
-    instructions: str = Field(min_length=1, max_length=2_000)
-    max_categories: int = Field(default=6, ge=1, le=12)
+    TOP_LEVEL = "top_level"
+    SUBCATEGORIES = "subcategories"
+
+
+class ResourceCategoryGenerateRequest(BaseModel):
+    """根据整理要求和收藏网页聚类生成分类模板建议。"""
+
+    instructions: str = Field(default="", max_length=2_000)
+    max_categories: int = Field(default=12, ge=1, le=12)
+    mode: ResourceCategoryGenerateMode = ResourceCategoryGenerateMode.SUBCATEGORIES
 
     @field_validator("instructions")
     @classmethod
     def normalize_instructions(cls, value: str) -> str:
-        """拒绝空白要求，避免模型生成无关目录。"""
+        """允许留空，空要求时改用收藏网页聚类。"""
 
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("请说明你希望怎样整理分类")
-        return cleaned
+        return value.strip()
+
+
+class ResourceCategorySuggestion(ResourceCategoryCreate):
+    """聚类标签；已有模板带 existing_code，examples 便于对照网页。"""
+
+    existing_code: str | None = Field(default=None, max_length=80)
+    examples: list[str] = Field(default_factory=list, max_length=5)
 
 
 class ResourceCategoryGenerateResponse(BaseModel):
     """模型生成的类别建议；使用现有创建接口加入模板。"""
 
     model: str
-    categories: list[ResourceCategoryCreate] = Field(max_length=12)
+    categories: list[ResourceCategorySuggestion] = Field(max_length=12)
 
 
 class ResourceCategoryUpdate(BaseModel):
@@ -901,13 +976,23 @@ class ResourceCategoryUpdate(BaseModel):
     expected_version: int = Field(ge=1)
     name: str | None = Field(default=None, max_length=50)
     description: str | None = Field(default=None, max_length=300)
+    definition: str | None = Field(default=None, max_length=600)
+    include_examples: str | None = Field(default=None, max_length=800)
+    exclude_examples: str | None = Field(default=None, max_length=800)
     is_active: bool | None = None
     parent_code: str | None = Field(default=None, max_length=50)
 
-    @field_validator("name", "description", "parent_code")
+    @field_validator(
+        "name",
+        "description",
+        "definition",
+        "include_examples",
+        "exclude_examples",
+        "parent_code",
+    )
     @classmethod
     def normalize_text(cls, value: str | None) -> str | None:
-        """清理分类名称、说明和父分类。"""
+        """清理分类名称、说明、口径和父分类。"""
 
         return normalize_optional_text(value)
 
@@ -1167,8 +1252,8 @@ class ImageOrganizationJobRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    action: Literal['ocr', 'classify', 'ocr_classify']
-    status: Literal['pending', 'processing', 'completed', 'failed']
+    action: Literal["ocr", "classify", "ocr_classify"]
+    status: Literal["pending", "processing", "completed", "failed"]
     total_count: int
     processed_count: int
     succeeded_count: int
@@ -1187,15 +1272,15 @@ class MemoBatchSelection(BaseModel):
 class MemoBatchRequest(BaseModel):
     """只对选中条目操作，不隐式覆盖筛选结果或整个回收站。"""
 
-    action: Literal['trash', 'restore', 'permanent']
+    action: Literal["trash", "restore", "permanent"]
     items: list[MemoBatchSelection] = Field(min_length=1, max_length=100)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def unique_items(self) -> MemoBatchRequest:
         """重复标识会造成重复版本操作，因此整批拒绝。"""
 
         if len({item.memo_id for item in self.items}) != len(self.items):
-            raise ValueError('不能重复选择同一条内容')
+            raise ValueError("不能重复选择同一条内容")
         return self
 
 
@@ -1203,8 +1288,8 @@ class MemoBatchResultItem(BaseModel):
     """冲突和状态变化只返回固定编码。"""
 
     memo_id: UUID
-    status: Literal['updated', 'skipped']
-    reason: Literal['missing', 'conflict', 'not_applicable'] | None = None
+    status: Literal["updated", "skipped"]
+    reason: Literal["missing", "conflict", "not_applicable"] | None = None
 
 
 class MemoBatchResult(BaseModel):
@@ -1218,20 +1303,20 @@ class MemoBatchResult(BaseModel):
 class ImageOrganizationRequest(BaseModel):
     """全库处理未完成图片，或只处理显式勾选的版本。"""
 
-    action: Literal['ocr', 'classify', 'ocr_classify'] = 'ocr'
-    scope: Literal['all', 'selected'] = 'selected'
+    action: Literal["ocr", "classify", "ocr_classify"] = "ocr"
+    scope: Literal["all", "selected"] = "selected"
     items: list[MemoBatchSelection] = Field(default_factory=list, max_length=100)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_selection(self) -> ImageOrganizationRequest:
         """拒绝空选择、重复选择及含糊的全库请求。"""
 
-        if self.scope == 'selected' and not self.items:
-            raise ValueError('请选择需要处理的图片')
-        if self.scope == 'all' and self.items:
-            raise ValueError('全库处理不需要选择条目')
+        if self.scope == "selected" and not self.items:
+            raise ValueError("请选择需要处理的图片")
+        if self.scope == "all" and self.items:
+            raise ValueError("全库处理不需要选择条目")
         if len({item.memo_id for item in self.items}) != len(self.items):
-            raise ValueError('不能重复选择同一张图片')
+            raise ValueError("不能重复选择同一张图片")
         return self
 
 
@@ -1679,17 +1764,43 @@ class BrowserCaptureCreate(BaseModel):
     page_title: str = Field(default="", max_length=300)
     favicon_url: str | None = Field(default=None, max_length=2_048)
 
-    @field_validator("page_url", "favicon_url")
+    @field_validator("page_url")
     @classmethod
     def validate_capture_url(cls, value: str | None) -> str | None:
         """只接受扩展可明确识别的 HTTP(S) 页面地址。"""
 
         return normalize_source_url(value)
 
-    @field_validator("page_title", "nonce")
+    @field_validator("favicon_url", mode="before")
     @classmethod
-    def normalize_capture_text(cls, value: str) -> str:
-        """清理扩展提交的短文本。"""
+    def normalize_capture_favicon(cls, value: object) -> object:
+        """图标过长或非公网地址时丢弃，不阻止当前页收藏。"""
+
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > 2_048:
+            return None
+        try:
+            return normalize_source_url(cleaned)
+        except ValueError:
+            return None
+
+    @field_validator("page_title", mode="before")
+    @classmethod
+    def normalize_capture_title(cls, value: object) -> object:
+        """浏览器标题可能超过 300 字，截断后仍可授权收藏。"""
+
+        if not isinstance(value, str):
+            return value
+        return " ".join(value.split()).strip()[:300]
+
+    @field_validator("nonce")
+    @classmethod
+    def normalize_capture_nonce(cls, value: str) -> str:
+        """清理扩展提交的一次性随机数。"""
 
         return value.strip()
 
@@ -1732,19 +1843,35 @@ class BrowserTabSyncItem(BaseModel):
     page_title: str = Field(default="", max_length=300)
     favicon_url: str | None = Field(default=None, max_length=2_048)
 
-    @field_validator("page_url", "favicon_url")
+    @field_validator("page_url")
     @classmethod
     def normalize_tab_url(cls, value: str | None) -> str | None:
         """清理标签页地址，公网校验由服务端统一执行。"""
 
         return normalize_optional_text(value)
 
-    @field_validator("page_title")
+    @field_validator("favicon_url", mode="before")
     @classmethod
-    def normalize_tab_title(cls, value: str) -> str:
-        """清理标签页标题。"""
+    def normalize_tab_favicon(cls, value: object) -> object:
+        """data: 图标常超过 2048，丢弃后不影响标签页进入选择器。"""
 
-        return " ".join(value.split()).strip()
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > 2_048:
+            return None
+        return cleaned
+
+    @field_validator("page_title", mode="before")
+    @classmethod
+    def normalize_tab_title(cls, value: object) -> object:
+        """清理并截断标签页标题。"""
+
+        if not isinstance(value, str):
+            return value
+        return " ".join(value.split()).strip()[:300]
 
 
 class BrowserTabSyncRequest(BaseModel):
@@ -1752,6 +1879,24 @@ class BrowserTabSyncRequest(BaseModel):
 
     extension_id: str = Field(pattern=r"^[a-p]{32}$")
     tabs: list[BrowserTabSyncItem] = Field(default_factory=list, max_length=200)
+
+    @field_validator("tabs", mode="before")
+    @classmethod
+    def coerce_open_tabs(cls, value: object) -> object:
+        """丢掉超长网址，避免一张快照里的异常标签让整个同步 422。"""
+
+        if not isinstance(value, list):
+            return value
+        cleaned: list[object] = []
+        for item in value:
+            if isinstance(item, dict):
+                url = item.get("page_url")
+                if isinstance(url, str) and len(url.strip()) > 2_048:
+                    continue
+            cleaned.append(item)
+            if len(cleaned) >= 200:
+                break
+        return cleaned
 
 
 class BrowserOpenTabRead(BaseModel):
@@ -1794,6 +1939,19 @@ def normalize_optional_text(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def truncate_optional_text(value: object, max_length: int) -> object:
+    """截断过长可选文本；非字符串交给后续类型校验。"""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    return cleaned[:max_length]
 
 
 def normalize_source_url(value: str | None) -> str | None:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import Memo, ResourceCategoryRule, ResourceCategoryTemplate
@@ -14,6 +16,7 @@ from app.resource_processing import (
     CATEGORY_LABELS,
     ClassificationCategory,
     ClassificationRule,
+    clean_metadata_text,
 )
 from app.schemas import (
     MemoType,
@@ -24,6 +27,9 @@ from app.schemas import (
 
 MAX_CATEGORY_DEPTH = 3
 MAX_RESOURCE_CATEGORIES = 8
+# 200 条带摘要的样本会拖垮中转模型，按大类各抽一些最近网页。
+MAX_LIBRARY_PAGES_FOR_GENERATION = 80
+_LIBRARY_PAGE_POOL = 400
 
 SYSTEM_CATEGORY_DESCRIPTIONS: dict[str, str] = {
     ResourceCategory.LEARNING.value: "课程、教程、文档和其他学习内容",
@@ -70,13 +76,14 @@ class CategoryVersionConflictError(RuntimeError):
 
 
 def system_category_options() -> list[ClassificationCategory]:
-    """返回系统内置的分类模板。"""
+    """返回系统内置的分类模板；它们只作兜底，不参与用户细类的竞争。"""
 
     return [
         ClassificationCategory(
             code=code,
             label=CATEGORY_LABELS[code],
             description=SYSTEM_CATEGORY_DESCRIPTIONS.get(code),
+            is_fallback=True,
         )
         for code in CATEGORY_LABELS
     ]
@@ -112,14 +119,18 @@ def list_resource_category_options(
     templates = list_category_templates(
         session,
         user_id,
-        include_inactive=include_inactive,
+        include_inactive=True,
     )
+    templates_by_code = {template.code: template for template in templates}
     options: list[dict[str, object]] = [
         {
             "id": None,
             "code": category.code,
             "name": category.label,
             "description": category.description,
+            "definition": None,
+            "include_examples": None,
+            "exclude_examples": None,
             "is_system": True,
             "is_active": True,
             "version": 1,
@@ -130,8 +141,9 @@ def list_resource_category_options(
         for category in system_category_options()
     ]
     options.extend(
-        category_template_to_option(session, user_id, template)
+        _option_from_template(template, templates_by_code)
         for template in templates
+        if include_inactive or template.is_active
     )
     return _order_category_options(options)
 
@@ -140,22 +152,27 @@ def classification_categories(
     session: Session,
     user_id: str,
 ) -> list[ClassificationCategory]:
-    """返回当前分类任务允许使用的分类集合。"""
+    """返回当前分类任务允许使用的分类集合。
 
-    categories = system_category_options()
-    categories.extend(
+    用户启用的自定义分类在前并携带口径；系统七类在后，只作兜底。
+    """
+
+    templates = list_category_templates(session, user_id, include_inactive=True)
+    templates_by_code = {template.code: template for template in templates}
+    categories = [
         ClassificationCategory(
             code=template.code,
             label=template.name,
             description=template.description,
-            path=category_path(session, user_id, template.code),
+            path=_path_from_map(templates_by_code, template.code),
+            definition=template.definition,
+            include_examples=template.include_examples,
+            exclude_examples=template.exclude_examples,
         )
-        for template in list_category_templates(
-            session,
-            user_id,
-            include_inactive=False,
-        )
-    )
+        for template in templates
+        if template.is_active
+    ]
+    categories.extend(system_category_options())
     return categories
 
 
@@ -200,19 +217,445 @@ def category_code_exists(
 def get_category_depth(session: Session, user_id: str, category_code: str) -> int:
     """计算分类深度，系统分类和自定义顶级均为 1。"""
 
+    return _depth_from_map(_templates_by_code(session, user_id), category_code)
+
+
+def category_path(session: Session, user_id: str, category_code: str) -> str:
+    """返回从大类到当前分类的显示路径。"""
+
+    return _path_from_map(_templates_by_code(session, user_id), category_code)
+
+
+def category_template_to_option(
+    session: Session,
+    user_id: str,
+    template: ResourceCategoryTemplate,
+) -> dict[str, object]:
+    """把用户分类模板转成客户端选项。"""
+
+    templates_by_code = _templates_by_code(session, user_id)
+    templates_by_code[template.code] = template
+    return _option_from_template(template, templates_by_code)
+
+
+def serialize_category_templates(
+    session: Session,
+    user_id: str,
+) -> list[dict[str, object]]:
+    """导出可随备份还原的自定义分类，不含系统分类。"""
+
+    return [
+        {
+            "code": template.code,
+            "name": template.name,
+            "description": template.description,
+            "definition": template.definition,
+            "include_examples": template.include_examples,
+            "exclude_examples": template.exclude_examples,
+            "parent_code": template.parent_code,
+            "is_active": template.is_active,
+        }
+        for template in list_category_templates(
+            session,
+            user_id,
+            include_inactive=True,
+        )
+    ]
+
+
+def import_category_templates(
+    session: Session,
+    user_id: str,
+    raw_categories: Sequence[Mapping[str, Any]],
+) -> int:
+    """按备份里的 code 补建缺失的自定义分类，先建父级。"""
+
+    existing = {
+        template.code: template
+        for template in list_category_templates(
+            session,
+            user_id,
+            include_inactive=True,
+        )
+    }
+    pending: list[dict[str, object]] = []
+    seen_codes: set[str] = set()
+    for item in raw_categories:
+        code = str(item.get("code") or "").strip()
+        name = str(item.get("name") or "").strip()
+        if (
+            not code
+            or not name
+            or code in SYSTEM_CATEGORY_CODES
+            or code in seen_codes
+            or len(code) > 50
+            or len(name) > 50
+            or not code.replace("_", "").isalnum()
+        ):
+            continue
+        parent = str(item.get("parent_code") or "").strip() or None
+        description = item.get("description")
+        pending.append(
+            {
+                "code": code,
+                "name": name,
+                "description": (
+                    str(description).strip()[:300] if description else None
+                ),
+                "definition": _imported_text(item.get("definition"), 600),
+                "include_examples": _imported_text(item.get("include_examples"), 800),
+                "exclude_examples": _imported_text(item.get("exclude_examples"), 800),
+                "parent_code": parent,
+                "is_active": bool(item.get("is_active", True)),
+            }
+        )
+        seen_codes.add(code)
+
+    def imported_depth(code: str) -> int:
+        depth = 1
+        current: str | None = code
+        walked: set[str] = set()
+        while current and current not in walked and depth <= MAX_CATEGORY_DEPTH + 1:
+            walked.add(current)
+            if current in SYSTEM_CATEGORY_CODES:
+                return depth
+            row = next((item for item in pending if item["code"] == current), None)
+            parent_code = (
+                str(row["parent_code"]) if row and row["parent_code"] else None
+            )
+            if row is None:
+                template = existing.get(current)
+                parent_code = template.parent_code if template is not None else None
+            if not parent_code:
+                return depth
+            current = parent_code
+            depth += 1
+        return depth
+
+    # 先把深度算完再排序：排序键里读取 pending 会看到正在排序的空列表。
+    depths = {
+        str(item["code"]): imported_depth(str(item["code"])) for item in pending
+    }
+    pending.sort(key=lambda item: (depths[str(item["code"])], str(item["code"])))
+    available = set(SYSTEM_CATEGORY_CODES) | set(existing)
+    created = 0
+    for item in pending:
+        code = str(item["code"])
+        if code in existing:
+            continue
+        parent_code = (
+            str(item["parent_code"]) if item["parent_code"] is not None else None
+        )
+        if parent_code is not None and parent_code not in available:
+            continue
+        if imported_depth(code) > MAX_CATEGORY_DEPTH:
+            continue
+        if _category_name_taken(
+            session,
+            user_id,
+            str(item["name"]),
+            parent_code=parent_code,
+        ):
+            continue
+        template = ResourceCategoryTemplate(
+            id=str(uuid4()),
+            user_id=user_id,
+            code=code,
+            parent_code=parent_code,
+            name=str(item["name"]),
+            description=(
+                str(item["description"]) if item["description"] is not None else None
+            ),
+            definition=(
+                str(item["definition"]) if item["definition"] is not None else None
+            ),
+            include_examples=(
+                str(item["include_examples"])
+                if item["include_examples"] is not None
+                else None
+            ),
+            exclude_examples=(
+                str(item["exclude_examples"])
+                if item["exclude_examples"] is not None
+                else None
+            ),
+            is_active=bool(item["is_active"]),
+            version=1,
+        )
+        session.add(template)
+        existing[code] = template
+        available.add(code)
+        created += 1
+    if created:
+        session.flush()
+    return created
+
+
+def category_exemplars(
+    session: Session,
+    user_id: str,
+    categories: Sequence[ClassificationCategory],
+    per_category: int = 4,
+    max_total: int = 40,
+) -> dict[str, list[dict[str, str]]]:
+    """取出用户已确认的历史样本，作为分类口径的一部分回喂给模型。
+
+    只有人工指定、用户规则和人工确认过的条目才算已确认；模型自己的旧判断
+    不参与，避免把错误结论当成口径。
+    """
+
+    codes = [category.code for category in categories if not category.is_fallback]
+    if not codes:
+        return {}
+    confirmed = or_(
+        Memo.resource_category_source == "manual",
+        Memo.resource_category_source == "user_rule",
+        Memo.resource_ai_confirmation.is_not(None),
+    )
+    rows = session.execute(
+        select(
+            Memo.resource_category,
+            Memo.resource_page_title,
+            Memo.title,
+            Memo.source_url,
+            Memo.resource_site_name,
+        )
+        .where(
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != "trashed",
+            Memo.resource_category.in_(codes),
+            confirmed,
+        )
+        .order_by(Memo.updated_at.desc(), Memo.id.desc())
+        .limit(max_total * 8)
+    ).all()
+    exemplars: dict[str, list[dict[str, str]]] = {}
+    total = 0
+    for category_code, page_title, title, source_url, site_name in rows:
+        if total >= max_total:
+            break
+        bucket = exemplars.setdefault(str(category_code), [])
+        if len(bucket) >= per_category:
+            continue
+        label = clean_metadata_text(page_title or title, 120)
+        if not label:
+            continue
+        bucket.append(
+            {
+                "title": label,
+                "site": clean_metadata_text(site_name, 80) or "",
+                "domain": _url_domain(source_url),
+            }
+        )
+        total += 1
+    return exemplars
+
+
+def category_rejected_examples(
+    session: Session,
+    user_id: str,
+    categories: Sequence[ClassificationCategory],
+    per_category: int = 3,
+    max_total: int = 20,
+) -> dict[str, list[dict[str, str]]]:
+    """取出被用户改掉的模型判断，作为该分类的反例回喂给模型。
+
+    只有人工指定或人工确认过的条目才作数：模型当时首选了 A，用户改成了 B，
+    那么这一条就是 A 的反例。模型自己的旧结论不会被当成反例。
+    """
+
+    codes = {category.code for category in categories}
+    if not codes:
+        return {}
+    labels = {
+        category.code: category.path or category.label for category in categories
+    }
+    rejected_code = Memo.resource_ai_assessment["candidates"][0]["code"].as_string()
+    rows = session.execute(
+        select(
+            rejected_code,
+            Memo.resource_category,
+            Memo.resource_page_title,
+            Memo.title,
+            Memo.source_url,
+            Memo.resource_site_name,
+        )
+        .where(
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != "trashed",
+            Memo.resource_ai_assessment.is_not(None),
+            Memo.resource_category.is_not(None),
+            or_(
+                Memo.resource_category_source == "manual",
+                Memo.resource_ai_confirmation.is_not(None),
+            ),
+        )
+        .order_by(Memo.updated_at.desc(), Memo.id.desc())
+        .limit(max_total * 8)
+    ).all()
+    rejected: dict[str, list[dict[str, str]]] = {}
+    total = 0
+    for code, final_code, page_title, title, source_url, site_name in rows:
+        if total >= max_total:
+            break
+        if not code or code == final_code or code not in codes:
+            continue
+        bucket = rejected.setdefault(str(code), [])
+        if len(bucket) >= per_category:
+            continue
+        label = clean_metadata_text(page_title or title, 120)
+        if not label:
+            continue
+        bucket.append(
+            {
+                "title": label,
+                "site": clean_metadata_text(site_name, 80) or "",
+                "domain": _url_domain(source_url),
+                "actual": labels.get(str(final_code), str(final_code)),
+            }
+        )
+        total += 1
+    return rejected
+
+
+def _url_domain(source_url: str | None) -> str:
+    """只保留域名，样本里不回传完整链接。"""
+
+    if not source_url:
+        return ""
+    return urlsplit(source_url).netloc.lower()
+
+
+def _primary_page_category(primary: str | None, extras: object) -> str:
+    """聚类样本带上已有分类，方便模型把细类挂到对应大类。"""
+
+    if primary:
+        return primary
+    if isinstance(extras, list) and extras:
+        first = extras[0]
+        if isinstance(first, str) and first.strip():
+            return first.strip()
+    return ""
+
+
+def library_pages_for_generation(
+    session: Session,
+    user_id: str,
+    limit: int = MAX_LIBRARY_PAGES_FOR_GENERATION,
+) -> list[dict[str, str]]:
+    """取出最近网页的标题、站点和公开摘要，供聚类生成标签。
+
+    不读取收藏备注或图片；摘要只来自页面元数据。
+    确认失效的网页不进入样本。按已有大类交错取样，避免全是同一类。
+    """
+
+    rows = session.execute(
+        select(
+            Memo.resource_page_title,
+            Memo.title,
+            Memo.resource_site_name,
+            Memo.source_url,
+            Memo.resource_description,
+            Memo.resource_category,
+            Memo.resource_categories,
+        )
+        .where(
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != "trashed",
+            Memo.link_health_status != "failed",
+        )
+        .order_by(Memo.updated_at.desc(), Memo.id.desc())
+        .limit(_LIBRARY_PAGE_POOL)
+    ).all()
+    buckets: dict[str, list[dict[str, str]]] = {}
+    for (
+        page_title,
+        title,
+        site_name,
+        source_url,
+        description,
+        primary,
+        extras,
+    ) in rows:
+        label = clean_metadata_text(page_title or title, 120)
+        if not label:
+            continue
+        page: dict[str, str] = {"title": label}
+        site = clean_metadata_text(site_name, 80)
+        if site:
+            page["site"] = site
+        domain = _url_domain(source_url)
+        if domain:
+            page["domain"] = domain
+        summary = clean_metadata_text(description, 80)
+        if summary:
+            page["summary"] = summary
+        category = _primary_page_category(primary, extras)
+        if category:
+            page["category"] = category
+        buckets.setdefault(category, []).append(page)
+    selected: list[dict[str, str]] = []
+    cursors = {key: 0 for key in buckets}
+    keys = list(buckets)
+    while len(selected) < limit and keys:
+        remaining: list[str] = []
+        for key in keys:
+            index = cursors[key]
+            group = buckets[key]
+            if index >= len(group):
+                continue
+            selected.append(group[index])
+            cursors[key] = index + 1
+            if cursors[key] < len(group):
+                remaining.append(key)
+            if len(selected) >= limit:
+                break
+        keys = remaining
+    return selected
+
+
+def _imported_text(value: object, max_length: int) -> str | None:
+    """备份还原时校验口径文本长度，超长直接截断。"""
+
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned[:max_length] or None
+
+
+def _templates_by_code(
+    session: Session,
+    user_id: str,
+) -> dict[str, ResourceCategoryTemplate]:
+    """一次读出当前用户全部分类，供深度和路径在内存里计算。"""
+
+    return {
+        template.code: template
+        for template in list_category_templates(
+            session,
+            user_id,
+            include_inactive=True,
+        )
+    }
+
+
+def _depth_from_map(
+    templates_by_code: Mapping[str, ResourceCategoryTemplate],
+    category_code: str,
+) -> int:
+    """用已加载的模板计算深度，避免按父节点反复查库。"""
+
     depth = 1
-    current = category_code
+    current: str | None = category_code
     seen: set[str] = set()
     while current and current not in seen and depth <= MAX_CATEGORY_DEPTH + 1:
         seen.add(current)
         if current in SYSTEM_CATEGORY_CODES:
             return depth
-        template = session.scalar(
-            select(ResourceCategoryTemplate).where(
-                ResourceCategoryTemplate.user_id == user_id,
-                ResourceCategoryTemplate.code == current,
-            ),
-        )
+        template = templates_by_code.get(current)
         if template is None or not template.parent_code:
             return depth
         current = template.parent_code
@@ -220,8 +663,11 @@ def get_category_depth(session: Session, user_id: str, category_code: str) -> in
     return depth
 
 
-def category_path(session: Session, user_id: str, category_code: str) -> str:
-    """返回从大类到当前分类的显示路径。"""
+def _path_from_map(
+    templates_by_code: Mapping[str, ResourceCategoryTemplate],
+    category_code: str,
+) -> str:
+    """用已加载的模板拼接显示路径。"""
 
     parts: list[str] = []
     current: str | None = category_code
@@ -232,12 +678,7 @@ def category_path(session: Session, user_id: str, category_code: str) -> str:
         if system_label is not None:
             parts.append(system_label)
             break
-        template = session.scalar(
-            select(ResourceCategoryTemplate).where(
-                ResourceCategoryTemplate.user_id == user_id,
-                ResourceCategoryTemplate.code == current,
-            ),
-        )
+        template = templates_by_code.get(current)
         if template is None:
             break
         parts.append(template.name)
@@ -245,24 +686,26 @@ def category_path(session: Session, user_id: str, category_code: str) -> str:
     return " / ".join(reversed(parts))
 
 
-def category_template_to_option(
-    session: Session,
-    user_id: str,
+def _option_from_template(
     template: ResourceCategoryTemplate,
+    templates_by_code: Mapping[str, ResourceCategoryTemplate],
 ) -> dict[str, object]:
-    """把用户分类模板转成客户端选项。"""
+    """把模板转成客户端选项，depth/path 只读内存。"""
 
     return {
         "id": template.id,
         "code": template.code,
         "name": template.name,
         "description": template.description,
+        "definition": template.definition,
+        "include_examples": template.include_examples,
+        "exclude_examples": template.exclude_examples,
         "is_system": False,
         "is_active": template.is_active,
         "version": template.version,
         "parent_code": template.parent_code,
-        "depth": get_category_depth(session, user_id, template.code),
-        "path": category_path(session, user_id, template.code) or template.name,
+        "depth": _depth_from_map(templates_by_code, template.code),
+        "path": _path_from_map(templates_by_code, template.code) or template.name,
     }
 
 
@@ -406,6 +849,10 @@ def create_category_template(
     name: str,
     description: str | None,
     parent_code: str | None = None,
+    *,
+    definition: str | None = None,
+    include_examples: str | None = None,
+    exclude_examples: str | None = None,
 ) -> ResourceCategoryTemplate:
     """创建用户分类模板，可挂在系统或自定义大类下。"""
 
@@ -421,6 +868,9 @@ def create_category_template(
         parent_code=cleaned_parent,
         name=cleaned_name,
         description=description.strip() if description else None,
+        definition=definition.strip() if definition else None,
+        include_examples=include_examples.strip() if include_examples else None,
+        exclude_examples=exclude_examples.strip() if exclude_examples else None,
         is_active=True,
         version=1,
     )
@@ -477,6 +927,10 @@ def update_category_template(
     if "description" in changes:
         value = changes["description"]
         template.description = str(value) if value is not None else None
+    for name in ("definition", "include_examples", "exclude_examples"):
+        if name in changes:
+            value = changes[name]
+            setattr(template, name, str(value) if value is not None else None)
     if "is_active" in changes and changes["is_active"] is not None:
         template.is_active = bool(changes["is_active"])
     if "parent_code" in changes:
@@ -684,7 +1138,7 @@ def _remove_codes_from_memos(
     memos = session.scalars(
         select(Memo).where(
             Memo.user_id == user_id,
-            Memo.type == MemoType.RESOURCE,
+            Memo.type.in_((MemoType.RESOURCE, MemoType.IMAGE)),
         )
     )
     for memo in memos:

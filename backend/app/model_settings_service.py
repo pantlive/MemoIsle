@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
@@ -27,6 +29,78 @@ class ModelSettingError(ValueError):
     """配置或连接不可用；消息可安全显示给用户。"""
 
 
+logger = logging.getLogger(__name__)
+_UPSTREAM_ERROR_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+
+
+def _upstream_error_tokens(response: httpx.Response) -> tuple[str | None, str | None]:
+    """读取服务商错误信封中的 code/type，忽略可能含密钥的原文。"""
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None, None
+    tokens: list[str | None] = []
+    for key in ("code", "type"):
+        value = error.get(key)
+        if isinstance(value, str) and _UPSTREAM_ERROR_TOKEN.fullmatch(value):
+            tokens.append(value)
+        else:
+            tokens.append(None)
+    return tokens[0], tokens[1]
+
+
+def describe_model_http_error(error: httpx.HTTPStatusError) -> str:
+    """把上游 HTTP 错误收成可展示的原因，不回传响应正文。"""
+
+    status = error.response.status_code
+    upstream_code, upstream_type = _upstream_error_tokens(error.response)
+    logger.info(
+        "model connection test rejected status=%s code=%s type=%s",
+        status,
+        upstream_code,
+        upstream_type,
+    )
+    if (
+        status in {401, 403}
+        or upstream_type == "authentication_error"
+        or (upstream_code or "").upper() == "UNAUTHORIZED"
+    ):
+        if (upstream_code or "").lower() == "upgrade_required":
+            return "当前套餐不能调用该模型接口，请升级服务商套餐后再试"
+        return "认证失败，请检查 API Key"
+    if status in {402, 429} or upstream_type == "rate_limit_error":
+        return "额度不足或请求过于频繁，请检查服务账户"
+    if (upstream_code or "").lower() == "unsupported_model":
+        return "模型名称不受该服务支持，请对照服务商的模型列表修改"
+    if status == 400:
+        return "模型服务拒绝请求，请检查模型名称、请求地址和接口格式"
+    return "模型服务请求失败，请检查模型名称和服务状态"
+
+
+def _message_text(content: object) -> str:
+    """兼容字符串和分段数组两种 Chat Completions 正文。"""
+
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str) and item.strip():
+                parts.append(item.strip())
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        return "\n".join(parts)
+    return ""
+
+
 @dataclass(frozen=True)
 class ProviderConfiguration:
     """单个账号实际生效的服务配置，仅在服务端使用。"""
@@ -39,6 +113,7 @@ class ProviderConfiguration:
     has_custom_settings: bool
     error: str | None = None
     custom_base_url: str | None = None
+    min_confidence: float | None = None
 
 
 def request_origin(url: str) -> tuple[str, str | None, int]:
@@ -116,6 +191,7 @@ def provider_configuration(
     error_message: str | None = None
     saved = get_provider_setting(session, user_id, provider)
     custom_base_url = saved.base_url if saved is not None else None
+    min_confidence = saved.min_confidence if saved is not None else None
     if saved is not None:
         model, enabled = saved.model, saved.enabled
         if custom_base_url:
@@ -147,7 +223,16 @@ def provider_configuration(
         saved is not None,
         error_message,
         custom_base_url=custom_base_url,
+        min_confidence=min_confidence,
     )
+
+
+def default_min_confidence(settings: Settings, provider: ModelProvider) -> float:
+    """服务器默认的判定阈值；两个通道历史上各有默认值。"""
+
+    if provider == ModelProvider.DEEPSEEK:
+        return settings.classification_min_confidence
+    return settings.jev_min_confidence
 
 
 def read_model_setting(
@@ -175,6 +260,12 @@ def read_model_setting(
         credential_source=config.source,
         has_custom_settings=config.has_custom_settings,
         error=config.error,
+        min_confidence=(
+            config.min_confidence
+            if config.min_confidence is not None
+            else default_min_confidence(settings, provider)
+        ),
+        default_min_confidence=default_min_confidence(settings, provider),
     )
 
 
@@ -200,6 +291,16 @@ def resolve_model_settings(
         jev_model=jev.model,
         jev_base_url=jev.base_url,
         jev_api_key=jev.api_key if jev.enabled else None,
+        classification_min_confidence=(
+            deepseek.min_confidence
+            if deepseek.min_confidence is not None
+            else settings.classification_min_confidence
+        ),
+        jev_min_confidence=(
+            jev.min_confidence
+            if jev.min_confidence is not None
+            else settings.jev_min_confidence
+        ),
     )
 
 
@@ -240,10 +341,16 @@ def requested_configuration(
         and not key
     ):
         raise ModelSettingError("更换服务地址时，请填写对应服务的 API Key")
+    min_confidence = (
+        payload.min_confidence
+        if "min_confidence" in payload.model_fields_set
+        else current.min_confidence
+    )
     return replace(
         current,
         model=payload.model,
         enabled=payload.enabled,
+        min_confidence=min_confidence,
         base_url=base_url,
         custom_base_url=custom_url,
         api_key=key or current.api_key,
@@ -280,6 +387,7 @@ def save_model_setting(
     saved.model = payload.model
     saved.enabled = payload.enabled
     saved.base_url = requested.custom_base_url
+    saved.min_confidence = requested.min_confidence
     if encrypted is not None:
         saved.credential_cipher = encrypted
     session.commit()
@@ -359,8 +467,8 @@ def verify_model_connection(
         result = response.json()
         if provider == ModelProvider.DEEPSEEK:
             choice = result["choices"][0]
-            content = choice["message"]["content"]
-            if not isinstance(content, str) or not content.strip():
+            content = _message_text(choice["message"]["content"])
+            if not content:
                 if choice.get("finish_reason") == "length":
                     raise ModelSettingError(
                         "模型已响应，但输出达到长度上限，未返回最终答复",
@@ -375,14 +483,7 @@ def verify_model_connection(
             "模型响应超时，请稍后重试或检查服务连接",
         ) from error
     except httpx.HTTPStatusError as error:
-        code = error.response.status_code
-        if code in {401, 403}:
-            message = "认证失败，请检查 API Key"
-        elif code in {402, 429}:
-            message = "额度不足或请求过于频繁，请检查服务账户"
-        else:
-            message = "模型服务请求失败，请检查模型名称和服务状态"
-        raise ModelSettingError(message) from error
+        raise ModelSettingError(describe_model_http_error(error)) from error
     except (
         httpx.HTTPError,
         KeyError,

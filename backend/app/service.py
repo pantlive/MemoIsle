@@ -6,17 +6,24 @@ import hashlib
 import io
 import json
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 from PIL import Image, ImageOps
-from sqlalchemy import Select, String, and_, cast, delete, func, or_, select, update
+from sqlalchemy import Select, String, Update, and_, cast, delete, func, or_, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.category_service import assign_memo_categories, descendant_category_codes
 from app.config import Settings
+from app.database import (
+    SQLITE_LOCK_COMMIT_ATTEMPTS,
+    commit_with_retry,
+    is_sqlite_lock_error,
+)
 from app.memo_deletion_service import record_memo_deletion
 from app.models import Memo, User
 from app.schemas import (
@@ -270,9 +277,9 @@ def build_title(
     """优先使用显式标题，否则从正文第一行生成。"""
 
     if title and title.strip():
-        return title.strip()
+        return title.strip()[:200]
     if source_title and source_title.strip():
-        return source_title.strip()
+        return source_title.strip()[:200]
     if source_url:
         hostname = urlsplit(source_url).hostname
         if hostname:
@@ -287,7 +294,13 @@ def build_title(
     return f"{first_line[:77]}..."
 
 
-def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
+def create_memo(
+    session: Session,
+    user_id: str,
+    payload: MemoCreate,
+    *,
+    commit: bool = True,
+) -> Memo:
     """幂等创建一条收藏内容。"""
 
     existing = session.scalar(
@@ -405,8 +418,9 @@ def create_memo(session: Session, user_id: str, payload: MemoCreate) -> Memo:
         version=1,
     )
     session.add(memo)
-    session.commit()
-    session.refresh(memo)
+    if commit:
+        commit_with_retry(session)
+        session.refresh(memo)
     return memo
 
 
@@ -525,6 +539,12 @@ def memo_query(
         MemoSort.CREATED_ASC: (Memo.created_at.asc(), Memo.id.asc()),
         MemoSort.TITLE_ASC: (Memo.title.asc(), Memo.id.asc()),
         MemoSort.TITLE_DESC: (Memo.title.desc(), Memo.id.desc()),
+        MemoSort.OPENED_DESC: (
+            Memo.resource_open_count.desc(),
+            Memo.resource_last_opened_at.desc(),
+            Memo.updated_at.desc(),
+            Memo.id.desc(),
+        ),
     }
     return query.order_by(*sort_orders[sort])
 
@@ -666,6 +686,99 @@ def get_memo(session: Session, user_id: str, memo_id: str) -> Memo:
     )
     if memo is None:
         raise MemoNotFoundError
+    return memo
+
+
+def _execute_with_lock_retry(session: Session, statement: Update) -> None:
+    """执行并提交一条更新语句。
+
+    回滚会撤销已执行的语句，所以遇到 SQLite 锁时连同语句一起重试，
+    不能只重试提交。
+    """
+
+    delay = 0.05
+    for attempt in range(SQLITE_LOCK_COMMIT_ATTEMPTS):
+        try:
+            session.execute(statement)
+            session.commit()
+            return
+        except OperationalError as error:
+            session.rollback()
+            if not is_sqlite_lock_error(error) or attempt == SQLITE_LOCK_COMMIT_ATTEMPTS - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.8)
+
+
+def record_resource_open(session: Session, user_id: str, memo_id: str) -> Memo:
+    """网页资料打开次数加一，不改动版本号，避免与正在进行的编辑冲突。"""
+
+    memo = get_memo(session, user_id, memo_id)
+    if memo.type != MemoType.RESOURCE:
+        raise MemoTypeError("只有网页资料记录打开次数")
+    if memo.status == MemoStatus.TRASHED:
+        raise MemoNotFoundError
+    opened_at = datetime.now(UTC)
+    # 在数据库里自增，多个标签页同时打开也不会丢计数；显式保留 updated_at，
+    # 否则 onupdate 会刷新它，让「最近更新」排序和增量同步把打开当成修改。
+    statement = (
+        update(Memo)
+        .where(Memo.id == memo.id, Memo.user_id == user_id)
+        .values(
+            resource_open_count=Memo.resource_open_count + 1,
+            resource_last_opened_at=opened_at,
+            updated_at=Memo.updated_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    _execute_with_lock_retry(session, statement)
+    session.refresh(memo)
+    return memo
+
+
+def list_quick_access(session: Session, user_id: str, limit: int) -> list[Memo]:
+    """快速访问：打开过、未被移除的网页资料，按打开次数降序。"""
+
+    query = (
+        select(Memo)
+        .where(
+            Memo.user_id == user_id,
+            Memo.type == MemoType.RESOURCE,
+            Memo.status != MemoStatus.TRASHED,
+            Memo.resource_open_count > 0,
+            Memo.resource_quick_access_hidden.is_(False),
+        )
+        .order_by(
+            Memo.resource_open_count.desc(),
+            Memo.resource_last_opened_at.desc(),
+            Memo.id.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.scalars(query))
+
+
+def set_resource_quick_access_hidden(
+    session: Session,
+    user_id: str,
+    memo_id: str,
+    hidden: bool,
+) -> Memo:
+    """移除或恢复快速访问；与打开统计一样不改版本号和更新时间。"""
+
+    memo = get_memo(session, user_id, memo_id)
+    if memo.type != MemoType.RESOURCE:
+        raise MemoTypeError("只有网页资料可以加入快速访问")
+    if memo.status == MemoStatus.TRASHED:
+        raise MemoNotFoundError
+    _execute_with_lock_retry(
+        session,
+        update(Memo)
+        .where(Memo.id == memo.id, Memo.user_id == user_id)
+        .values(resource_quick_access_hidden=hidden, updated_at=Memo.updated_at)
+        .execution_options(synchronize_session=False),
+    )
+    session.refresh(memo)
     return memo
 
 

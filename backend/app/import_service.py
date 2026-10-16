@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import StringIO
 from typing import Any
@@ -13,9 +13,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.category_service import CategoryCodeNotFoundError, assign_memo_categories
+from app.category_service import (
+    assign_memo_categories,
+    category_code_exists,
+    import_category_templates,
+)
 from app.models import Memo
 from app.schemas import (
+    CloudProvider,
     MemoCreate,
     MemoStatus,
     MemoType,
@@ -58,6 +63,14 @@ class LibraryImportRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class LibraryImportFile:
+    """解析后的备份：条目，以及 JSON 里可还原的自定义分类。"""
+
+    records: list[LibraryImportRecord]
+    categories: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
 class LibraryImportResult:
     """完整备份导入统计。"""
 
@@ -69,7 +82,7 @@ class LibraryImportResult:
     errors: tuple[tuple[int, str], ...]
 
 
-def parse_library_import(content: bytes, file_format: str) -> list[LibraryImportRecord]:
+def parse_library_import(content: bytes, file_format: str) -> LibraryImportFile:
     """解析 MemoIsle JSON 或 CSV 导出文件。"""
 
     if len(content) > MAX_LIBRARY_IMPORT_BYTES:
@@ -91,16 +104,19 @@ def parse_library_import(content: bytes, file_format: str) -> list[LibraryImport
 def import_library_memos(
     session: Session,
     user_id: str,
-    records: list[LibraryImportRecord],
+    import_file: LibraryImportFile,
 ) -> LibraryImportResult:
     """把备份条目写入当前账号，按 client_id、词形和网址去重。"""
 
+    if import_file.categories:
+        import_category_templates(session, user_id, import_file.categories)
+        session.commit()
     imported_count = 0
     duplicate_count = 0
     skipped_count = 0
     failed_count = 0
     errors: list[tuple[int, str]] = []
-    for record in records:
+    for record in import_file.records:
         try:
             payload = build_library_import_payload(record)
         except (TypeError, ValueError) as error:
@@ -120,18 +136,27 @@ def import_library_memos(
             duplicate_count += 1
             continue
         try:
-            memo = create_memo(session, user_id, payload)
+            memo = create_memo(session, user_id, payload, commit=False)
+            _apply_imported_fields(session, user_id, memo, record.values)
+            session.commit()
         except WordDuplicateError:
+            session.rollback()
             duplicate_count += 1
             continue
         except ResourceDuplicateError:
+            session.rollback()
             duplicate_count += 1
             continue
-        _apply_imported_fields(session, user_id, memo, record.values)
-        session.commit()
+        except (TypeError, ValueError) as error:
+            session.rollback()
+            failed_count += 1
+            if len(errors) < 50:
+                message = str(error).strip() or "字段校验失败"
+                errors.append((record.row_number, message[:200]))
+            continue
         imported_count += 1
     return LibraryImportResult(
-        total_count=len(records),
+        total_count=len(import_file.records),
         imported_count=imported_count,
         duplicate_count=duplicate_count,
         skipped_count=skipped_count,
@@ -184,18 +209,24 @@ def build_library_import_payload(record: LibraryImportRecord) -> MemoCreate:
     )
 
 
-def _parse_json_records(text: str) -> list[LibraryImportRecord]:
+def _parse_json_records(text: str) -> LibraryImportFile:
     """解析 MemoIsle JSON 导出对象或条目数组。"""
 
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as error:
         raise LibraryImportFormatError("JSON 文件格式不正确") from error
+    categories: tuple[Mapping[str, Any], ...] = ()
     if isinstance(payload, Mapping):
         records = payload.get("memos")
         export_format = payload.get("format")
         if export_format not in {None, "memoisle-json"}:
             raise LibraryImportFormatError("不是 MemoIsle JSON 备份文件")
+        raw_categories = payload.get("categories")
+        if isinstance(raw_categories, list):
+            categories = tuple(
+                dict(item) for item in raw_categories if isinstance(item, Mapping)
+            )
     else:
         records = payload
     if not isinstance(records, list):
@@ -213,10 +244,10 @@ def _parse_json_records(text: str) -> list[LibraryImportRecord]:
                     {"_import_error": "每条数据必须是对象"},
                 )
             )
-    return parsed
+    return LibraryImportFile(records=parsed, categories=categories)
 
 
-def _parse_csv_records(text: str) -> list[LibraryImportRecord]:
+def _parse_csv_records(text: str) -> LibraryImportFile:
     """解析导出 CSV，列表字段按 JSON 文本还原。"""
 
     reader = csv.DictReader(StringIO(text, newline=""))
@@ -232,7 +263,7 @@ def _parse_csv_records(text: str) -> list[LibraryImportRecord]:
             if key is not None
         }
         parsed.append(LibraryImportRecord(row_number, values))
-    return parsed
+    return LibraryImportFile(records=parsed)
 
 
 def _decode_csv_cell(value: Any) -> Any:
@@ -273,18 +304,100 @@ def _enum_value(value: Any, enum_type: type) -> Any:
         return None
 
 
-def _datetime_value(value: Any) -> datetime | None:
-    """解析导出中的 ISO 时间。"""
+def _int_value(value: Any) -> int | None:
+    """解析导出里的整数；CSV 把数字写成文本。"""
 
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
     text = _text_value(value)
-    if not text:
+    if text is None:
         return None
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return int(text)
     except ValueError:
         return None
+
+
+def _apply_imported_categories(
+    session: Session,
+    user_id: str,
+    memo: Memo,
+    values: Mapping[str, Any],
+) -> None:
+    """恢复仍存在的分类；未知 code 不影响其余有效分类。"""
+
+    category_codes = _list_value(_lookup_value(values, "resource_categories"))
+    primary = _text_value(_lookup_value(values, "resource_category"))
+    if primary and primary not in category_codes:
+        category_codes = [primary, *category_codes]
+    if not category_codes:
+        return
+    valid_codes = [
+        code
+        for code in category_codes
+        if category_code_exists(session, user_id, code, active_only=True)
+    ]
+    if valid_codes:
+        assign_memo_categories(
+            session,
+            user_id,
+            memo,
+            valid_codes,
+            manual=True,
+        )
+        return
+    label = _text_value(_lookup_value(values, "resource_category_label"))
+    if label:
+        memo.resource_category_label = label
+
+
+def _apply_imported_ebook_fields(memo: Memo, values: Mapping[str, Any]) -> None:
+    """恢复云盘电子书引用；不含文件本体。"""
+
+    provider = _enum_value(_lookup_value(values, "ebook_provider"), CloudProvider)
+    if provider is not None:
+        memo.ebook_provider = provider.value
+    file_id = _text_value(_lookup_value(values, "ebook_file_id"))
+    if file_id:
+        memo.ebook_file_id = file_id
+    path = _text_value(_lookup_value(values, "ebook_path"))
+    if path:
+        memo.ebook_path = path
+    share_url = _text_value(_lookup_value(values, "ebook_share_url"))
+    if share_url:
+        memo.ebook_share_url = share_url
+    ebook_format = _text_value(_lookup_value(values, "ebook_format"))
+    if ebook_format:
+        memo.ebook_format = ebook_format
+    size_bytes = _int_value(_lookup_value(values, "ebook_size_bytes"))
+    if size_bytes is not None and size_bytes >= 0:
+        memo.ebook_size_bytes = size_bytes
+    snapshot = _lookup_value(values, "ebook_snapshot")
+    if isinstance(snapshot, dict):
+        memo.ebook_snapshot = snapshot
+
+
+def _datetime_value(value: Any) -> datetime | None:
+    """把备份时间解析成 UTC。
+
+    导出一律写 ISO-8601 且带 Z；无时区的字符串按 UTC 解释，避免跟服务器本地时区错位。
+    带偏移的时间先换算成 UTC 再入库。
+    """
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = _text_value(value)
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
 
 
@@ -299,11 +412,11 @@ def _apply_imported_fields(
     if _lookup_value(values, "_import_error"):
         raise ValueError(str(_lookup_value(values, "_import_error")))
     memo.starred = _bool_value(_lookup_value(values, "starred") or memo.starred)
-    familiarity = _lookup_value(values, "familiarity")
-    if isinstance(familiarity, int) and familiarity >= 0:
+    familiarity = _int_value(_lookup_value(values, "familiarity"))
+    if familiarity is not None and familiarity >= 0:
         memo.familiarity = familiarity
-    review_count = _lookup_value(values, "review_count")
-    if isinstance(review_count, int) and review_count >= 0:
+    review_count = _int_value(_lookup_value(values, "review_count"))
+    if review_count is not None and review_count >= 0:
         memo.review_count = review_count
     last_review_at = _datetime_value(_lookup_value(values, "last_review_at"))
     if last_review_at is not None:
@@ -311,7 +424,28 @@ def _apply_imported_fields(
     next_review_at = _datetime_value(_lookup_value(values, "next_review_at"))
     if next_review_at is not None:
         memo.next_review_at = next_review_at
+    created_at = _datetime_value(_lookup_value(values, "created_at"))
+    if created_at is not None:
+        memo.created_at = created_at
+    updated_at = _datetime_value(_lookup_value(values, "updated_at"))
+    if updated_at is not None:
+        memo.updated_at = updated_at
+    _apply_imported_ebook_fields(memo, values)
+    if memo.type in {MemoType.RESOURCE, MemoType.IMAGE}:
+        _apply_imported_categories(session, user_id, memo, values)
     if memo.type == MemoType.RESOURCE:
+        # 恢复备份时保留快速访问依据的打开统计。
+        open_count = _int_value(_lookup_value(values, "resource_open_count"))
+        if open_count is not None and open_count >= 0:
+            memo.resource_open_count = open_count
+        last_opened_at = _datetime_value(
+            _lookup_value(values, "resource_last_opened_at"),
+        )
+        if last_opened_at is not None:
+            memo.resource_last_opened_at = last_opened_at
+        memo.resource_quick_access_hidden = _bool_value(
+            _lookup_value(values, "resource_quick_access_hidden") or False,
+        )
         page_title = _text_value(_lookup_value(values, "resource_page_title"))
         if page_title:
             memo.resource_page_title = page_title
@@ -342,23 +476,6 @@ def _apply_imported_fields(
         )
         if metadata_status is not None:
             memo.resource_metadata_status = metadata_status
-        category_codes = _list_value(_lookup_value(values, "resource_categories"))
-        primary = _text_value(_lookup_value(values, "resource_category"))
-        if primary and primary not in category_codes:
-            category_codes = [primary, *category_codes]
-        if category_codes:
-            try:
-                assign_memo_categories(
-                    session,
-                    user_id,
-                    memo,
-                    category_codes,
-                    manual=True,
-                )
-            except CategoryCodeNotFoundError:
-                memo.resource_category_label = _text_value(
-                    _lookup_value(values, "resource_category_label"),
-                )
     if memo.type == MemoType.IMAGE:
         # 图片二进制不随备份迁移，但已识别的文字与标签可以恢复并继续参与搜索。
         ocr_text = _text_value(_lookup_value(values, "image_ocr_text"))

@@ -20,6 +20,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.auth_service import (
@@ -77,7 +78,10 @@ from app.browser_capture_service import (
     sync_browser_bookmarks,
     sync_open_browser_tabs,
 )
-from app.browser_extension_service import build_browser_extension_archive
+from app.browser_extension_service import (
+    browser_extension_archive_filename,
+    build_browser_extension_archive,
+)
 from app.category_generation_service import (
     CategoryGenerationNotConfiguredError,
     CategoryGenerationUnavailableError,
@@ -97,8 +101,10 @@ from app.category_service import (
     create_category_template,
     delete_category_rule,
     delete_category_template,
+    library_pages_for_generation,
     list_category_rules,
     list_resource_category_options,
+    serialize_category_templates,
     update_category_rule,
     update_category_template,
 )
@@ -113,6 +119,7 @@ from app.cloud_account_service import (
 )
 from app.cloud_drive import UnsupportedProviderError
 from app.config import Settings, normalize_image_ocr_provider
+from app.database import is_sqlite_lock_error
 from app.dependencies import get_current_user_id, get_session, get_settings
 from app.ebook_service import (
     EbookJobNotFoundError,
@@ -222,6 +229,9 @@ from app.schemas import (
     ResourceCategoryRuleUpdate,
     ResourceCategoryUpdate,
     ResourceKind,
+    ResourceOpenRead,
+    ResourceQuickAccessRead,
+    ResourceQuickAccessUpdate,
     ResourceReadingStatus,
     ReviewQueueResponse,
     ReviewSettingsResponse,
@@ -257,6 +267,9 @@ from app.service import (
     get_audio_path,
     get_image_path,
     get_memo,
+    list_quick_access,
+    record_resource_open,
+    set_resource_quick_access_hidden,
     get_review_settings,
     is_trash_expired,
     list_memos,
@@ -369,8 +382,7 @@ async def _handle_auth_callback(
 
     expires_in = int(
         (
-            created.session.expires_at.replace(tzinfo=UTC)
-            - datetime.now(UTC)
+            created.session.expires_at.replace(tzinfo=UTC) - datetime.now(UTC)
         ).total_seconds(),
     )
     fragment = urlencode(
@@ -728,6 +740,19 @@ def _prepare_export_data(
     return user, list_memos_for_export(session, user_id), exported_at
 
 
+async def _read_request_body_limited(request: Request, max_bytes: int) -> bytes:
+    """按块读取请求体，超过上限立即中断，不依赖 Content-Length。"""
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="备份文件不能超过 10 MB")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _export_headers(filename: str) -> dict[str, str]:
     """为私人导出响应设置下载文件名和缓存策略。"""
 
@@ -753,9 +778,9 @@ def export_json_route(
         "audio_files_included": False,
         "image_files_included": False,
         "user": AuthUserResponse.model_validate(user).model_dump(mode="json"),
+        "categories": serialize_category_templates(session, user_id),
         "memos": [
-            MemoRead.model_validate(memo).model_dump(mode="json")
-            for memo in memos
+            MemoRead.model_validate(memo).model_dump(mode="json") for memo in memos
         ],
     }
     filename = f"memoisle-export-{exported_at.strftime('%Y%m%dT%H%M%SZ')}.json"
@@ -831,10 +856,10 @@ async def import_library_route(
         if declared_size > MAX_LIBRARY_IMPORT_BYTES:
             raise HTTPException(status_code=413, detail="备份文件不能超过 10 MB")
 
-    content = await request.body()
+    content = await _read_request_body_limited(request, MAX_LIBRARY_IMPORT_BYTES)
     try:
-        records = parse_library_import(content, file_format)
-        result = import_library_memos(session, user_id, records)
+        parsed = parse_library_import(content, file_format)
+        result = import_library_memos(session, user_id, parsed)
     except LibraryImportTooLargeError as error:
         raise HTTPException(status_code=413, detail=str(error)) from error
     except LibraryImportFormatError as error:
@@ -877,13 +902,12 @@ def download_browser_extension_route() -> Response:
     """下载可解压后加载到 Chrome 或 Edge 的扩展包。"""
 
     archive = build_browser_extension_archive()
+    filename = browser_extension_archive_filename()
     return Response(
         content=archive,
         media_type="application/zip",
         headers={
-            "Content-Disposition": (
-                'attachment; filename="memoisle-browser-extension.zip"'
-            ),
+            "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-store",
         },
     )
@@ -965,6 +989,13 @@ def sync_browser_tabs_route(
         raise HTTPException(status_code=403, detail="浏览器扩展来源不匹配") from error
     except (ValueError, OSError) as error:
         raise HTTPException(status_code=422, detail="浏览器标签页快照无效") from error
+    except OperationalError as error:
+        if is_sqlite_lock_error(error):
+            raise HTTPException(
+                status_code=503,
+                detail="浏览器标签页同步繁忙",
+            ) from error
+        raise
     return BrowserTabSyncResponse(synced_count=synced_count)
 
 
@@ -1085,12 +1116,18 @@ def create_memo_route(
 ) -> MemoRead:
     """创建或返回同一客户端标识对应的条目。"""
 
-    if session.scalar(select(MemoDeletion.memo_id).where(
-        MemoDeletion.user_id == user_id,
-        MemoDeletion.client_id == str(payload.client_id),
-    )) is not None:
+    if (
+        session.scalar(
+            select(MemoDeletion.memo_id).where(
+                MemoDeletion.user_id == user_id,
+                MemoDeletion.client_id == str(payload.client_id),
+            )
+        )
+        is not None
+    ):
         raise HTTPException(
-            status_code=410, detail="该条目已永久删除，请使用新的收藏标识",
+            status_code=410,
+            detail="该条目已永久删除，请使用新的收藏标识",
         )
     try:
         memo = create_memo(session, user_id, payload)
@@ -1573,17 +1610,26 @@ def generate_resource_categories_route(
     user_id: UserDependency,
     settings: SettingsDependency,
 ) -> ResourceCategoryGenerateResponse:
-    """根据整理要求生成当前用户可添加的分类建议。"""
+    """根据整理要求和收藏网页聚类，生成当前用户可添加的分类建议。"""
 
     existing = [
         ResourceCategoryRead.model_validate(option)
         for option in list_resource_category_options(session, user_id)
     ]
+    library_pages = library_pages_for_generation(session, user_id)
+    if not payload.instructions and not library_pages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="请说明整理要求，或先收藏网页后再根据网页聚类",
+        )
     try:
         return generate_category_suggestions(
-            payload.instructions, existing,
+            payload.instructions,
+            existing,
             resolve_model_settings(session, user_id, settings),
             payload.max_categories,
+            library_pages=library_pages,
+            mode=payload.mode,
         )
     except CategoryGenerationNotConfiguredError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -1611,6 +1657,9 @@ def create_resource_category_route(
             payload.name,
             payload.description,
             payload.parent_code,
+            definition=payload.definition,
+            include_examples=payload.include_examples,
+            exclude_examples=payload.exclude_examples,
         )
     except CategoryNameConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -1970,6 +2019,74 @@ def trash_memo_route(
     return MemoRead.model_validate(memo)
 
 
+@router.post(
+    "/resources/{memo_id}/open",
+    response_model=ResourceOpenRead,
+    tags=["resources"],
+)
+def record_resource_open_route(
+    memo_id: UUID,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> ResourceOpenRead:
+    """记录一次打开原网页，用于快速访问排序。"""
+
+    try:
+        memo = record_resource_open(session, user_id, str(memo_id))
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="条目不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ResourceOpenRead(
+        resource_open_count=memo.resource_open_count,
+        resource_last_opened_at=memo.resource_last_opened_at,
+    )
+
+
+@router.get(
+    "/resources/quick-access",
+    response_model=list[MemoRead],
+    tags=["resources"],
+)
+def list_quick_access_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    limit: Annotated[int, Query(ge=1, le=50)] = 8,
+) -> list[MemoRead]:
+    """快速访问：按打开次数排列常用网页，已移除的不出现。"""
+
+    return [
+        MemoRead.model_validate(memo)
+        for memo in list_quick_access(session, user_id, limit)
+    ]
+
+
+@router.put(
+    "/resources/{memo_id}/quick-access",
+    response_model=ResourceQuickAccessRead,
+    tags=["resources"],
+)
+def update_quick_access_route(
+    memo_id: UUID,
+    payload: ResourceQuickAccessUpdate,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> ResourceQuickAccessRead:
+    """从快速访问移除，或重新显示。"""
+
+    try:
+        memo = set_resource_quick_access_hidden(
+            session, user_id, str(memo_id), payload.hidden,
+        )
+    except MemoNotFoundError as error:
+        raise HTTPException(status_code=404, detail="条目不存在") from error
+    except MemoTypeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ResourceQuickAccessRead(
+        resource_quick_access_hidden=memo.resource_quick_access_hidden,
+    )
+
+
 @router.post("/memos/{memo_id}/restore", response_model=MemoRead, tags=["memos"])
 def restore_memo_route(
     memo_id: UUID,
@@ -2069,7 +2186,11 @@ def sync_changes_route(
         user_id=user_id,
     )
     return sync_change_page(
-        session, user_id, cursor, str(cursor_id) if cursor_id else None, limit,
+        session,
+        user_id,
+        cursor,
+        str(cursor_id) if cursor_id else None,
+        limit,
     )
 
 
@@ -2758,8 +2879,7 @@ def list_ebook_jobs_route(
     """返回当前用户最近的电子书任务。"""
 
     return [
-        EbookJobRead.model_validate(job)
-        for job in list_ebook_jobs(session, user_id)
+        EbookJobRead.model_validate(job) for job in list_ebook_jobs(session, user_id)
     ]
 
 

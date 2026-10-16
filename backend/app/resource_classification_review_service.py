@@ -28,7 +28,11 @@ from app.schemas import (
 )
 
 ReviewReason = Literal[
-    "low_confidence", "unknown_category", "invalid_response", "legacy"
+    "low_confidence",
+    "unknown_category",
+    "invalid_response",
+    "no_match",
+    "legacy",
 ]
 
 
@@ -136,7 +140,7 @@ def confirm_classification_reviews(
     user_id: str,
     payload: ResourceClassificationReviewRequest,
 ) -> ResourceClassificationReviewResult:
-    """按用户所见版本逐项确认，保护已修改、已处理及待巡检的网页。"""
+    """按用户所见版本逐项确认，保护已修改、已处理及确认失效的网页。"""
 
     if payload.action == "assign" and not category_code_exists(
         session,

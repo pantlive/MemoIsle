@@ -17,6 +17,8 @@ from app.resource_classification_service import (
     ResourceClassificationStateError,
     classification_state,
     resume_classification_job,
+    retry_classified_classifications,
+    retry_review_classifications,
     start_classification_job,
 )
 from app.schemas import (
@@ -57,6 +59,23 @@ def list_classification_reviews_route(
     )
 
 
+@router.post("/review/retry", response_model=ResourceClassificationState, status_code=202)
+def retry_classification_reviews_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceClassificationState:
+    """把待确认网页重新排队给大模型和 Jev，保留原分类直到有新结果。"""
+
+    try:
+        retry_review_classifications(session, user_id, settings)
+    except ResourceClassificationConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ResourceClassificationStateError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return classification_state(session, user_id)
+
+
 @router.post("/review/confirm", response_model=ResourceClassificationReviewResult)
 def confirm_classification_reviews_route(
     session: SessionDependency,
@@ -69,6 +88,23 @@ def confirm_classification_reviews_route(
         return confirm_classification_reviews(session, user_id, payload)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/classified/retry", response_model=ResourceClassificationState, status_code=202)
+def retry_classified_classifications_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+) -> ResourceClassificationState:
+    """把已完成模型分类的网页重新排队给大模型和 Jev，保留原分类直到有新结果。"""
+
+    try:
+        retry_classified_classifications(session, user_id, settings)
+    except ResourceClassificationConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ResourceClassificationStateError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return classification_state(session, user_id)
 
 
 @router.get("", response_model=ResourceClassificationState)

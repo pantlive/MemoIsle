@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.database import Database
+from app.database import Database, commit_with_retry
 from app.models import LinkHealthEvent, LinkHealthSitePause, Memo, User
 from app.resource_classification_policy import (
     REVIEW_HEALTH_STATUSES,
@@ -239,24 +239,42 @@ def check_resource_link(
     if memo.link_health_status == LinkHealthStatus.IGNORED and not force:
         return memo
 
+    source_url = memo.source_url
+    fingerprint = memo.link_metadata_fingerprint
     _, interval_hours = _account_health_preferences(session, user_id, settings)
+    # 抓取期间不占用数据库事务，避免挡住前台保存网页。
+    session.rollback()
     now = datetime.now(UTC)
+    metadata: ResourceMetadata | None = None
+    fetch_error: ResourceFetchError | UnsafeResourceUrlError | None = None
     try:
         metadata = (
-            fetcher(memo.source_url)
+            fetcher(source_url)
             if fetcher is not None
             else fetch_resource_metadata(
-                memo.source_url,
+                source_url,
                 timeout_seconds=settings.resource_fetch_timeout_seconds,
                 max_bytes=settings.resource_fetch_max_bytes,
             )
         )
+    except (ResourceFetchError, UnsafeResourceUrlError) as error:
+        fetch_error = error
+
+    memo = get_memo(session, user_id, memo_id)
+    if memo.type != MemoType.RESOURCE or memo.source_url is None:
+        raise MemoTypeError("只有网页资料可以执行链接巡检")
+    if expected_version is not None and memo.version != expected_version:
+        raise MemoVersionConflictError(memo)
+    if memo.link_health_status == LinkHealthStatus.IGNORED and not force:
+        return memo
+
+    if metadata is not None:
         current_fingerprint = metadata_fingerprint(metadata)
         if metadata.final_url != memo.source_url:
             health_status = LinkHealthStatus.REDIRECTED
         elif (
-            memo.link_metadata_fingerprint is not None
-            and memo.link_metadata_fingerprint != current_fingerprint
+            fingerprint is not None
+            and fingerprint != current_fingerprint
         ):
             health_status = LinkHealthStatus.CHANGED
         else:
@@ -276,11 +294,18 @@ def check_resource_link(
         if health_status != LinkHealthStatus.CHANGED:
             # 内容变化需要持续提醒，直到用户确认更新资料信息。
             memo.link_metadata_fingerprint = current_fingerprint
-    except (ResourceFetchError, UnsafeResourceUrlError) as error:
+    else:
+        assert fetch_error is not None
         http_status = (
-            error.http_status if isinstance(error, ResourceFetchError) else None
+            fetch_error.http_status
+            if isinstance(fetch_error, ResourceFetchError)
+            else None
         )
-        error_code = error.code if isinstance(error, ResourceFetchError) else str(error)
+        error_code = (
+            fetch_error.code
+            if isinstance(fetch_error, ResourceFetchError)
+            else str(fetch_error)
+        )
         memo.link_consecutive_failures += 1
         if http_status in {401, 403}:
             health_status = LinkHealthStatus.AUTH_REQUIRED
@@ -305,7 +330,7 @@ def check_resource_link(
     memo.version += 1
     memo.updated_at = now
     _record_event(session, memo, "automatic_check" if not force else "manual_check")
-    session.commit()
+    commit_with_retry(session)
     session.refresh(memo)
     return memo
 

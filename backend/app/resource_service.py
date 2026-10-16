@@ -11,7 +11,12 @@ from urllib.parse import urlsplit
 from sqlalchemy import inspect, select, update
 from sqlalchemy.orm import Session
 
-from app.category_service import classification_categories, classification_rules
+from app.category_service import (
+    category_exemplars,
+    category_rejected_examples,
+    classification_categories,
+    classification_rules,
+)
 from app.config import Settings
 from app.database import Database
 from app.model_settings_service import resolve_model_settings
@@ -87,6 +92,18 @@ def safe_resource_image_url(value: str | None) -> str | None:
     """只保留可由客户端安全加载的 HTTP(S) 封面地址。"""
 
     return safe_favicon_url(value)
+
+
+def _category_assignment_state(memo: Memo) -> tuple[object, ...]:
+    """比较主分类和附加分类，避免 extras 变化时漏加 version。"""
+
+    return (
+        memo.resource_category,
+        memo.resource_category_label,
+        memo.resource_category_source,
+        tuple(memo.resource_categories or []),
+        tuple(memo.resource_auto_tags or []),
+    )
 
 
 def apply_category(memo: Memo, decision: CategoryDecision) -> None:
@@ -241,7 +258,7 @@ def enrich_resource(
             memo.link_health_status = "temporary_failure"
         memo.link_next_check_at = now + timedelta(hours=health_interval_hours)
 
-    # 先确定巡检结果，再决定是否允许模型调用，异常网页只保留规则结果。
+    # 先写入巡检结果；确认失效的网页只保留规则分类。
     apply_classification_health_gate(memo, review_confirmed)
     if (
         memo.resource_ai_classified_at is not None
@@ -260,32 +277,53 @@ def enrich_resource(
             ),
         )
     elif classifier is None:
-        # 读取配置和模板时禁止自动刷写，网络等待期间不持有写锁。
+        # 判定期间禁止自动刷写：刷写会清空 ORM 变更历史，导致后面按版本提交时
+        # 丢掉刚写入的元数据；同时避免网络等待期间持有写锁。
         with session.no_autoflush:
             settings = resolve_model_settings(session, user_id, settings)
             user_rules = classification_rules(session, user_id)
             category_options = classification_categories(session, user_id)
-        allow_model = (
-            health_allows_ai_classification(memo)
-            and memo.resource_category_source != "manual"
-            and memo.resource_ai_classified_at is None
-            and memo.resource_ai_confirmation is None
-            # 书签批次先抓取元数据，再由独立自动队列分类，避免导入被模型阻塞。
-            and memo.resource_import_batch_id is None
-        )
-        decision = classify_resource(
-            metadata,
-            llm_base_url=settings.llm_base_url if allow_model else None,
-            llm_api_key=settings.llm_api_key if allow_model else None,
-            llm_model=settings.llm_model if allow_model else "",
-            user_rules=user_rules,
-            category_options=category_options,
-            jev_api_key=settings.jev_api_key if allow_model else None,
-            jev_base_url=settings.jev_base_url,
-            jev_model=settings.jev_model,
-            jev_min_confidence=settings.jev_min_confidence,
-        )
-        if allow_model and settings.jev_api_key:
+            allow_model = (
+                health_allows_ai_classification(memo)
+                and memo.resource_category_source != "manual"
+                and memo.resource_ai_classified_at is None
+                and memo.resource_ai_confirmation is None
+                # 书签批次先抓取元数据，再由独立自动队列分类，避免导入被模型阻塞。
+                and memo.resource_import_batch_id is None
+            )
+            decision = classify_resource(
+                metadata,
+                llm_base_url=settings.llm_base_url if allow_model else None,
+                llm_api_key=settings.llm_api_key if allow_model else None,
+                llm_model=settings.llm_model if allow_model else "",
+                user_rules=user_rules,
+                category_options=category_options,
+                jev_api_key=settings.jev_api_key if allow_model else None,
+                jev_base_url=settings.jev_base_url,
+                jev_model=settings.jev_model,
+                jev_min_confidence=settings.jev_min_confidence,
+                deepseek_api_key=settings.deepseek_api_key if allow_model else None,
+                deepseek_base_url=settings.deepseek_base_url,
+                deepseek_model=settings.deepseek_model,
+                deepseek_timeout_seconds=settings.deepseek_timeout_seconds,
+                classification_min_confidence=(
+                    settings.classification_min_confidence
+                ),
+                exemplars=(
+                    category_exemplars(session, user_id, category_options)
+                    if allow_model
+                    else None
+                ),
+                rejected_examples=(
+                    category_rejected_examples(session, user_id, category_options)
+                    if allow_model
+                    else None
+                ),
+            )
+        if allow_model and (
+            settings.jev_api_key
+            or (settings.deepseek_api_key and settings.deepseek_model)
+        ):
             # 单次自动尝试后不无限重试低置信度；手动批量重试仍可执行。
             memo.resource_ai_auto_pending = False
     else:
@@ -415,20 +453,9 @@ def apply_user_category_rules(
         )
         if decision is None:
             continue
-        previous_values = (
-            memo.resource_category,
-            memo.resource_category_label,
-            memo.resource_category_source,
-            memo.resource_auto_tags,
-        )
+        previous_values = _category_assignment_state(memo)
         apply_category(memo, decision)
-        current_values = (
-            memo.resource_category,
-            memo.resource_category_label,
-            memo.resource_category_source,
-            memo.resource_auto_tags,
-        )
-        if previous_values != current_values:
+        if previous_values != _category_assignment_state(memo):
             memo.updated_at = datetime.now(UTC)
             memo.version += 1
             changed_count += 1
@@ -472,7 +499,7 @@ def reclassify_user_rule_resources(
     for memo in resources:
         if memo.resource_category_source == "manual":
             continue
-        # 删除或修改用户规则时，同样遵守巡检确认和模型完成标记。
+        # 删除或修改用户规则时，确认失效的网页不调用模型。
         allow_model = (
             health_allows_ai_classification(memo)
             and memo.resource_ai_classified_at is None
@@ -488,21 +515,25 @@ def reclassify_user_rule_resources(
             jev_base_url=settings.jev_base_url,
             jev_model=settings.jev_model,
             jev_min_confidence=settings.jev_min_confidence,
+            deepseek_api_key=settings.deepseek_api_key if allow_model else None,
+            deepseek_base_url=settings.deepseek_base_url,
+            deepseek_model=settings.deepseek_model,
+            deepseek_timeout_seconds=settings.deepseek_timeout_seconds,
+            classification_min_confidence=settings.classification_min_confidence,
+            exemplars=(
+                category_exemplars(session, user_id, categories)
+                if allow_model
+                else None
+            ),
+            rejected_examples=(
+                category_rejected_examples(session, user_id, categories)
+                if allow_model
+                else None
+            ),
         )
-        previous_values = (
-            memo.resource_category,
-            memo.resource_category_label,
-            memo.resource_category_source,
-            memo.resource_auto_tags,
-        )
+        previous_values = _category_assignment_state(memo)
         apply_category(memo, decision)
-        current_values = (
-            memo.resource_category,
-            memo.resource_category_label,
-            memo.resource_category_source,
-            memo.resource_auto_tags,
-        )
-        if previous_values != current_values:
+        if previous_values != _category_assignment_state(memo):
             memo.updated_at = datetime.now(UTC)
             memo.version += 1
             changed_count += 1

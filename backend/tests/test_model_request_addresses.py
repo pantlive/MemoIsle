@@ -18,7 +18,7 @@ from app.schemas import (
     ModelSettingUpdate,
 )
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 
@@ -301,3 +301,35 @@ def test_old_configuration_table_migrates_without_losing_credentials(
         saved = session.get(ModelProviderSetting, (user_id, "deepseek"))
         assert saved is not None
         assert saved.credential_cipher == old_cipher
+
+
+def test_model_provider_setting_migrates_min_confidence(
+    client: TestClient,
+) -> None:
+    """旧库缺少分类阈值列时，升级只补字段、不丢凭据。"""
+
+    database = client.app.state.database
+    user_id = client.app.state.settings.local_user_id
+    client.put(
+        "/api/v1/model-settings/deepseek",
+        json={"model": "old-model", "api_key": "old-private-key"},
+    ).raise_for_status()
+    with database.session_factory() as session:
+        saved = session.get(ModelProviderSetting, (user_id, "deepseek"))
+        assert saved is not None
+        old_cipher = saved.credential_cipher
+    with database.engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE model_provider_setting DROP COLUMN min_confidence"),
+        )
+    database.create_schema()
+    columns = {
+        column["name"]
+        for column in inspect(database.engine).get_columns("model_provider_setting")
+    }
+    assert "min_confidence" in columns
+    with database.session_factory() as session:
+        saved = session.get(ModelProviderSetting, (user_id, "deepseek"))
+        assert saved is not None
+        assert saved.credential_cipher == old_cipher
+        assert saved.min_confidence is None

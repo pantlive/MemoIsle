@@ -194,6 +194,82 @@ def test_browser_capture_rejects_spoofed_origin_and_private_page(
     assert private_response.status_code == 422
 
 
+def test_tab_sync_accepts_public_hostnames_without_dns(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """打开标签页快照不能对每个网址做 DNS，否则会堵住右键收藏和 @ 选择器。"""
+
+    def boom(_hostname: str, _port: int, **_kwargs: object) -> list[object]:
+        raise AssertionError("tab snapshot must not resolve DNS")
+
+    monkeypatch.setattr("app.resource_processing.socket.getaddrinfo", boom)
+    response = client.post(
+        "/api/v1/browser-tabs/sync",
+        headers={"Origin": EXTENSION_ORIGIN},
+        json={
+            "extension_id": EXTENSION_ID,
+            "tabs": [
+                {
+                    "tab_id": 1,
+                    "window_id": 1,
+                    "page_url": "https://example.com/guide",
+                    "page_title": "公开网页",
+                    "favicon_url": "https://example.com/favicon.ico",
+                },
+                {
+                    "tab_id": 2,
+                    "window_id": 1,
+                    "page_url": "http://127.0.0.1/private",
+                    "page_title": "不应展示",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["synced_count"] == 1
+    open_tabs = client.get("/api/v1/browser-tabs/open").json()["items"]
+    assert [tab["page_title"] for tab in open_tabs] == ["公开网页"]
+
+
+def test_tab_sync_and_capture_accept_overlong_browser_fields() -> None:
+    """超长标题和图标不应让整次标签页同步或当前页授权 422。"""
+
+    sync_payload = BrowserTabSyncRequest.model_validate(
+        {
+            "extension_id": EXTENSION_ID,
+            "tabs": [
+                {
+                    "tab_id": 1,
+                    "page_url": "https://example.com/ok",
+                    "page_title": "x" * 400,
+                    "favicon_url": "data:image/png;base64," + ("a" * 3000),
+                },
+                {
+                    "tab_id": 2,
+                    "page_url": "https://example.com/" + ("p" * 3000),
+                    "page_title": "网址过长",
+                },
+            ],
+        }
+    )
+    assert len(sync_payload.tabs) == 1
+    assert sync_payload.tabs[0].page_title == "x" * 300
+    assert sync_payload.tabs[0].favicon_url is None
+
+    capture_payload = BrowserCaptureCreate.model_validate(
+        {
+            "extension_id": EXTENSION_ID,
+            "nonce": "0123456789abcdef0123456789abcdef",
+            "page_url": "https://example.com/guide",
+            "page_title": "y" * 400,
+            "favicon_url": "chrome://favicon/size/16@2x/https://example.com",
+        }
+    )
+    assert capture_payload.page_title == "y" * 300
+    assert capture_payload.favicon_url is None
+
+
 def test_browser_extension_syncs_bookmarks_for_direct_web_import(
     client: TestClient,
 ) -> None:

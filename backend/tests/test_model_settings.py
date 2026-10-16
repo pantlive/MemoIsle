@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import json as json_module
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -580,6 +581,57 @@ def test_connection_errors_hide_upstream_secrets(
     assert "private-upstream-key" not in str(error.value)
 
 
+@pytest.mark.parametrize(
+    ("status", "payload", "expected"),
+    [
+        (
+            403,
+            {"error": {"message": "upgrade", "type": "permission_error", "code": "upgrade_required"}},
+            "当前套餐不能调用该模型接口，请升级服务商套餐后再试",
+        ),
+        (
+            400,
+            {"error": {"message": "missing from catalog", "type": "invalid_request_error", "code": "unsupported_model"}},
+            "模型名称不受该服务支持，请对照服务商的模型列表修改",
+        ),
+        (
+            400,
+            {"error": {"message": "private-upstream-key", "type": "invalid_request_error"}},
+            "模型服务拒绝请求，请检查模型名称、请求地址和接口格式",
+        ),
+    ],
+)
+def test_connection_maps_provider_error_codes(
+    client: TestClient,
+    status: int,
+    payload: dict[str, object],
+    expected: str,
+) -> None:
+    """把服务商错误码转成可操作提示，不回显上游正文。"""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json=payload)
+
+    with client.app.state.database.session_factory() as session:
+        with httpx.Client(
+            transport=httpx.MockTransport(handler),
+        ) as model_client:
+            with pytest.raises(ModelSettingError) as error:
+                verify_model_connection(
+                    session,
+                    client.app.state.settings.local_user_id,
+                    client.app.state.settings,
+                    ModelProvider.DEEPSEEK,
+                    ModelSettingUpdate(
+                        model="deepseek/deepseek-v4.1-flash",
+                        api_key="private-upstream-key",
+                    ),
+                    model_client,
+                )
+    assert str(error.value) == expected
+    assert "private-upstream-key" not in str(error.value)
+
+
 def test_saved_settings_reach_generation_and_web_classification(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -615,7 +667,7 @@ def test_saved_settings_reach_generation_and_web_classification(
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps(
+                            "content": json_module.dumps(
                                 {
                                     "categories": [
                                         {
@@ -636,6 +688,7 @@ def test_saved_settings_reach_generation_and_web_classification(
         existing: Sequence[ResourceCategoryRead],
         settings: Settings,
         max_categories: int,
+        **_kwargs: object,
     ) -> ResourceCategoryGenerateResponse:
         """仅替换 HTTP 传输，保留生成逻辑及设置读取。"""
 
@@ -675,27 +728,49 @@ def test_saved_settings_reach_generation_and_web_classification(
     assert memo_response.status_code == 201
     memo = memo_response.json()
 
-    def jev_request(
+    def model_request(
         url: str,
         *,
         headers: dict[str, str],
         json: dict[str, Any],
         timeout: float,
     ) -> httpx.Response:
-        """断言网页后台处理使用新的分类目录及 Jev 配置。"""
+        """断言网页处理使用账号里保存的 DeepSeek 和 Jev 配置。"""
 
+        if url.endswith("/chat/completions"):
+            assert headers["Authorization"] == "Bearer private-deepseek-key"
+            assert url == "https://deepseek.relay.example/v1/chat/completions"
+            assert json["model"] == "custom-deepseek"
+            content = json_module.loads(json["messages"][1]["content"])
+            codes = [item["code"] for item in content["categories"]]
+            assert custom in codes
+            assert codes[0] == custom
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json_module.dumps(
+                                    {
+                                        "category": custom,
+                                        "confidence": 0.98,
+                                        "reason": "命中小类口径",
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
         assert headers["Authorization"] == "Bearer private-jev-key"
         assert url == "https://jev.relay.example/v1/systemone"
         assert json["model"] == "custom-jev"
-        assert custom in json["questions"]["category"]["criteria"]
         return httpx.Response(
             200,
             request=httpx.Request("POST", url),
-            json={
-                "answers": {
-                    "category": {"choice": custom, "confidence": 0.98}
-                },
-            },
+            json={"answers": {"category": {"choice": custom, "confidence": 0.9}}},
         )
 
     def metadata_fetcher(url: str) -> ResourceMetadata:
@@ -710,7 +785,8 @@ def test_saved_settings_reach_generation_and_web_classification(
             http_status=200,
         )
 
-    monkeypatch.setattr("app.resource_processing.httpx.post", jev_request)
+    monkeypatch.setattr("app.resource_processing.httpx.post", model_request)
+    monkeypatch.setattr("app.resource_classification_judge.httpx.post", model_request)
     settings = client.app.state.settings
     with client.app.state.database.session_factory() as session:
         result = enrich_resource(
@@ -720,7 +796,88 @@ def test_saved_settings_reach_generation_and_web_classification(
             settings,
             metadata_fetcher=metadata_fetcher,
         )
-        assert result.resource_category_source == "jev"
+        assert result.resource_category_source in {"llm", "jev"}
         assert result.resource_category == custom
     assert settings.deepseek_api_key is None
     assert settings.jev_api_key is None
+
+
+def test_saved_confidence_threshold_reaches_classification(
+    client: TestClient,
+) -> None:
+    """设置页保存的置信度阈值会用于该账号的分类判定。"""
+
+    assert (
+        client.put(
+            "/api/v1/model-settings/deepseek",
+            json={
+                "model": "custom-deepseek",
+                "api_key": "private-deepseek-key",
+                "base_url": "https://deepseek.relay.example/v1",
+                "min_confidence": 0.55,
+            },
+        ).status_code
+        == 200
+    )
+    read = next(
+        item
+        for item in client.get("/api/v1/model-settings").json()
+        if item["provider"] == "deepseek"
+    )
+    assert read["min_confidence"] == 0.55
+    assert read["default_min_confidence"] == 0.7
+
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        resolved = resolve_model_settings(
+            session,
+            settings.local_user_id,
+            settings,
+        )
+    assert resolved.classification_min_confidence == 0.55
+    # 未配置阈值的通道继续使用服务器默认值。
+    assert resolved.jev_min_confidence == settings.jev_min_confidence
+
+
+def test_confidence_threshold_is_validated_and_resettable(
+    client: TestClient,
+) -> None:
+    """阈值必须在 0 到 1 之间，重置配置后回到默认值。"""
+
+    assert (
+        client.put(
+            "/api/v1/model-settings/jev",
+            json={
+                "model": "typesafe/jev",
+                "api_key": "private-jev-key",
+                "min_confidence": 1.5,
+            },
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/api/v1/model-settings/jev",
+            json={
+                "model": "typesafe/jev",
+                "api_key": "private-jev-key",
+                "min_confidence": 0.4,
+            },
+        ).status_code
+        == 200
+    )
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        resolved = resolve_model_settings(
+            session,
+            settings.local_user_id,
+            settings,
+        )
+    assert resolved.jev_min_confidence == 0.4
+    assert client.delete("/api/v1/model-settings/jev").status_code == 200
+    reset = next(
+        item
+        for item in client.get("/api/v1/model-settings").json()
+        if item["provider"] == "jev"
+    )
+    assert reset["min_confidence"] == settings.jev_min_confidence

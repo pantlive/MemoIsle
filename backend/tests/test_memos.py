@@ -593,6 +593,28 @@ def test_create_update_and_list_resource(client: TestClient) -> None:
     assert created["collections"] == []
     assert created["starred"] is False
 
+
+def test_create_resource_truncates_long_browser_title(client: TestClient) -> None:
+    """浏览器原生标题超过 200 字时截断保存，而不是返回 422。"""
+
+    long_title = "用户中心 - " + ("丽萨主机," * 40)
+    assert len(long_title) > 200
+    response = client.post(
+        "/api/v1/memos",
+        json={
+            "client_id": str(uuid4()),
+            "type": "resource",
+            "body": "https://lisahost.com/clientarea.php",
+            "source_url": "https://lisahost.com/clientarea.php",
+            "source_title": long_title,
+            "tags": [],
+        },
+    )
+    assert response.status_code == 201, response.json()
+    created = response.json()
+    assert created["source_title"] == long_title[:200]
+    assert created["title"] == long_title[:200]
+
     list_response = client.get("/api/v1/memos", params={"type": "resource"})
     assert list_response.status_code == 200
     assert [item["id"] for item in list_response.json()["items"]] == [created["id"]]

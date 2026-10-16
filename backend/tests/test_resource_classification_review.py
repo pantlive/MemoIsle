@@ -23,6 +23,8 @@ from app.resource_processing import CategoryDecision, ResourceMetadata
 from app.resource_service import apply_category, enrich_resource
 from fastapi.testclient import TestClient
 
+from tests.classification_stubs import patch_web_classifier
+
 REVIEW_URL = "/api/v1/resource-classification/review"
 
 
@@ -107,6 +109,32 @@ def seed_reviews(
     return ids
 
 
+def seed_pending_resource(client: TestClient, title: str = "尚未分类网页") -> str:
+    """插入一条普通待处理网页，不进入确认中心。"""
+
+    memo_id = str(uuid4())
+    with client.app.state.database.session_factory() as session:
+        session.add(
+            Memo(
+                id=memo_id,
+                user_id=client.app.state.settings.local_user_id,
+                client_id=str(uuid4()),
+                type="resource",
+                title=title,
+                body="",
+                source_url=f"https://example.com/pending/{memo_id}",
+                resource_metadata_status="ready",
+                link_health_status="healthy",
+                resource_category="other",
+                resource_category_label="其他",
+                resource_category_source="fallback",
+                resource_category_status="ready",
+            )
+        )
+        session.commit()
+    return memo_id
+
+
 def selection(client: TestClient, memo_id: str) -> dict[str, object]:
     """使用用户当前看到的版本构建确认请求。"""
 
@@ -179,8 +207,7 @@ def test_review_pagination_filters_and_private_fields(client: TestClient) -> Non
 @pytest.mark.parametrize(
     "change",
     [
-        {"resource_ai_review_required": True},
-        {"link_health_status": "changed"},
+        {"link_health_status": "failed"},
         {"status": "trashed"},
         {"ebook_provider": "baidu"},
         {"type": "idea"},
@@ -193,7 +220,7 @@ def test_review_does_not_bypass_health_or_protected_resources(
     client: TestClient,
     change: dict[str, object],
 ) -> None:
-    """分类确认不得释放巡检确认、改动手动分类或处理非网页条目。"""
+    """分类确认不得处理确认失效、改动手动分类或处理非网页条目。"""
 
     memo_id = seed_reviews(client)[0]
     with client.app.state.database.session_factory() as session:
@@ -443,6 +470,7 @@ def test_review_account_isolation_and_authentication(client: TestClient) -> None
         ).token
     client.app.state.settings = replace(settings, auth_dev_mode=False)
     assert client.get(REVIEW_URL).status_code == 401
+    assert client.post(f"{REVIEW_URL}/retry").status_code == 401
     assert (
         client.post(
             f"{REVIEW_URL}/confirm", json={"action": "keep", "items": [item]}
@@ -472,6 +500,18 @@ def test_review_account_isolation_and_authentication(client: TestClient) -> None
         ).status_code
         == 400
     )
+    assert (
+        client.get(REVIEW_URL, headers={"Authorization": f"Bearer {own}"}).json()[
+            "total_count"
+        ]
+        == 1
+    )
+    retry = client.post(
+        f"{REVIEW_URL}/retry",
+        headers={"Authorization": f"Bearer {other}"},
+    )
+    assert retry.status_code == 202
+    assert retry.json()["review_count"] == 0
     assert (
         client.get(REVIEW_URL, headers={"Authorization": f"Bearer {own}"}).json()[
             "total_count"
@@ -565,9 +605,7 @@ def test_model_response_cannot_overwrite_intervening_confirmation(
         assert result.json()["updated_count"] == 1
         return CategoryDecision("learning", "学习资料", 0.9, "jev", ())
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     memo = client.get(f"/api/v1/memos/{memo_id}").json()
@@ -666,6 +704,7 @@ def test_review_migration_recovers_only_attempted_eligible_legacy_rows(
         job.succeeded_count = 1
         job.failed_count = 3
         session.get(Memo, ids[0]).resource_ai_classified_at = datetime.now(UTC)
+        session.get(Memo, ids[2]).link_health_status = "failed"
         session.get(Memo, ids[2]).resource_ai_review_required = True
         session.get(Memo, ids[3]).resource_category_source = "manual"
         session.commit()
@@ -700,3 +739,158 @@ def test_review_migration_recovers_only_attempted_eligible_legacy_rows(
         ]
         == "keep"
     )
+
+
+def test_retry_reviews_queues_only_pending_confirmations(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重新分类只排队待确认网页，保留原分类直到模型给出新结果。"""
+
+    review_ids = seed_reviews(client, 2)
+    confirmed_id = seed_reviews(client)[0]
+    pending_id = seed_pending_resource(client)
+    client.post(
+        f"{REVIEW_URL}/confirm",
+        json={"action": "keep", "items": [selection(client, confirmed_id)]},
+    ).raise_for_status()
+    before = [client.get(f"/api/v1/memos/{memo_id}").json() for memo_id in review_ids]
+    configure_jev(client)
+    calls: list[str | None] = []
+
+    def classify(metadata: ResourceMetadata, *_args: object) -> CategoryDecision:
+        """待确认网页改为学习资料，证明队列确实再次请求模型。"""
+
+        calls.append(metadata.page_title)
+        return CategoryDecision("learning", "学习资料", 0.9, "jev", ("学习资料",))
+
+    patch_web_classifier(monkeypatch, classify)
+    response = client.post(f"{REVIEW_URL}/retry")
+    assert response.status_code == 202
+    state = response.json()
+    assert state["review_count"] == 0
+    assert state["job"]["total_count"] == 2
+    assert state["job"]["processed_count"] == 0
+    assert state["job"]["status"] == "pending"
+    with client.app.state.database.session_factory() as session:
+        job = session.get(
+            ResourceClassificationJob, client.app.state.settings.local_user_id
+        )
+        assert set(job.memo_ids) == set(review_ids)
+        assert pending_id not in job.memo_ids
+        assert confirmed_id not in job.memo_ids
+    for memo_id, snapshot in zip(review_ids, before, strict=True):
+        current = client.get(f"/api/v1/memos/{memo_id}").json()
+        assert current["resource_ai_confirmation_pending"] is False
+        assert current["resource_category"] == snapshot["resource_category"]
+        assert current["resource_categories"] == snapshot["resource_categories"]
+        assert current["resource_category_source"] == "rule"
+        assert current["resource_ai_classified_at"] is None
+        assert current["version"] == snapshot["version"]
+    settings = client.app.state.settings
+    assert run_pending_classification_jobs(settings.database_url, settings) == 2
+    assert sorted(calls) == ["复核网页 0", "复核网页 1"]
+    for memo_id in review_ids:
+        memo = client.get(f"/api/v1/memos/{memo_id}").json()
+        assert memo["resource_category"] == "learning"
+        assert memo["resource_category_source"] == "jev"
+        assert memo["resource_ai_classified_at"] is not None
+        assert memo["resource_ai_confirmation_pending"] is False
+    pending = client.get(f"/api/v1/memos/{pending_id}").json()
+    assert pending["resource_category_source"] == "fallback"
+    assert pending["resource_ai_classified_at"] is None
+    confirmed = client.get(f"/api/v1/memos/{confirmed_id}").json()
+    assert confirmed["resource_ai_confirmation"]["action"] == "keep"
+    assert client.get("/api/v1/resource-classification").json()["review_count"] == 0
+
+
+def test_retry_reviews_requires_model_and_rejects_active_job(
+    client: TestClient,
+) -> None:
+    """未配置模型时不改队列；任务进行中拒绝重新分类待确认网页。"""
+
+    review_id = seed_reviews(client)[0]
+    missing = client.post(f"{REVIEW_URL}/retry")
+    assert missing.status_code == 400
+    assert "配置并启用 DeepSeek 或 Jev" in missing.json()["detail"]
+    assert client.get(REVIEW_URL).json()["total_count"] == 1
+    configure_jev(client)
+    seed_pending_resource(client)
+    started = client.post("/api/v1/resource-classification")
+    assert started.status_code == 202
+    assert started.json()["job"]["status"] in {"pending", "processing"}
+    blocked = client.post(f"{REVIEW_URL}/retry")
+    assert blocked.status_code == 409
+    assert "还在进行" in blocked.json()["detail"]
+    assert client.get(REVIEW_URL).json()["items"][0]["id"] == review_id
+
+
+def test_retry_reviews_replaces_failed_job_instead_of_resuming(
+    client: TestClient,
+) -> None:
+    """暂停任务再跑待确认时新建队列，不继续原游标里已失败的条目。"""
+
+    review_ids = seed_reviews(client, 2)
+    pending_id = seed_pending_resource(client)
+    configure_jev(client)
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        job = start_classification_job(session, settings.local_user_id, settings)
+        original_id = job.id
+        original_queue = list(job.memo_ids)
+        job.status = "failed"
+        job.processed_count = 2
+        job.failed_count = 2
+        session.commit()
+    assert set(original_queue) == set([*review_ids, pending_id])
+    response = client.post(f"{REVIEW_URL}/retry")
+    assert response.status_code == 202
+    replaced = response.json()["job"]
+    assert replaced["id"] != original_id
+    assert replaced["total_count"] == 2
+    assert replaced["processed_count"] == replaced["failed_count"] == 0
+    with client.app.state.database.session_factory() as session:
+        job = session.get(ResourceClassificationJob, settings.local_user_id)
+        assert job.id == replaced["id"]
+        assert set(job.memo_ids) == set(review_ids)
+        assert pending_id not in job.memo_ids
+
+
+def test_retry_reviews_empty_queue_does_not_clobber_failed_job(
+    client: TestClient,
+) -> None:
+    """没有待确认网页时保持可继续的暂停任务。"""
+
+    pending_id = seed_pending_resource(client)
+    configure_jev(client)
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        job = start_classification_job(session, settings.local_user_id, settings)
+        original_id = job.id
+        job.status = "failed"
+        job.processed_count = 0
+        session.commit()
+    empty = client.post(f"{REVIEW_URL}/retry")
+    assert empty.status_code == 202
+    assert empty.json()["job"]["id"] == original_id
+    assert empty.json()["job"]["status"] == "failed"
+    assert empty.json()["review_count"] == 0
+    none = client.post(f"{REVIEW_URL}/retry")
+    # 第二次仍是同一暂停任务，不会改成空的已完成任务。
+    assert none.json()["job"]["id"] == original_id
+    with client.app.state.database.session_factory() as session:
+        job = session.get(ResourceClassificationJob, settings.local_user_id)
+        assert job.memo_ids == [pending_id]
+
+
+def test_retry_reviews_empty_without_job_returns_completed_state(
+    client: TestClient,
+) -> None:
+    """没有任务也没有待确认网页时返回空的已完成进度。"""
+
+    response = client.post(f"{REVIEW_URL}/retry")
+    assert response.status_code == 202
+    state = response.json()
+    assert state["review_count"] == 0
+    assert state["job"]["total_count"] == 0
+    assert state["job"]["status"] == "completed"

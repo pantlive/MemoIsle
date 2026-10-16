@@ -111,12 +111,14 @@ class Settings:
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-flash"
-    deepseek_timeout_seconds: float = 30.0
+    deepseek_timeout_seconds: float = 60.0
     # Jev 只选择已有类别；与 DeepSeek 的模板生成凭证分别配置。
     jev_base_url: str = "https://api.typesafe.ai/v1"
     jev_api_key: str | None = None
     jev_model: str = "jev-1.13.0"
     jev_min_confidence: float = 0.7
+    # 按分类口径判定时的最低置信度；低于它的结果进分类确认中心。
+    classification_min_confidence: float = 0.7
     # 设置页凭据使用持久化加密密钥，默认与数据库保存在同一目录。
     model_credential_key_file: Path | None = None
     # 图片 OCR：none 关闭；local 只用本地引擎；llm 只用视觉大模型；
@@ -376,7 +378,7 @@ class Settings:
                 "MEMOISLE_DEEPSEEK_MODEL", "deepseek-flash",
             ),
             deepseek_timeout_seconds=float(
-                os.environ.get("MEMOISLE_DEEPSEEK_TIMEOUT_SECONDS", "30"),
+                os.environ.get("MEMOISLE_DEEPSEEK_TIMEOUT_SECONDS", "60"),
             ),
             jev_base_url=os.environ.get(
                 "MEMOISLE_JEV_BASE_URL", "https://api.typesafe.ai/v1",
@@ -392,6 +394,17 @@ class Settings:
                 min(
                     1.0,
                     float(os.environ.get("MEMOISLE_JEV_MIN_CONFIDENCE", "0.7")),
+                ),
+            ),
+            classification_min_confidence=max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        os.environ.get(
+                            "MEMOISLE_CLASSIFICATION_MIN_CONFIDENCE", "0.7",
+                        ),
+                    ),
                 ),
             ),
             image_ocr_provider=normalize_image_ocr_provider(

@@ -76,6 +76,7 @@ Web / Android 搜索
 - 音频文件名完全由服务端生成，下载前检查条目所有者。
 - 已有 SQLite 数据库自动补充资料来源字段，不清空原有灵感。
 - SQLite 本地开发持久化；连接地址可通过环境变量替换。
+- SQLite 连接启用 WAL 与 `busy_timeout=5000`：后台巡检读取不再阻塞界面保存和浏览器扩展同步写入，偶发同时写入改为短暂等待而不是直接报 `database is locked`。
 - 使用 `user_id + client_id` 保证离线重试幂等。
 - 使用 `version` 检测跨设备更新冲突，冲突返回 HTTP 409 和服务端当前内容。
 - Android 首次同步完成全量校准，之后按 `updated_at + id` 游标分页增量同步；游标持久化在本地 SQLite，远端刷新保留本机录音路径和离线失败草稿。
@@ -90,9 +91,15 @@ Web / Android 搜索
 - 普通列表与搜索在执行条数限制前按更新时间倒序，确保最新收藏不会被旧数据截掉；增量同步按 `updated_at + id` 正序游标推进，兼容同一时间戳的分页边界。
 - 网页资料支持文章、视频、课程、工具、书籍、其他六种资源形态，以及未读、阅读中、已完成、归档四种阅读进度；个人收藏夹和星标与系统自动分类分开保存。
 - 网页元数据任务具备公网 URL/重定向 SSRF 防护、大小/超时限制和重启恢复。
-- 自动分类提供“用户分类模板/规则 → 固定七类系统规则 → 可选大模型 → 其他”的处理链，并校验大模型分类白名单。
+- 自动分类提供“用户分类模板/规则 → 用户口径判定 → 系统七类兜底 → 关键词 → 其他”的处理链，并校验模型返回的分类白名单。
+- 每个自定义分类可写“分类口径”：判定说明、属于的例子、边界反例；判定时连同该账号已人工确认的历史样本一起发给模型。口径为空时仍按分类名称和路径判断网页用途。
+- 自动分类在配置了对话模型和 Jev 时分两步：对话模型根据当前网页和已确认样本列出所有成立的功能标签（白名单内，可多选），再由 Jev 在这份候选里做最终分类；其余成立的标签作为附加分类和自动标签保留，并写入 `proposed_categories` 供界面展示。没有 Jev 时对话模型的列表直接作为分类结果。DeepSeek 请求失败时 Jev 回退到完整模板判定。两者都未配置时后台任务按配置错误报出，不会用规则结果冒充模型分类。已完成的模型分类可通过「重新分类已完成」再排队一轮，人工确认和确认失效的网页不纳入。
+- 「智能生成分类」先列出当前顶级分类，由用户确认是否够用。够用后按这些大类生成细类；不够则先补顶级分类，加入模板后再细分。读取最近网页的标题、站点和公开摘要。结果直接显示在网页资料页。加入模板后需再跑分类才会写到网页上。
+- 有更具体的子类时不会停在大类。有自定义细类时高置信度关键词规则不再抢先定案。
+- 人工在确认中心指定或采纳分类后，该条目立即成为目标分类的正例；被改掉的模型首选则成为原分类的反例，下一次判定即可用。
+- 自动分类置信度阈值按账号保存在模型服务设置里（默认 0.7），低于阈值的结果进分类确认中心，可在设置页调整以平衡自动分类与人工确认。
 - Web 支持创建、停用自定义分类模板，配置域名、网址或标题/描述关键词规则；规则会应用到已有网页资料，Android 同步显示自定义分类名称。
-- Web「分类确认中心」完整分页复核未确定分类，支持搜索、原因、首选候选和置信度筛选，以及批量采纳候选、指定分类、保留原分类。版本冲突、停用候选和巡检待确认条目逐项跳过；人工确认保留原模型证据并停止自动分类，旧批次未保存候选的网页也可指定或保留分类。
+- Web「分类确认中心」完整分页复核未确定分类，支持搜索、原因、首选候选和置信度筛选，以及批量采纳候选、指定分类、保留原分类。也可把全部待确认网页重新交给大模型和 Jev 分类，不把其余未处理网页一并排队。版本冲突、停用候选和确认失效条目逐项跳过；人工确认保留原模型证据并停止自动分类，旧批次未保存候选的网页也可指定或保留分类。
 - 网页健康调度支持同站点单轮限流、连续失败阈值、指数退避、审计事件、账号开关、账号频率和站点暂停；单条资料可在巡检中心暂停或恢复。
 - 微信、Google 和 Apple ID OAuth 授权码登录代码已保留，`state` 使用 HMAC 签名并限制回跳来源；默认关闭，需显式设置 `MEMOISLE_OAUTH_LOGIN_ENABLED=true` 且凭据完整才会对外授权。
 - 支持邮箱密码注册与登录，密码使用 PBKDF2-SHA256、随机盐和 600,000 次迭代保存。
@@ -130,17 +137,22 @@ Web / Android 搜索
 | GET | `/api/v1/exports/json` | 下载当前账号的 JSON 数据副本，不含访问令牌和录音二进制 |
 | GET | `/api/v1/exports/csv` | 下载当前账号的 CSV 数据副本 |
 | GET | `/api/v1/exports/markdown` | 下载当前账号的 Markdown 数据副本 |
-| POST | `/api/v1/imports` | 导入 JSON 或 CSV 备份，恢复灵感、单词和网页资料 |
+| POST | `/api/v1/imports` | 导入 JSON 或 CSV 备份；JSON 同时恢复自定义分类模板 |
 | POST | `/api/v1/words/import` | 导入 JSON/CSV 单词并返回新增、重复、跳过和失败摘要 |
 | GET | `/api/v1/resource-categories` | 读取系统分类和当前用户自定义分类模板 |
-| POST | `/api/v1/resource-categories` | 创建用户自定义分类模板 |
-| PATCH | `/api/v1/resource-categories/{id}` | 修改或停用用户自定义分类模板 |
-| GET | `/api/v1/resource-classification/review` | 当前账号未确定网页的完整分页与候选、原因、置信度筛选 |
+| POST | `/api/v1/resource-categories` | 创建用户自定义分类模板，可同时写入分类口径、属于与不属于的例子 |
+| PATCH | `/api/v1/resource-categories/{id}` | 修改或停用用户自定义分类模板；可更新口径和正反例 |
+| GET | `/api/v1/resource-classification/review` | 当前账号未确定网页的完整分页与候选、原因（含“口径都不匹配”）、置信度筛选 |
+| POST | `/api/v1/resource-classification/review/retry` | 把待确认网页重新排队给大模型和 Jev；任务进行中返回 409，不沿用暂停任务的已处理游标 |
+| POST | `/api/v1/resource-classification/classified/retry` | 把已完成模型分类的网页重新排队给大模型和 Jev；人工确认、规则保护和确认失效的条目跳过 |
 | POST | `/api/v1/resource-classification/review/confirm` | 按所见版本批量采纳候选、保留分类或指定分类；逐项返回冲突和其他跳过原因 |
 | GET | `/api/v1/resource-category-rules` | 读取当前用户分类规则 |
 | POST | `/api/v1/resource-category-rules` | 创建分类规则并应用到已有资料 |
 | PATCH | `/api/v1/resource-category-rules/{id}` | 修改分类规则 |
 | DELETE | `/api/v1/resource-category-rules/{id}` | 删除分类规则 |
+| GET | `/api/v1/model-settings` | 读取各模型服务的生效配置，含自动分类置信度阈值与服务器默认值 |
+| PUT | `/api/v1/model-settings/{provider}` | 保存模型配置；`min_confidence` 留空恢复默认阈值 |
+| DELETE | `/api/v1/model-settings/{provider}` | 删除账号配置并恢复服务器默认值 |
 | GET | `/api/v1/memos/{id}` | 读取详情 |
 | PATCH | `/api/v1/memos/{id}` | 带版本号编辑 |
 | DELETE | `/api/v1/memos/{id}` | 移入回收站 |
@@ -173,6 +185,9 @@ Web / Android 搜索
 | POST | `/api/v1/browser-captures` | 扩展提交当前页并换取短时凭据 |
 | POST | `/api/v1/browser-captures/exchange` | Web 一次性消费当前页凭据 |
 | POST | `/api/v1/resources/{id}/enrich` | 重试网页元数据与分类 |
+| POST | `/api/v1/resources/{id}/open` | 记录一次打开原网页；只累加打开次数和最近打开时间，不改版本号与 `updated_at` |
+| GET | `/api/v1/resources/quick-access` | 快速访问：打开过、未移除、不在回收站的网页资料，按打开次数降序 |
+| PUT | `/api/v1/resources/{id}/quick-access` | 从快速访问移除或恢复；移除后继续计数，不改版本号 |
 | GET | `/api/v1/resources/link-health` | 读取巡检中心、状态摘要和账号巡检设置 |
 | PATCH | `/api/v1/resources/link-health/settings` | 更新账号巡检开关和检查频率 |
 | POST | `/api/v1/resources/link-health/site-pauses` | 暂停或恢复某个网站的全部巡检 |
@@ -337,7 +352,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 ### 3.4 浏览器扩展
 
-点击 Web 顶栏“下载扩展”，解压 `memoisle-browser-extension.zip`，然后在
+点击 Web 顶栏“下载扩展”，解压 `memoisle-browser-extension-<version>.zip`，然后在
 Chrome 或 Edge 的扩展管理页启用开发者模式并选择“加载已解压的扩展”。加载后刷新
 MemoIsle 页面并登录，使页面把当前用户凭证同步给扩展。
 本地开发也可以直接加载仓库中的 `extension` 目录。

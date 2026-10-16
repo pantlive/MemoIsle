@@ -43,6 +43,8 @@ from app.resource_service import (
 )
 from fastapi.testclient import TestClient
 
+from tests.classification_stubs import patch_web_classifier
+
 
 @pytest.fixture(autouse=True)
 def pause_automatic_worker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,13 +154,11 @@ def test_jev_classification_accepts_relay_slower_than_eight_seconds(
     assert decision.source == "jev"
 
 
-@pytest.mark.parametrize("health_status", ["failed", "healthy"])
-def test_rule_removal_does_not_send_review_held_pages_to_models(
+def test_rule_removal_does_not_send_failed_pages_to_models(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
-    health_status: str,
 ) -> None:
-    """规则删除后仍等待人工确认，后台恢复正常也不能绕过准入限制。"""
+    """确认失效的网页在规则删除后也不调用模型。"""
 
     configure_jev(client)
     memo_id = create_resource(client)
@@ -176,7 +176,7 @@ def test_rule_removal_does_not_send_review_held_pages_to_models(
     with client.app.state.database.session_factory() as session:
         memo = session.get(Memo, memo_id)
         memo.resource_category_source = "user_rule"
-        memo.link_health_status = health_status
+        memo.link_health_status = "failed"
         memo.resource_ai_review_required = True
         session.commit()
         reclassify_user_rule_resources(
@@ -185,6 +185,40 @@ def test_rule_removal_does_not_send_review_held_pages_to_models(
             client.app.state.settings,
         )
         assert memo.resource_ai_classified_at is None
+        assert memo.resource_ai_review_required is True
+    assert len(calls) == 1
+
+
+def test_rule_removal_classifies_review_required_pages(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """巡检中心待确认不再阻止规则删除后的模型分类。"""
+
+    configure_jev(client)
+    memo_id = create_resource(client)
+    calls: list[str] = []
+
+    def classify(metadata: ResourceMetadata, **kwargs: object) -> CategoryDecision:
+        """巡检待确认的正常网页仍应把模型凭证传给分类入口。"""
+
+        assert kwargs["jev_api_key"] is not None
+        calls.append(metadata.final_url)
+        return tool_decision()
+
+    monkeypatch.setattr("app.resource_service.classify_resource", classify)
+    with client.app.state.database.session_factory() as session:
+        memo = session.get(Memo, memo_id)
+        memo.resource_category_source = "user_rule"
+        memo.link_health_status = "healthy"
+        memo.resource_ai_review_required = True
+        session.commit()
+        reclassify_user_rule_resources(
+            session,
+            client.app.state.settings.local_user_id,
+            client.app.state.settings,
+        )
+        assert memo.resource_ai_classified_at is not None
         assert memo.resource_ai_review_required is True
     assert len(calls) == 1
 
@@ -218,10 +252,7 @@ def test_batch_processes_rules_once_and_skips_completed(
         calls.append(metadata)
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     first = client.post("/api/v1/resource-classification")
     assert first.status_code == 202
     first_id = first.json()["job"]["id"]
@@ -272,13 +303,13 @@ def test_preserves_protected_and_legacy_ai_categories(
     )
 
 
-def test_requires_jev_and_does_not_fallback_to_rules(client: TestClient) -> None:
+def test_requires_model_and_does_not_fallback_to_rules(client: TestClient) -> None:
     """模型不可用时不能把规则处理算成大模型分类完成。"""
 
     memo_id = create_resource(client)
     response = client.post("/api/v1/resource-classification")
     assert response.status_code == 400
-    assert "配置并启用 Jev" in response.json()["detail"]
+    assert "配置并启用 DeepSeek 或 Jev" in response.json()["detail"]
     assert (
         client.get(f"/api/v1/memos/{memo_id}").json()["resource_ai_classified_at"]
         is None
@@ -305,10 +336,7 @@ def test_uncertain_result_remains_retryable_without_repeating_success(
             raise ValueError("uncertain_or_invalid_jev_category")
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
@@ -353,10 +381,7 @@ def test_service_failure_stops_batch_and_hides_secrets(
             "private-upstream-key", request=request, response=response
         )
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
@@ -395,10 +420,7 @@ def test_resume_preserves_progress_and_does_not_repeat_processed_items(
 
         return stopped
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
@@ -448,10 +470,7 @@ def test_active_worker_lease_prevents_duplicate_model_requests(
             )
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
         assert (
@@ -481,10 +500,7 @@ def test_manual_edit_during_model_request_is_not_overwritten(
             other.commit()
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
         process_classification_job(session, settings.local_user_id, settings)
@@ -514,6 +530,7 @@ def test_job_and_resource_counts_are_isolated_by_account(client: TestClient) -> 
     client.app.state.settings = replace(settings, auth_dev_mode=False)
     assert client.get("/api/v1/resource-classification").status_code == 401
     assert client.post("/api/v1/resource-classification").status_code == 401
+    assert client.post("/api/v1/resource-classification/classified/retry").status_code == 401
     other_headers = {"Authorization": f"Bearer {other}"}
     other_state = client.get(
         "/api/v1/resource-classification", headers=other_headers
@@ -584,8 +601,8 @@ def test_url_change_invalidates_previous_completion_marker(
     assert response.status_code == 200
     assert response.json()["resource_ai_classified_at"] is None
     state = client.get("/api/v1/resource-classification").json()
-    assert state["pending_count"] == 0
-    assert state["deferred_count"] == 1
+    assert state["pending_count"] == 1
+    assert state["deferred_count"] == 0
 
 
 def test_sqlite_upgrade_backfills_existing_model_classification(
@@ -614,29 +631,15 @@ def test_sqlite_upgrade_backfills_existing_model_classification(
     )
 
 
-@pytest.mark.parametrize(
-    "health_status",
-    [
-        "failed",
-        "redirected",
-        "changed",
-        "auth_required",
-        "temporary_failure",
-        "ignored",
-        "unchecked",
-    ],
-)
-def test_review_webpages_are_not_sent_to_model(
+def test_failed_webpages_are_not_sent_to_model(
     client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    health_status: str,
 ) -> None:
-    """全部巡检待确认项被排除，不受巡检列表 200 条上限影响。"""
+    """确认失效的网页不进入模型分类队列。"""
 
     memo_id = create_resource(client)
     with client.app.state.database.session_factory() as session:
         memo = session.get(Memo, memo_id)
-        memo.link_health_status = health_status
+        memo.link_health_status = "failed"
         apply_classification_health_gate(memo)
         session.commit()
     response = client.post("/api/v1/resource-classification")
@@ -647,11 +650,53 @@ def test_review_webpages_are_not_sent_to_model(
     assert state["job"]["total_count"] == 0
 
 
-def test_queued_webpage_is_skipped_when_health_changes(
+@pytest.mark.parametrize(
+    "health_status",
+    [
+        "redirected",
+        "changed",
+        "auth_required",
+        "temporary_failure",
+        "ignored",
+        "unchecked",
+        "healthy",
+    ],
+)
+def test_non_failed_health_statuses_are_classified(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    health_status: str,
+) -> None:
+    """巡检失败以外的网页都进入分类，包括巡检中心待确认项。"""
+
+    configure_jev(client)
+    memo_id = create_resource(client)
+    with client.app.state.database.session_factory() as session:
+        memo = session.get(Memo, memo_id)
+        memo.link_health_status = health_status
+        apply_classification_health_gate(memo)
+        if health_status == "healthy":
+            memo.resource_ai_review_required = True
+        session.commit()
+    patch_web_classifier(monkeypatch, lambda *_args: tool_decision())
+    response = client.post("/api/v1/resource-classification")
+    assert response.status_code == 202
+    state = response.json()
+    assert state["pending_count"] == 1
+    assert state["deferred_count"] == 0
+    assert state["job"]["total_count"] == 1
+    settings = client.app.state.settings
+    assert run_pending_classification_jobs(settings.database_url, settings) == 1
+    after = client.get(f"/api/v1/memos/{memo_id}").json()
+    assert after["resource_ai_classified_at"] is not None
+    assert after["link_health_status"] == health_status
+
+
+def test_queued_webpage_is_classified_when_health_is_not_failed(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """排队后才进入巡检中心的网页也不能调用模型。"""
+    """排队后进入巡检中心但尚未确认失效的网页仍调用模型。"""
 
     configure_jev(client)
     memo_id = create_resource(client)
@@ -659,15 +704,13 @@ def test_queued_webpage_is_skipped_when_health_changes(
     calls = 0
 
     def classify(_metadata: ResourceMetadata, *_args: object) -> CategoryDecision:
-        """记录任何意外发生的模型调用。"""
+        """记录模型调用，证明非失效巡检状态仍会分类。"""
 
         nonlocal calls
         calls += 1
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
         memo = session.get(Memo, memo_id)
@@ -675,19 +718,17 @@ def test_queued_webpage_is_skipped_when_health_changes(
         apply_classification_health_gate(memo)
         session.commit()
         process_classification_job(session, settings.local_user_id, settings)
-        assert (
-            session.get(ResourceClassificationJob, settings.local_user_id).skipped_count
-            == 1
-        )
-        assert session.get(Memo, memo_id).resource_ai_classified_at is None
-    assert calls == 0
+        job = session.get(ResourceClassificationJob, settings.local_user_id)
+        assert job.succeeded_count == 1
+        assert session.get(Memo, memo_id).resource_ai_classified_at is not None
+    assert calls == 1
 
 
-def test_automatic_recovery_still_requires_manual_confirmation(
+def test_automatic_recovery_classifies_while_review_center_waits(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """后台巡检恢复正常不能自动分类；明确人工确认后才自动排队。"""
+    """后台巡检恢复后可以自动分类；巡检中心仍等待人工确认。"""
 
     configure_jev(client)
     memo_id = create_resource(client)
@@ -699,13 +740,11 @@ def test_automatic_recovery_still_requires_manual_confirmation(
         return ResourceMetadata(url, "可保留的网页", "公开描述", "Example", None, 200)
 
     def classify(_metadata: ResourceMetadata, *_args: object) -> CategoryDecision:
-        """人工确认后模拟有效的模型分类。"""
+        """恢复正常后模拟有效的模型分类。"""
 
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     with client.app.state.database.session_factory() as session:
         memo = session.get(Memo, memo_id)
         memo.link_health_status = "temporary_failure"
@@ -716,7 +755,13 @@ def test_automatic_recovery_still_requires_manual_confirmation(
         )
         assert memo.link_health_status == "healthy"
         assert memo.resource_ai_review_required is True
-        assert queue_automatic_classifications(session, settings) == 0
+        state = classification_state(session, settings.local_user_id)
+        assert state.pending_count == 1
+        assert state.deferred_count == 0
+        assert queue_automatic_classifications(session, settings) == 1
+        process_classification_job(session, settings.local_user_id, settings)
+        assert session.get(Memo, memo_id).resource_ai_classified_at is not None
+        assert session.get(Memo, memo_id).resource_ai_review_required is True
         center = client.get("/api/v1/resources/link-health").json()
         assert center["counts"]["review_pending"] == 1
         assert [item["id"] for item in center["items"]] == [memo_id]
@@ -732,16 +777,13 @@ def test_automatic_recovery_still_requires_manual_confirmation(
         )
         assert memo.resource_ai_review_required is False
         assert client.get("/api/v1/resources/link-health").json()["items"] == []
-        assert queue_automatic_classifications(session, settings) == 1
-        process_classification_job(session, settings.local_user_id, settings)
-        assert session.get(Memo, memo_id).resource_ai_classified_at is not None
 
 
 def test_health_change_during_inference_prevents_category_write(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """推理期间发现巡检异常，提交结果时也必须再次遵守确认门槛。"""
+    """推理期间被确认为失效时，提交结果也必须跳过写入。"""
 
     configure_jev(client)
     memo_id = create_resource(client)
@@ -757,10 +799,7 @@ def test_health_change_during_inference_prevents_category_write(
             other.commit()
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev",
-        classify,
-    )
+    patch_web_classifier(monkeypatch, classify)
     with client.app.state.database.session_factory() as session:
         start_classification_job(session, settings.local_user_id, settings)
         process_classification_job(session, settings.local_user_id, settings)
@@ -823,9 +862,7 @@ def test_new_imports_are_detected_and_classified_automatically(
         calls += 1
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     assert client.get("/api/v1/resource-classification").json()["job"] is None
     assert run_pending_classification_jobs(settings.database_url, settings) == 3
@@ -855,9 +892,7 @@ def test_uncertain_auto_classification_is_not_retried_in_a_loop(
         calls += 1
         raise ValueError("uncertain_or_invalid_jev_category")
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
     assert run_pending_classification_jobs(settings.database_url, settings) == 0
@@ -892,9 +927,7 @@ def test_auto_queue_waits_when_provider_has_failed(
             response=httpx.Response(401, request=request),
         )
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     run_pending_classification_jobs(settings.database_url, settings)
@@ -968,9 +1001,7 @@ def test_quality_content_is_cached_across_provider_retries(
     monkeypatch.setattr(
         "app.resource_classification_service.fetch_resource_metadata", fetch
     )
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     assert run_pending_classification_jobs(settings.database_url, settings) == 0
     make_retry_due(client)
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
@@ -1015,9 +1046,7 @@ def test_uncertain_quality_evidence_preserves_category_and_is_reset_on_url_chang
         )
         raise AssertionError("低置信度不得接受")
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     after = client.get(f"/api/v1/memos/{memo_id}").json()
@@ -1052,13 +1081,13 @@ def test_uncertain_quality_evidence_preserves_category_and_is_reset_on_url_chang
         ("private", "temporary_failure"),
     ],
 )
-def test_quality_fetch_health_problem_defers_without_model_request(
+def test_quality_fetch_health_problem_still_classifies(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     problem: str,
     status: str,
 ) -> None:
-    """补正文发现新的巡检问题时排队待人工确认，绝不发送模型请求。"""
+    """补正文发现新的巡检问题时写入巡检中心，仍用已有元数据完成分类。"""
 
     configure_jev(client)
     memo_id = create_resource(client)
@@ -1089,26 +1118,19 @@ def test_quality_fetch_health_problem_defers_without_model_request(
             text_excerpt="公开正文",
         )
 
-    def classify(_metadata: ResourceMetadata, *_args: object) -> CategoryDecision:
-        """巡检尚未确认时调用模型属于错误。"""
-
-        raise AssertionError("待巡检确认网页不能调用模型")
-
     monkeypatch.setattr(
         "app.resource_classification_service.fetch_resource_metadata", fetch
     )
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, lambda *_args: tool_decision())
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
     after = client.get(f"/api/v1/memos/{memo_id}").json()
     assert after["link_health_status"] == status
     assert after["resource_ai_review_required"] is True
-    assert after["resource_ai_classified_at"] is None
+    assert after["resource_ai_classified_at"] is not None
     state = client.get("/api/v1/resource-classification").json()
-    assert state["deferred_count"] == 1
-    assert state["job"]["skipped_count"] == 1
-    assert state["job"]["failed_count"] == 0
+    assert state["deferred_count"] == 0
+    assert state["job"]["succeeded_count"] == 1
+    assert state["job"]["skipped_count"] == 0
 
 
 def test_edit_during_content_fetch_cannot_attach_old_text_or_call_model(
@@ -1141,9 +1163,7 @@ def test_edit_during_content_fetch_cannot_attach_old_text_or_call_model(
     monkeypatch.setattr(
         "app.resource_classification_service.fetch_resource_metadata", fetch
     )
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     run_pending_classification_jobs(settings.database_url, settings)
     after = client.get(f"/api/v1/memos/{memo_id}").json()
     assert after["source_url"] == "https://example.com/replaced"
@@ -1185,9 +1205,7 @@ def test_uncertain_result_after_manual_edit_is_skipped_not_saved(
         )
         raise AssertionError("低置信度不得接受")
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     after = client.get(f"/api/v1/memos/{memo_id}").json()
@@ -1297,9 +1315,7 @@ def test_classification_input_snapshot_survives_later_metadata_refresh(
         )
         return replace(tool_decision(), assessment=assessment)
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
 
@@ -1393,9 +1409,7 @@ def test_retry_wait_cannot_be_bypassed_by_repeated_resume_or_start(
 
         raise httpx.ReadTimeout("private-key")
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     before = client.get("/api/v1/resource-classification").json()["job"]
@@ -1431,9 +1445,7 @@ def test_long_retry_after_pauses_without_requesting_too_early(
         response = httpx.Response(429, request=request, headers={"Retry-After": "600"})
         raise httpx.HTTPStatusError("private-key", request=request, response=response)
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     job = client.get("/api/v1/resource-classification").json()["job"]
@@ -1504,9 +1516,7 @@ def test_transient_failure_has_persistent_bounded_retries(
             "private-upstream-key", request=request, response=response
         )
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     assert run_pending_classification_jobs(settings.database_url, settings) == 0
     first = client.get("/api/v1/resource-classification").json()["job"]
@@ -1571,9 +1581,7 @@ def test_retry_after_survives_restart_and_recovers_without_repeating_success(
             )
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
     before = client.get("/api/v1/resource-classification").json()["job"]
     assert before["processed_count"] == before["succeeded_count"] == 1
@@ -1626,9 +1634,7 @@ def test_manual_resume_keeps_queue_and_never_replays_uncertain_or_successful_pag
             )
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     client.post("/api/v1/resource-classification").raise_for_status()
     assert run_pending_classification_jobs(settings.database_url, settings) == 2
     original = client.get("/api/v1/resource-classification").json()["job"]
@@ -1672,9 +1678,7 @@ def test_retry_still_honors_new_health_review_hold(
         calls += 1
         raise httpx.ReadTimeout("private-upstream-key")
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     settings = client.app.state.settings
     run_pending_classification_jobs(settings.database_url, settings)
     with client.app.state.database.session_factory() as session:
@@ -1736,9 +1740,7 @@ def test_resume_is_account_scoped_and_new_imports_continue_after_recovery(
         calls.append(metadata.page_title or "")
         return tool_decision()
 
-    monkeypatch.setattr(
-        "app.resource_classification_service.classify_resource_with_jev", classify
-    )
+    patch_web_classifier(monkeypatch, classify)
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
     assert run_pending_classification_jobs(settings.database_url, settings) == 0
@@ -1781,44 +1783,47 @@ def test_retry_schema_upgrade_preserves_failed_job_progress(client: TestClient) 
         assert resumed.memo_ids == original_queue
 
 
-@pytest.mark.parametrize("outcome", ["failed", "redirected"])
-def test_enrichment_defers_model_calls_for_review_webpages(
+@pytest.mark.parametrize("outcome", ["auth_required", "redirected"])
+def test_enrichment_classifies_non_failed_review_webpages(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:
-    """新导入网页的访问异常或跳转也必须先等待用户筛选。"""
+    """新导入网页的访问异常或跳转仍写入巡检中心，同时完成模型分类。"""
 
     configure_jev(client)
     memo_id = create_resource(client)
     settings = client.app.state.settings
     calls = 0
 
-    def model_request(*_args: object, **_kwargs: object) -> httpx.Response:
-        """捕获任何不应发生的外部模型请求。"""
+    def classify(_metadata: ResourceMetadata, **kwargs: object) -> CategoryDecision:
+        """访问异常但尚未确认失效时仍应调用模型。"""
 
         nonlocal calls
         calls += 1
-        return httpx.Response(500)
+        assert kwargs["jev_api_key"] is not None
+        return tool_decision()
 
     def fetch(url: str) -> ResourceMetadata:
-        """分别模拟访问失败和需要采用新网址的网页。"""
+        """分别模拟需要登录和需要采用新网址的网页。"""
 
-        if outcome == "failed":
+        if outcome == "auth_required":
             raise ResourceFetchError("http_403", 403)
         return ResourceMetadata(
             url + "/redirected", "网页标题", None, "Example", None, 200
         )
 
-    monkeypatch.setattr("app.resource_processing.httpx.post", model_request)
+    monkeypatch.setattr("app.resource_service.classify_resource", classify)
     with client.app.state.database.session_factory() as session:
         memo = enrich_resource(
             session, settings.local_user_id, memo_id, settings, metadata_fetcher=fetch
         )
         assert memo.resource_ai_review_required is True
-        assert memo.resource_ai_classified_at is None
+        assert memo.link_health_status == outcome
+        assert memo.resource_ai_classified_at is not None
         assert classification_state(session, settings.local_user_id).pending_count == 0
-    assert calls == 0
+        assert classification_state(session, settings.local_user_id).deferred_count == 0
+    assert calls == 1
 
 
 def test_successful_model_classification_is_not_repeated_on_metadata_refresh(
@@ -1847,7 +1852,8 @@ def test_successful_model_classification_is_not_repeated_on_metadata_refresh(
     def fetch(url: str) -> ResourceMetadata:
         """提供可正常访问的元数据。"""
 
-        return ResourceMetadata(url, "工具主页", None, "Example", None, 200)
+        # 标题不含关键词，规则不抢答，元数据刷新仍应只调用一次模型。
+        return ResourceMetadata(url, "示例主页", None, "Example", None, 200)
 
     monkeypatch.setattr("app.resource_processing.httpx.post", model_request)
     with client.app.state.database.session_factory() as session:
@@ -1904,3 +1910,180 @@ def test_bookmark_enrichment_feeds_auto_classification_queue(
         assert calls == 0
     assert run_pending_classification_jobs(settings.database_url, settings) == 1
     assert calls == 1
+
+
+CLASSIFIED_RETRY_URL = "/api/v1/resource-classification/classified/retry"
+
+
+def mark_classified(
+    client: TestClient,
+    memo_id: str,
+    *,
+    source: str = "jev",
+    category: str = "tool",
+    label: str = "工具与服务",
+) -> None:
+    """把网页标成已完成的模型分类。"""
+
+    with client.app.state.database.session_factory() as session:
+        memo = session.get(Memo, memo_id)
+        assert memo is not None
+        memo.resource_category = category
+        memo.resource_category_label = label
+        memo.resource_categories = [category]
+        memo.resource_category_source = source
+        memo.resource_ai_classified_at = datetime.now(UTC)
+        memo.resource_ai_auto_pending = False
+        session.commit()
+
+
+def test_retry_classified_queues_only_completed_model_pages(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重新分类已完成网页只排队模型结果，保留原分类直到给出新结果。"""
+
+    classified_ids = [create_resource(client, f"已分类网页 {index}") for index in range(2)]
+    pending_id = create_resource(client, "尚未分类网页")
+    manual_id = create_resource(client, "人工分类网页")
+    confirmed_id = create_resource(client, "已确认网页")
+    deferred_id = create_resource(client, "确认失效网页")
+    for memo_id in classified_ids:
+        mark_classified(client, memo_id)
+    mark_classified(client, manual_id, source="manual", category="article", label="文章阅读")
+    mark_classified(client, confirmed_id)
+    mark_classified(client, deferred_id)
+    with client.app.state.database.session_factory() as session:
+        confirmed = session.get(Memo, confirmed_id)
+        confirmed.resource_ai_confirmation = {"action": "keep"}
+        deferred = session.get(Memo, deferred_id)
+        deferred.link_health_status = "failed"
+        deferred.resource_ai_review_required = True
+        session.commit()
+    before = [client.get(f"/api/v1/memos/{memo_id}").json() for memo_id in classified_ids]
+    configure_jev(client)
+    calls: list[str | None] = []
+
+    def classify(metadata: ResourceMetadata, *_args: object) -> CategoryDecision:
+        """已完成网页改为学习资料，证明队列再次请求模型。"""
+
+        calls.append(metadata.page_title)
+        return CategoryDecision("learning", "学习资料", 0.9, "jev", ("学习资料",))
+
+    patch_web_classifier(monkeypatch, classify)
+    response = client.post(CLASSIFIED_RETRY_URL)
+    assert response.status_code == 202
+    state = response.json()
+    assert state["job"]["total_count"] == 2
+    assert state["job"]["processed_count"] == 0
+    assert state["job"]["status"] == "pending"
+    assert state["classified_count"] == 3
+    assert state["classified_retry_count"] == 0
+    with client.app.state.database.session_factory() as session:
+        job = session.get(
+            ResourceClassificationJob, client.app.state.settings.local_user_id
+        )
+        assert set(job.memo_ids) == set(classified_ids)
+        assert pending_id not in job.memo_ids
+        assert manual_id not in job.memo_ids
+        assert confirmed_id not in job.memo_ids
+        assert deferred_id not in job.memo_ids
+    for memo_id, snapshot in zip(classified_ids, before, strict=True):
+        current = client.get(f"/api/v1/memos/{memo_id}").json()
+        assert current["resource_category"] == snapshot["resource_category"]
+        assert current["resource_category_source"] == "fallback"
+        assert current["resource_ai_classified_at"] is None
+        assert current["version"] == snapshot["version"]
+    settings = client.app.state.settings
+    assert run_pending_classification_jobs(settings.database_url, settings) == 2
+    assert sorted(calls) == ["已分类网页 0", "已分类网页 1"]
+    for memo_id in classified_ids:
+        memo = client.get(f"/api/v1/memos/{memo_id}").json()
+        assert memo["resource_category"] == "learning"
+        assert memo["resource_category_source"] == "jev"
+        assert memo["resource_ai_classified_at"] is not None
+    pending = client.get(f"/api/v1/memos/{pending_id}").json()
+    assert pending["resource_ai_classified_at"] is None
+    assert pending["resource_category_source"] != "jev"
+    manual = client.get(f"/api/v1/memos/{manual_id}").json()
+    assert manual["resource_category_source"] == "manual"
+    with client.app.state.database.session_factory() as session:
+        assert session.get(Memo, confirmed_id).resource_ai_classified_at is not None
+        assert session.get(Memo, deferred_id).resource_ai_classified_at is not None
+
+
+def test_retry_classified_requires_model_and_rejects_active_job(
+    client: TestClient,
+) -> None:
+    """未配置模型时不改已完成标记；任务进行中拒绝重新分类。"""
+
+    memo_id = create_resource(client)
+    mark_classified(client, memo_id)
+    missing = client.post(CLASSIFIED_RETRY_URL)
+    assert missing.status_code == 400
+    assert "配置并启用 DeepSeek 或 Jev" in missing.json()["detail"]
+    assert (
+        client.get(f"/api/v1/memos/{memo_id}").json()["resource_ai_classified_at"]
+        is not None
+    )
+    configure_jev(client)
+    create_resource(client, "未处理网页")
+    started = client.post("/api/v1/resource-classification")
+    assert started.status_code == 202
+    assert started.json()["job"]["status"] in {"pending", "processing"}
+    blocked = client.post(CLASSIFIED_RETRY_URL)
+    assert blocked.status_code == 409
+    assert "还在进行" in blocked.json()["detail"]
+    assert (
+        client.get(f"/api/v1/memos/{memo_id}").json()["resource_category_source"]
+        == "jev"
+    )
+
+
+def test_retry_classified_replaces_failed_job_instead_of_resuming(
+    client: TestClient,
+) -> None:
+    """暂停任务再跑已完成分类时新建队列，不继续原游标。"""
+
+    classified_id = create_resource(client, "已完成网页")
+    pending_id = create_resource(client, "未处理网页")
+    mark_classified(client, classified_id)
+    configure_jev(client)
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        job = start_classification_job(session, settings.local_user_id, settings)
+        original_id = job.id
+        assert job.memo_ids == [pending_id]
+        job.status = "failed"
+        job.processed_count = 0
+        session.commit()
+    response = client.post(CLASSIFIED_RETRY_URL)
+    assert response.status_code == 202
+    replaced = response.json()["job"]
+    assert replaced["id"] != original_id
+    assert replaced["total_count"] == 1
+    with client.app.state.database.session_factory() as session:
+        job = session.get(ResourceClassificationJob, settings.local_user_id)
+        assert job.memo_ids == [classified_id]
+
+
+def test_retry_classified_empty_queue_does_not_clobber_failed_job(
+    client: TestClient,
+) -> None:
+    """没有可重跑的已完成网页时保持可继续的暂停任务。"""
+
+    pending_id = create_resource(client)
+    configure_jev(client)
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        job = start_classification_job(session, settings.local_user_id, settings)
+        original_id = job.id
+        job.status = "failed"
+        session.commit()
+    empty = client.post(CLASSIFIED_RETRY_URL)
+    assert empty.status_code == 202
+    assert empty.json()["job"]["id"] == original_id
+    assert empty.json()["job"]["status"] == "failed"
+    with client.app.state.database.session_factory() as session:
+        job = session.get(ResourceClassificationJob, settings.local_user_id)
+        assert job.memo_ids == [pending_id]
