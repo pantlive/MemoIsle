@@ -101,6 +101,30 @@ data class SyncChangesResponse(
     val hasMore: Boolean? = null,
 )
 
+data class QuickAccessEntry(
+    val memo: Memo,
+    val openCount: Int,
+)
+
+data class VaultStatusResponse(
+    val configured: Boolean,
+    val kdf: String?,
+    val kdfIterations: Int?,
+    val kdfSalt: String?,
+    val wrappedKey: String?,
+    val wrapIv: String?,
+    val itemCount: Int,
+)
+
+data class VaultItemRecord(
+    val id: String,
+    val iv: String,
+    val ciphertext: String,
+    val version: Int,
+    val createdAt: String,
+    val updatedAt: String,
+)
+
 data class EmailRegisterResponse(
     val user: AuthUser,
 )
@@ -640,7 +664,75 @@ class MemoApiClient(baseUrl: String) {
         }
     }
 
+    fun recordResourceOpen(remoteId: String) {
+        execute("POST", "resources/$remoteId/open")
+    }
+
+    fun listQuickAccess(limit: Int = 8): List<QuickAccessEntry> {
+        val array = JSONArray(executeText("GET", "resources/quick-access?limit=$limit"))
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                add(QuickAccessEntry(item.toMemo(), item.optInt("resource_open_count", 0)))
+            }
+        }
+    }
+
+    fun setQuickAccessHidden(remoteId: String, hidden: Boolean) {
+        execute("PUT", "resources/$remoteId/quick-access", JSONObject().put("hidden", hidden))
+    }
+
+    // 密码库接口只收发密文，主密码和库密钥从不出现在请求里。
+    fun getVaultStatus(): VaultStatusResponse {
+        val response = execute("GET", "vault")
+        return VaultStatusResponse(
+            configured = response.optBoolean("configured", false),
+            kdf = response.optStringOrNull("kdf"),
+            kdfIterations = if (response.isNull("kdf_iterations")) null else response.optInt("kdf_iterations"),
+            kdfSalt = response.optStringOrNull("kdf_salt"),
+            wrappedKey = response.optStringOrNull("wrapped_key"),
+            wrapIv = response.optStringOrNull("wrap_iv"),
+            itemCount = response.optInt("item_count", 0),
+        )
+    }
+
+    fun listVaultItems(): List<VaultItemRecord> {
+        val array = JSONArray(executeText("GET", "vault/items"))
+        return buildList {
+            for (index in 0 until array.length()) {
+                add(array.getJSONObject(index).toVaultItemRecord())
+            }
+        }
+    }
+
+    fun createVaultItem(id: String, iv: String, ciphertext: String): VaultItemRecord {
+        val body = JSONObject().put("id", id).put("iv", iv).put("ciphertext", ciphertext)
+        return execute("POST", "vault/items", body).toVaultItemRecord()
+    }
+
+    fun updateVaultItem(
+        id: String,
+        iv: String,
+        ciphertext: String,
+        expectedVersion: Int,
+    ): VaultItemRecord {
+        val body = JSONObject()
+            .put("iv", iv)
+            .put("ciphertext", ciphertext)
+            .put("expected_version", expectedVersion)
+        return execute("PUT", "vault/items/$id", body).toVaultItemRecord()
+    }
+
+    fun deleteVaultItem(id: String, expectedVersion: Int) {
+        executeText("DELETE", "vault/items/$id?expected_version=$expectedVersion")
+    }
+
     private fun execute(method: String, path: String, body: JSONObject? = null): JSONObject {
+        // 204 等空响应按空对象处理。
+        return JSONObject(executeText(method, path, body).ifBlank { "{}" })
+    }
+
+    private fun executeText(method: String, path: String, body: JSONObject? = null): String {
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
         return try {
             connection.requestMethod = method
@@ -668,11 +760,26 @@ class MemoApiClient(baseUrl: String) {
             if (statusCode !in 200..299) {
                 throw ApiException(statusCode, responseBody)
             }
-            JSONObject(responseBody)
+            responseBody
         } finally {
             connection.disconnect()
         }
     }
+}
+
+private fun JSONObject.optStringOrNull(name: String): String? {
+    return if (isNull(name)) null else optString(name).ifBlank { null }
+}
+
+private fun JSONObject.toVaultItemRecord(): VaultItemRecord {
+    return VaultItemRecord(
+        id = getString("id"),
+        iv = getString("iv"),
+        ciphertext = getString("ciphertext"),
+        version = getInt("version"),
+        createdAt = getString("created_at"),
+        updatedAt = getString("updated_at"),
+    )
 }
 
 private fun JSONObject.toAuthUser(): AuthUser {

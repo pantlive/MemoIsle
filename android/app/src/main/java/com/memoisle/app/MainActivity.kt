@@ -31,6 +31,9 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MemoViewModel by viewModels {
         MemoViewModel.factory((application as MemoIsleApplication).repository)
     }
+    private val vaultViewModel: VaultViewModel by viewModels {
+        VaultViewModel.factory((application as MemoIsleApplication).api)
+    }
     private var sharedText by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,12 +52,15 @@ class MainActivity : ComponentActivity() {
                     viewModel.refresh()
                 } else if (authState.status == AuthStatus.ANONYMOUS) {
                     MemoSyncScheduler.cancel(context)
+                    // 退出登录后内存里不留解锁后的库密钥。
+                    vaultViewModel.reset()
                 }
             }
             MemoIsleTheme {
                 when (authState.status) {
                     AuthStatus.AUTHENTICATED -> MemoHomeScreen(
                         viewModel = viewModel,
+                        vaultViewModel = vaultViewModel,
                         sharedText = sharedText,
                         onSharedTextConsumed = { sharedText = null },
                         onLogout = authViewModel::logout,

@@ -4,6 +4,7 @@ import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.DuplicateLemmaException
 import com.memoisle.app.network.DuplicateResourceException
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.network.ReviewSettings
 import com.memoisle.app.network.WordLookupResponse
 import java.io.OutputStream
@@ -55,6 +56,13 @@ class MemoRepository(
     }
 
     fun activeUserId(): String? = activeUserId
+
+    // 快速访问只在线读取，不进本地缓存：打开次数由服务器统一累计。
+    fun recordResourceOpen(remoteId: String) = api.recordResourceOpen(remoteId)
+
+    fun listQuickAccess(limit: Int = 8): List<QuickAccessEntry> = api.listQuickAccess(limit)
+
+    fun setQuickAccessHidden(remoteId: String, hidden: Boolean) = api.setQuickAccessHidden(remoteId, hidden)
 
     @Synchronized
     fun clearForLogout(): Unit {

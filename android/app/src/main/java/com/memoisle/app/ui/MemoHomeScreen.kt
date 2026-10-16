@@ -11,11 +11,14 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +47,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -79,6 +85,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.memoisle.app.MemoIsleApplication
 import com.memoisle.app.MemoViewModel
+import com.memoisle.app.VaultViewModel
 import com.memoisle.app.audio.VoiceRecorder
 import com.memoisle.app.audio.VoiceRecording
 import com.memoisle.app.audio.WordPronouncer
@@ -91,6 +98,7 @@ import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
 import com.memoisle.app.data.formatFileSize
 import com.memoisle.app.data.hasUploadedImage
+import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.data.imageDimensionsLabel
 import com.memoisle.app.data.imageOcrSourceLabel
 import com.memoisle.app.data.imageOcrStatusLabel
@@ -126,6 +134,7 @@ private val displayTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 @Composable
 fun MemoHomeScreen(
     viewModel: MemoViewModel,
+    vaultViewModel: VaultViewModel,
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -155,6 +164,7 @@ fun MemoHomeScreen(
     var showReview by rememberSaveable { mutableStateOf(false) }
     var showTrash by rememberSaveable { mutableStateOf(false) }
     var showInbox by rememberSaveable { mutableStateOf(false) }
+    var showVault by rememberSaveable { mutableStateOf(false) }
     var pendingPermanentDelete by remember { mutableStateOf<Memo?>(null) }
     var pendingMoveToTrash by remember { mutableStateOf<Memo?>(null) }
     var showReviewAnswer by rememberSaveable { mutableStateOf(false) }
@@ -541,6 +551,15 @@ fun MemoHomeScreen(
         }
     }
 
+    LaunchedEffect(activeType) {
+        if (activeType == TYPE_RESOURCE) viewModel.loadQuickAccess()
+    }
+
+    if (showVault) {
+        VaultScreen(viewModel = vaultViewModel, onClose = { showVault = false })
+        return
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = WarmMist,
@@ -572,6 +591,8 @@ fun MemoHomeScreen(
                     searchQuery = ""
                     showReviewAnswer = false
                 },
+                vaultReminderCount = vaultViewModel.lastReminderCount,
+                onShowVault = { showVault = true },
             )
         },
         floatingActionButton = {
@@ -766,6 +787,7 @@ fun MemoHomeScreen(
                         onOpenResource = {
                             currentReview?.sourceUrl?.let(uriHandler::openUri)
                             currentReview?.let { memo ->
+                                viewModel.recordResourceOpen(memo)
                                 viewModel.markResourceOpened(memo) { showReviewAnswer = false }
                             }
                         },
@@ -896,6 +918,34 @@ fun MemoHomeScreen(
                     }
                 }
                 if (activeType == TYPE_RESOURCE) {
+                    if (normalizedSearchQuery.isEmpty() && viewModel.quickAccessLoaded) {
+                        item {
+                            QuickAccessSection(
+                                entries = viewModel.quickAccess,
+                                onOpen = { memo ->
+                                    memo.sourceUrl?.let(uriHandler::openUri)
+                                    viewModel.recordResourceOpen(memo)
+                                },
+                                onRemove = { memo ->
+                                    viewModel.setQuickAccessHidden(memo, true) { succeeded ->
+                                        coroutineScope.launch {
+                                            if (!succeeded) {
+                                                snackbarHostState.showSnackbar("暂时无法移除，请检查网络后重试")
+                                                return@launch
+                                            }
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "已从快速访问移除「${memo.title}」",
+                                                actionLabel = "撤销",
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                viewModel.setQuickAccessHidden(memo, false)
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
                     item {
                         ResourceCategoryFilter(
                             selected = resourceCategoryFilter,
@@ -982,7 +1032,10 @@ fun MemoHomeScreen(
                 onArchive = {
                     viewModel.archiveMemo(memo) { selectedMemo = null }
                 },
-                onOpen = { memo.sourceUrl?.let(uriHandler::openUri) },
+                onOpen = {
+                    memo.sourceUrl?.let(uriHandler::openUri)
+                    viewModel.recordResourceOpen(memo)
+                },
                 onCopy = {
                     val clipboard = context.getSystemService(ClipboardManager::class.java)
                     clipboard.setPrimaryClip(
@@ -3727,6 +3780,8 @@ private fun MemoBottomNavigation(
     onShowHome: () -> Unit,
     onShowLibrary: () -> Unit,
     onShowReview: () -> Unit,
+    vaultReminderCount: Int,
+    onShowVault: () -> Unit,
 ) {
     NavigationBar(containerColor = SurfaceWhite) {
         NavigationBarItem(
@@ -3752,10 +3807,14 @@ private fun MemoBottomNavigation(
         )
         NavigationBarItem(
             selected = false,
-            onClick = {},
-            enabled = false,
-            icon = { Text("○", fontSize = 17.sp) },
-            label = { Text("我的", fontSize = 11.sp) },
+            onClick = onShowVault,
+            icon = {
+                // 角标是上次解锁时需要处理的提醒数，锁定后仍然显示。
+                BadgedBox(badge = { if (vaultReminderCount > 0) Badge { Text("$vaultReminderCount") } }) {
+                    Text("◈", fontSize = 17.sp)
+                }
+            },
+            label = { Text("密码库", fontSize = 11.sp) },
             colors = memoNavigationColors(),
         )
     }
@@ -3935,4 +3994,94 @@ private fun sharedTitle(value: String, url: String): String {
         .firstOrNull { line -> line.isNotEmpty() && !line.contains(url) }
         ?.take(200)
         .orEmpty()
+}
+
+private fun quickAccessHost(url: String?): String {
+    return url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }.orEmpty()
+}
+
+// 由站点名算出固定色相，同一站点每次显示同一种颜色；不加载站点图标，避免向第三方暴露访问记录。
+private fun quickAccessAvatarColor(text: String): Color {
+    var hash = 0
+    for (char in text) hash = (hash * 31 + char.code) % 360
+    return Color.hsl(hash.toFloat(), 0.45f, 0.42f)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuickAccessSection(
+    entries: List<QuickAccessEntry>,
+    onOpen: (Memo) -> Unit,
+    onRemove: (Memo) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("快速访问", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(8.dp))
+            Text("按打开次数排列", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+        }
+        if (entries.isEmpty()) {
+            Text(
+                "还没有打开记录。点开网页资料的「打开原网页」后，常用的网页会按打开次数出现在这里。",
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            return@Column
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            entries.forEach { entry ->
+                val memo = entry.memo
+                val host = quickAccessHost(memo.sourceUrl)
+                val name = host.ifBlank { memo.title }
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 220.dp)
+                        .background(SurfaceWhite, RoundedCornerShape(12.dp))
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .clickable { onOpen(memo) }
+                        .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(quickAccessAvatarColor(name), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            name.trim().firstOrNull()?.uppercase() ?: "?",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f, fill = false)) {
+                        Text(
+                            memo.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "${entry.openCount} 次 · $host",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    TextButton(
+                        onClick = { onRemove(memo) },
+                        modifier = Modifier.size(36.dp),
+                        contentPadding = PaddingValues(0.dp),
+                    ) { Text("×", color = TextMuted) }
+                }
+            }
+        }
+    }
 }

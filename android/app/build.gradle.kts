@@ -138,6 +138,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     testImplementation("junit:junit:4.13.2")
+    // 单元测试跑在 JVM 上，没有 Android 自带的 org.json，需要单独引入。
+    testImplementation("org.json:json:20240303")
 
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation("androidx.compose.ui:ui-tooling")

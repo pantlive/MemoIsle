@@ -21,6 +21,7 @@ import com.memoisle.app.data.normalizeImageMimeType
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.DuplicateLemmaException
 import com.memoisle.app.network.DuplicateResourceException
+import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.network.ReviewSettings
 import com.memoisle.app.network.WordLookupResponse
 import kotlin.coroutines.cancellation.CancellationException
@@ -66,6 +67,12 @@ class MemoViewModel(
     var loadingImageKeys by mutableStateOf<Set<String>>(emptySet())
         private set
     private val failedImageKeys = mutableSetOf<String>()
+
+    var quickAccess by mutableStateOf<List<QuickAccessEntry>>(emptyList())
+        private set
+    // 首次读取完成前不显示，避免空状态一闪而过。
+    var quickAccessLoaded by mutableStateOf(false)
+        private set
 
     init {
         refresh()
@@ -830,6 +837,42 @@ class MemoViewModel(
                     message = "复习计划保存失败：${error.readableMessage()}",
                 )
             }
+        }
+    }
+
+    /** 打开原网页时计一次数，常用网页按次数出现在快速访问。离线时不计数。 */
+    fun recordResourceOpen(memo: Memo) {
+        val remoteId = memo.id ?: return
+        viewModelScope.launch {
+            val recorded = runCatching {
+                withContext(Dispatchers.IO) { repository.recordResourceOpen(remoteId) }
+            }.isSuccess
+            if (recorded) loadQuickAccess()
+        }
+    }
+
+    fun loadQuickAccess() {
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { repository.listQuickAccess() } }
+                .onSuccess { entries ->
+                    quickAccess = entries
+                    quickAccessLoaded = true
+                }
+        }
+    }
+
+    fun setQuickAccessHidden(memo: Memo, hidden: Boolean, onDone: (Boolean) -> Unit = {}) {
+        val remoteId = memo.id ?: return
+        if (hidden) {
+            // 先从界面移除，失败再放回。
+            quickAccess = quickAccess.filter { it.memo.id != remoteId }
+        }
+        viewModelScope.launch {
+            val succeeded = runCatching {
+                withContext(Dispatchers.IO) { repository.setQuickAccessHidden(remoteId, hidden) }
+            }.isSuccess
+            loadQuickAccess()
+            onDone(succeeded)
         }
     }
 
