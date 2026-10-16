@@ -558,6 +558,7 @@ export default function App({ authUser, onLogout }: AppProps) {
   const [batchBusy, setBatchBusy] = useState(false);
   const [memoSort, setMemoSort] = useState<MemoSort>("updated_desc");
   const [quickAccessItems, setQuickAccessItems] = useState<Memo[]>([]);
+  const [quickAccessLoaded, setQuickAccessLoaded] = useState(false);
   // 撤销按钮只跟随对应的那条提示，提示被替换后自动失效。
   const [quickAccessUndo, setQuickAccessUndo] = useState<{ memo: Memo; message: string } | null>(null);
   const [resourceViewMode, setResourceViewMode] =
@@ -1002,6 +1003,7 @@ export default function App({ authUser, onLogout }: AppProps) {
   const loadQuickAccess = useCallback(async () => {
     try {
       setQuickAccessItems(await listQuickAccess(8));
+      setQuickAccessLoaded(true);
     } catch {
       // 快速访问只是入口，读取失败时保留上次结果。
     }
@@ -3876,6 +3878,7 @@ export default function App({ authUser, onLogout }: AppProps) {
           {activeType === "all" && !searchQuery.trim() && (
             <QuickAccess
               items={quickAccessItems}
+              loaded={quickAccessLoaded}
               onOpen={handleResourceOpened}
               onRemove={(memo) => void changeQuickAccessHidden(memo, true)}
             />
@@ -4448,6 +4451,7 @@ export default function App({ authUser, onLogout }: AppProps) {
             <QuickAccess
               compact
               items={quickAccessItems.slice(0, 4)}
+              loaded={quickAccessLoaded}
               onOpen={handleResourceOpened}
               onRemove={(memo) => void changeQuickAccessHidden(memo, true)}
             />

@@ -17,20 +17,27 @@ function avatarLetter(memo: Memo): string {
 
 // 快速访问：按打开次数列出常用网页，点击即在新标签页打开并计数。
 // 不加载站点 favicon，避免每次进入页面都向第三方暴露访问记录。
-export default function QuickAccess({ items, onOpen, onRemove, compact = false }: {
+export default function QuickAccess({ items, loaded, onOpen, onRemove, compact = false }: {
   items: Memo[];
+  // 首次读取完成前不显示，避免空状态一闪而过。
+  loaded: boolean;
   onOpen: (memo: Memo) => void;
   onRemove: (memo: Memo) => void;
   compact?: boolean;
 }) {
-  if (items.length === 0) return null;
+  if (!loaded) return null;
   return (
     <section className={`quick-access${compact ? " compact" : ""}`} aria-labelledby="quick-access-title">
       <div className="quick-access-header">
         <h2 id="quick-access-title">快速访问</h2>
         <small>按打开次数排列</small>
       </div>
-      <ul className="quick-access-grid">
+      {items.length === 0 && (
+        <p className="quick-access-empty">
+          还没有打开记录。在 MemoIsle 里点开网页标题或「打开原网页」后，常用的网页会按打开次数出现在这里。
+        </p>
+      )}
+      {items.length > 0 && <ul className="quick-access-grid">
         {items.map((memo) => {
           const host = sourceHost(memo.source_url);
           return (
@@ -82,7 +89,7 @@ export default function QuickAccess({ items, onOpen, onRemove, compact = false }
             </li>
           );
         })}
-      </ul>
+      </ul>}
     </section>
   );
 }
