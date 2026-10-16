@@ -19,16 +19,30 @@ export interface RecoveryCode {
   used: boolean;
 }
 
-export interface VaultLoginData {
+// 提醒设置和条目一起加密，服务器看不到哪些密码过期、多久没换。
+export interface VaultReminderSettings {
+  // 密码或密钥上次变化的时间（ISO）；旧条目没有记录时按创建时间算。
+  changedAt: string;
+  // 每隔多少天提醒更换，0 表示不提醒。
+  rotateDays: number;
+  // 到期日 YYYY-MM-DD，留空表示不会过期。
+  expiresOn: string;
+}
+
+export const VAULT_ROTATE_OPTIONS = [0, 30, 90, 180, 365] as const;
+
+export interface VaultLoginData extends VaultReminderSettings {
   kind: "login";
   title: string;
   username: string;
   password: string;
   url: string;
   notes: string;
+  // 不检查强度和重复，用于故意保留的简单密码（如门禁 PIN）。
+  skipChecks: boolean;
 }
 
-export interface VaultSecretData {
+export interface VaultSecretData extends VaultReminderSettings {
   kind: "secret";
   title: string;
   secret: string;
@@ -233,12 +247,24 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function reminderSettings(raw: Record<string, unknown>): VaultReminderSettings {
+  const changedAt = text(raw.changedAt);
+  const expiresOn = text(raw.expiresOn);
+  return {
+    changedAt: Number.isNaN(Date.parse(changedAt)) ? "" : changedAt,
+    rotateDays: (VAULT_ROTATE_OPTIONS as readonly unknown[]).includes(raw.rotateDays)
+      ? raw.rotateDays as number
+      : 0,
+    expiresOn: /^\d{4}-\d{2}-\d{2}$/.test(expiresOn) ? expiresOn : "",
+  };
+}
+
 // 解密后按类型补齐字段，旧版本或缺字段的数据也能正常显示。
 function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
   const title = text(raw.title) || "未命名";
   const notes = text(raw.notes);
   if (raw.kind === "secret") {
-    return { kind: "secret", title, secret: text(raw.secret), notes };
+    return { kind: "secret", title, secret: text(raw.secret), notes, ...reminderSettings(raw) };
   }
   if (raw.kind === "recovery") {
     const codes = Array.isArray(raw.codes)
@@ -256,6 +282,8 @@ function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
     password: text(raw.password),
     url: text(raw.url),
     notes,
+    skipChecks: raw.skipChecks === true,
+    ...reminderSettings(raw),
   };
 }
 
@@ -328,9 +356,36 @@ export function parseRecoveryCodes(input: string, existing: RecoveryCode[] = [])
 }
 
 export function emptyVaultItem(kind: VaultKind): VaultItemData {
-  if (kind === "secret") return { kind, title: "", secret: "", notes: "" };
+  const reminders: VaultReminderSettings = { changedAt: "", rotateDays: 0, expiresOn: "" };
+  if (kind === "secret") return { kind, title: "", secret: "", notes: "", ...reminders };
   if (kind === "recovery") return { kind, title: "", account: "", codes: [], notes: "" };
-  return { kind, title: "", username: "", password: "", url: "", notes: "" };
+  return {
+    kind,
+    title: "",
+    username: "",
+    password: "",
+    url: "",
+    notes: "",
+    skipChecks: false,
+    ...reminders,
+  };
+}
+
+// 保存时密码或密钥有变化，就把「上次更换」记为现在。
+export function stampSecretChange(
+  previous: VaultItemData | null,
+  next: VaultItemData,
+  now = new Date().toISOString(),
+): VaultItemData {
+  if (next.kind === "login") {
+    const before = previous?.kind === "login" ? previous.password : "";
+    if (next.password && next.password !== before) return { ...next, changedAt: now };
+  }
+  if (next.kind === "secret") {
+    const before = previous?.kind === "secret" ? previous.secret : "";
+    if (next.secret && next.secret !== before) return { ...next, changedAt: now };
+  }
+  return next;
 }
 
 export const vaultKindLabels: Record<VaultKind, string> = {

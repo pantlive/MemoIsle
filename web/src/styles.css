@@ -6588,7 +6588,200 @@ button.template-node-copy {
   flex: 1;
 }
 
+.vault-row-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.vault-row-title strong {
+  min-width: 0;
+}
+
+.vault-reminder-badge {
+  flex: none;
+  border-radius: 999px;
+  background: hsl(38 85% 90%);
+  padding: 1px 8px;
+  color: hsl(30 70% 30%);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.vault-reminder-badge.danger,
+.vault-reminder.danger .vault-reminder-badge {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  color: var(--danger);
+}
+
+.vault-panel .vault-kind-filter button.vault-filter-reminders:not(.active) {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  color: var(--danger);
+}
+
+.vault-reminders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--danger) 4%, var(--surface));
+  padding: 14px 16px;
+}
+
+.vault-reminders-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.vault-reminders-header h2 {
+  margin: 0;
+  font-family: Sora, "Noto Sans SC", sans-serif;
+  font-size: 15px;
+}
+
+.vault-reminders-header small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.vault-reminders ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vault-panel button.vault-reminder {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  border-color: transparent;
+  background: none;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.vault-panel button.vault-reminder:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.vault-reminder-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.vault-reminder-text strong {
+  font-size: 13px;
+}
+
+.vault-reminder-text small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.vault-panel button.vault-reminders-more {
+  align-self: flex-start;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.vault-dialog-reminders {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vault-dialog-reminders li {
+  display: flex;
+  gap: 8px;
+  border-radius: 9px;
+  background: hsl(38 85% 94%);
+  padding: 8px 10px;
+  color: hsl(30 70% 26%);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vault-dialog-reminders li.danger {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+}
+
+.vault-dialog-reminders strong {
+  flex: none;
+}
+
+.vault-weak-hint {
+  margin-top: -8px;
+}
+
+.vault-reminder-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px 14px;
+}
+
+.vault-reminder-fields legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.vault-reminder-fields p {
+  margin: 0;
+}
+
+.vault-reminder-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.vault-field select {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 0 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.vault-field select:focus {
+  border-color: var(--focus);
+  outline: 0;
+}
+
 @media (max-width: 640px) {
+  .vault-reminder-grid {
+    grid-template-columns: 1fr;
+  }
+
   .vault-panel .page-heading {
     flex-direction: column;
     align-items: stretch;

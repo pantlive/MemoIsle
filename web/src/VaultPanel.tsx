@@ -24,6 +24,7 @@ import {
   openVaultBackup,
   parseVaultBackup,
   rewrapVaultKey,
+  stampSecretChange,
   unlockVault,
   vaultItemFingerprint,
   vaultKindLabels,
@@ -33,6 +34,12 @@ import {
   type VaultKind,
 } from "./vault";
 import VaultItemDialog from "./VaultItemDialog";
+import {
+  collectVaultReminders,
+  lastChangedAt,
+  reminderLabels,
+  type VaultReminder,
+} from "./vaultReminders";
 import {
   VAULT_AUTO_LOCK_MS,
   getVaultSessionKey,
@@ -53,7 +60,9 @@ type Phase = "loading" | "error" | "insecure" | "setup" | "locked" | "unlocked";
 const cryptoAvailable = (): boolean => (
   window.isSecureContext && typeof crypto !== "undefined" && crypto.subtle !== undefined
 );
-type KindFilter = VaultKind | "all";
+type KindFilter = VaultKind | "all" | "reminders";
+// 提醒卡片里最多直接列出几条，其余点「只看需处理的」查看。
+const REMINDER_PREVIEW_LIMIT = 4;
 
 interface ImportState {
   backup: VaultBackupFile;
@@ -76,6 +85,10 @@ function entrySubtitle(data: VaultItemData): string {
   if (data.kind === "secret") return data.secret ? `${data.secret.length} 个字符` : "未填写密钥";
   const remaining = data.codes.filter((item) => !item.used).length;
   return `${data.account ? `${data.account} · ` : ""}剩余 ${remaining} / ${data.codes.length} 个可用`;
+}
+
+function entryHasSecret(data: VaultItemData): boolean {
+  return (data.kind === "login" && Boolean(data.password)) || (data.kind === "secret" && Boolean(data.secret));
 }
 
 function matchesQuery(data: VaultItemData, query: string): boolean {
@@ -365,7 +378,7 @@ export default function VaultPanel() {
     setDialogError("");
     const id = editor.entry?.id ?? crypto.randomUUID();
     try {
-      const encrypted = await encryptVaultItem(key, id, data);
+      const encrypted = await encryptVaultItem(key, id, stampSecretChange(editor.entry?.data ?? null, data));
       const record = editor.entry
         ? await updateVaultItem(id, encrypted, editor.entry.version)
         : await createVaultItem(id, encrypted);
@@ -495,16 +508,39 @@ export default function VaultPanel() {
 
   const closeEditor = useCallback(() => setEditor(null), []);
 
+  const reminders = useMemo(() => collectVaultReminders(entries), [entries]);
+  const remindersByEntry = useMemo(() => {
+    const result = new Map<string, VaultReminder[]>();
+    for (const reminder of reminders) {
+      result.set(reminder.entryId, [...(result.get(reminder.entryId) ?? []), reminder]);
+    }
+    return result;
+  }, [reminders]);
+
   const counts = useMemo(() => {
-    const result: Record<KindFilter, number> = { all: entries.length, login: 0, secret: 0, recovery: 0 };
+    const result: Record<KindFilter, number> = {
+      all: entries.length,
+      login: 0,
+      secret: 0,
+      recovery: 0,
+      reminders: remindersByEntry.size,
+    };
     for (const entry of entries) result[entry.data.kind] += 1;
     return result;
-  }, [entries]);
+  }, [entries, remindersByEntry]);
+
+  const openEntry = (entry: VaultEntry) => {
+    setDialogError("");
+    setEditor({ entry, data: entry.data });
+  };
 
   const visibleEntries = useMemo(() => entries
-    .filter((entry) => kindFilter === "all" || entry.data.kind === kindFilter)
+    .filter((entry) => (
+      kindFilter === "all"
+      || (kindFilter === "reminders" ? remindersByEntry.has(entry.id) : entry.data.kind === kindFilter)
+    ))
     .filter((entry) => matchesQuery(entry.data, query.trim()))
-    .sort((left, right) => left.data.title.localeCompare(right.data.title, "zh-CN")), [entries, kindFilter, query]);
+    .sort((left, right) => left.data.title.localeCompare(right.data.title, "zh-CN")), [entries, kindFilter, query, remindersByEntry]);
 
   return (
     <section className="vault-panel" aria-labelledby="vault-title">
@@ -671,18 +707,54 @@ export default function VaultPanel() {
             </div>
           </div>
           <div className="category-filter vault-kind-filter" role="group" aria-label="按类型筛选">
-            {(["all", "login", "secret", "recovery"] as KindFilter[]).map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                className={kindFilter === kind ? "active" : ""}
-                aria-pressed={kindFilter === kind}
-                onClick={() => setKindFilter(kind)}
-              >
-                {kind === "all" ? "全部" : vaultKindLabels[kind]} {counts[kind]}
-              </button>
-            ))}
+            {(["all", "login", "secret", "recovery", "reminders"] as KindFilter[])
+              // 「需处理」没有提醒时不显示，正在看这一栏时保留，避免按钮突然消失。
+              .filter((kind) => kind !== "reminders" || counts.reminders > 0 || kindFilter === "reminders")
+              .map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={`${kindFilter === kind ? "active" : ""}${kind === "reminders" ? " vault-filter-reminders" : ""}`}
+                  aria-pressed={kindFilter === kind}
+                  onClick={() => setKindFilter(kind)}
+                >
+                  {kind === "all" ? "全部" : kind === "reminders" ? "需处理" : vaultKindLabels[kind]} {counts[kind]}
+                </button>
+              ))}
           </div>
+          {reminders.length > 0 && kindFilter !== "reminders" && !query.trim() && (
+            <section className="vault-reminders" aria-labelledby="vault-reminders-title">
+              <div className="vault-reminders-header">
+                <h2 id="vault-reminders-title">密码提醒</h2>
+                <small>{remindersByEntry.size} 条需要处理</small>
+              </div>
+              <ul>
+                {reminders.slice(0, REMINDER_PREVIEW_LIMIT).map((reminder) => {
+                  const entry = entries.find((item) => item.id === reminder.entryId);
+                  return (
+                    <li key={`${reminder.entryId}:${reminder.type}`}>
+                      <button
+                        type="button"
+                        className={`vault-reminder ${reminder.level}`}
+                        onClick={() => entry && openEntry(entry)}
+                      >
+                        <span className="vault-reminder-badge">{reminderLabels[reminder.type]}</span>
+                        <span className="vault-reminder-text">
+                          <strong>{reminder.title}</strong>
+                          <small>{reminder.message}</small>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {reminders.length > REMINDER_PREVIEW_LIMIT && (
+                <button type="button" className="vault-reminders-more" onClick={() => setKindFilter("reminders")}>
+                  查看全部 {reminders.length} 项提醒
+                </button>
+              )}
+            </section>
+          )}
           {brokenCount > 0 && (
             <p className="vault-error" role="alert">
               有 {brokenCount} 条无法解密，可能已损坏或被篡改，已跳过显示。
@@ -695,26 +767,37 @@ export default function VaultPanel() {
             </div>
           )}
           {entries.length > 0 && visibleEntries.length === 0 && (
-            <div className="state-panel">没有匹配的条目。</div>
+            <div className="state-panel">
+              {kindFilter === "reminders" && !query.trim() ? "提醒都处理完了。" : "没有匹配的条目。"}
+            </div>
           )}
           <ul className="vault-list">
             {visibleEntries.map((entry) => {
               const { data } = entry;
               const nextCode = data.kind === "recovery" ? data.codes.find((item) => !item.used) : undefined;
+              const entryReminders = remindersByEntry.get(entry.id) ?? [];
               return (
                 <li key={entry.id} className="vault-row">
-                  <button
-                    type="button"
-                    className="vault-row-main"
-                    onClick={() => {
-                      setDialogError("");
-                      setEditor({ entry, data });
-                    }}
-                  >
+                  <button type="button" className="vault-row-main" onClick={() => openEntry(entry)}>
                     <span className={`vault-kind-icon ${data.kind}`} aria-hidden="true">{kindIcons[data.kind]}</span>
                     <span className="vault-row-text">
-                      <strong>{data.title}</strong>
-                      <small>{vaultKindLabels[data.kind]} · {entrySubtitle(data)}</small>
+                      <span className="vault-row-title">
+                        <strong>{data.title}</strong>
+                        {entryReminders.map((reminder) => (
+                          <span
+                            key={reminder.type}
+                            className={`vault-reminder-badge ${reminder.level}`}
+                            title={reminder.message}
+                          >
+                            {reminderLabels[reminder.type]}
+                          </span>
+                        ))}
+                      </span>
+                      <small>
+                        {kindFilter === "reminders" && entryReminders[0]
+                          ? entryReminders.map((reminder) => reminder.message).join(" ")
+                          : `${vaultKindLabels[data.kind]} · ${entrySubtitle(data)}`}
+                      </small>
                     </span>
                   </button>
                   <span className="vault-row-actions">
@@ -749,6 +832,8 @@ export default function VaultPanel() {
         <VaultItemDialog
           initial={editor.data}
           isNew={editor.entry === null}
+          changedAt={editor.entry && entryHasSecret(editor.entry.data) ? lastChangedAt(editor.entry) : null}
+          reminders={editor.entry ? remindersByEntry.get(editor.entry.id) ?? [] : []}
           busy={busy}
           error={dialogError}
           onSave={(data) => void handleSave(data)}

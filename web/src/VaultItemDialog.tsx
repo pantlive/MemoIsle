@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
+  VAULT_ROTATE_OPTIONS,
   generatePassword,
   parseRecoveryCodes,
   vaultKindLabels,
   type RecoveryCode,
   type VaultItemData,
+  type VaultLoginData,
+  type VaultSecretData,
 } from "./vault";
+import { daysSince, daysUntilDate, isWeakPassword, reminderLabels, type VaultReminder } from "./vaultReminders";
 
 // 敏感字段默认遮挡，点「显示」才露出明文。
 function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = false }: {
@@ -64,6 +68,78 @@ function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = f
         />
       )}
     </div>
+  );
+}
+
+function rotateLabel(days: number): string {
+  if (days === 0) return "不提醒";
+  if (days === 365) return "每年";
+  return `每 ${days} 天`;
+}
+
+function describeAge(iso: string): string {
+  const days = daysSince(iso);
+  const date = new Date(iso).toLocaleDateString("zh-CN");
+  return `${date}（${days === 0 ? "今天" : `${days} 天前`}）`;
+}
+
+// 账号密码和密钥共用的提醒设置。
+function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
+  draft: VaultLoginData | VaultSecretData;
+  changedLabel: string;
+  secretChanged: boolean;
+  onChange: (field: "rotateDays" | "expiresOn" | "skipChecks", value: number | string | boolean) => void;
+}) {
+  const expiresIn = draft.expiresOn ? daysUntilDate(draft.expiresOn) : null;
+  return (
+    <fieldset className="vault-reminder-fields">
+      <legend>提醒</legend>
+      <p className="vault-hint">
+        {draft.kind === "login" ? "密码" : "密钥"}上次更换：
+        {secretChanged ? "保存后记为今天" : changedLabel}
+      </p>
+      <div className="vault-reminder-grid">
+        <label className="vault-field">
+          <span className="vault-field-label"><span>定期更换</span></span>
+          <select
+            value={draft.rotateDays}
+            onChange={(event) => onChange("rotateDays", Number(event.target.value))}
+          >
+            {VAULT_ROTATE_OPTIONS.map((days) => (
+              <option key={days} value={days}>{rotateLabel(days)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="vault-field">
+          <span className="vault-field-label">
+            <span>到期日</span>
+            {draft.expiresOn && (
+              <button type="button" onClick={() => onChange("expiresOn", "")}>清除</button>
+            )}
+          </span>
+          <input
+            type="date"
+            value={draft.expiresOn}
+            onChange={(event) => onChange("expiresOn", event.target.value)}
+          />
+        </label>
+      </div>
+      {expiresIn !== null && (
+        <small className={expiresIn <= 0 ? "vault-hint warn" : "vault-hint"}>
+          {expiresIn < 0 ? `已过期 ${-expiresIn} 天` : expiresIn === 0 ? "今天到期" : `还有 ${expiresIn} 天到期，到期前 14 天开始提醒`}
+        </small>
+      )}
+      {draft.kind === "login" && (
+        <label className="vault-acknowledge">
+          <input
+            type="checkbox"
+            checked={draft.skipChecks}
+            onChange={(event) => onChange("skipChecks", event.target.checked)}
+          />
+          不检查这条的密码强度和是否与其他条目重复
+        </label>
+      )}
+    </fieldset>
   );
 }
 
@@ -131,9 +207,14 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
   );
 }
 
-export default function VaultItemDialog({ initial, isNew, busy, error, onSave, onDelete, onClose, onCopy }: {
+export default function VaultItemDialog({
+  initial, isNew, changedAt, reminders, busy, error, onSave, onDelete, onClose, onCopy,
+}: {
   initial: VaultItemData;
   isNew: boolean;
+  // 已保存条目的上次更换时间；新建时为 null。
+  changedAt: string | null;
+  reminders: VaultReminder[];
   busy: boolean;
   error: string;
   onSave: (data: VaultItemData) => void;
@@ -165,9 +246,13 @@ export default function VaultItemDialog({ initial, isNew, busy, error, onSave, o
   }, [busy, onClose]);
 
   // 各类型字段不同，按字段名写入当前类型的草稿。
-  const update = (field: string, value: string | RecoveryCode[]) => {
+  const update = (field: string, value: string | number | boolean | RecoveryCode[]) => {
     setDraft((current) => ({ ...current, [field]: value }) as VaultItemData);
   };
+
+  const secretChanged = (draft.kind === "login" && initial.kind === "login" && draft.password !== initial.password && Boolean(draft.password))
+    || (draft.kind === "secret" && initial.kind === "secret" && draft.secret !== initial.secret && Boolean(draft.secret));
+  const changedLabel = changedAt ? describeAge(changedAt) : "还没有填写";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -199,6 +284,16 @@ export default function VaultItemDialog({ initial, isNew, busy, error, onSave, o
           >×</button>
         </div>
         <form className="vault-form" onSubmit={handleSubmit} autoComplete="off">
+          {reminders.length > 0 && (
+            <ul className="vault-dialog-reminders" aria-label="这一条的提醒">
+              {reminders.map((reminder) => (
+                <li key={reminder.type} className={reminder.level}>
+                  <strong>{reminderLabels[reminder.type]}</strong>
+                  <span>{reminder.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           <label className="vault-field">
             <span className="vault-field-label"><span>名称</span></span>
             <input
@@ -232,6 +327,11 @@ export default function VaultItemDialog({ initial, isNew, busy, error, onSave, o
                 onCopy={() => onCopy(draft.password, "密码")}
                 onGenerate={() => update("password", generatePassword())}
               />
+              {!draft.skipChecks && isWeakPassword(draft.password) && (
+                <small className="vault-hint warn vault-weak-hint">
+                  密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。
+                </small>
+              )}
               <label className="vault-field">
                 <span className="vault-field-label"><span>网址</span></span>
                 <input
@@ -252,6 +352,15 @@ export default function VaultItemDialog({ initial, isNew, busy, error, onSave, o
               onChange={(value) => update("secret", value)}
               onCopy={() => onCopy(draft.secret, "密钥")}
               multiline
+            />
+          )}
+
+          {(draft.kind === "login" || draft.kind === "secret") && (
+            <ReminderFields
+              draft={draft}
+              changedLabel={changedLabel}
+              secretChanged={secretChanged}
+              onChange={update}
             />
           )}
 
