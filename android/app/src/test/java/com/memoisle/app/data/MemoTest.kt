@@ -82,6 +82,22 @@ class MemoTest {
     }
 
     @Test
+    fun assignedCategoryCodesKeepsExtrasAndFallsBackToPrimary() {
+        val withExtras = newLocalResource(
+            url = "https://example.com/course",
+            title = "课程",
+            note = "",
+        ).copy(
+            resourceCategory = "learning",
+            resourceCategories = listOf("learning", "article"),
+        )
+        val primaryOnly = withExtras.copy(resourceCategories = emptyList())
+
+        assertEquals(listOf("learning", "article"), withExtras.assignedCategoryCodes())
+        assertEquals(listOf("learning"), primaryOnly.assignedCategoryCodes())
+    }
+
+    @Test
     fun resourceSearchIncludesAutomaticMetadataAndStatusLabels() {
         val resource = newLocalResource(
             url = "https://example.com/course",

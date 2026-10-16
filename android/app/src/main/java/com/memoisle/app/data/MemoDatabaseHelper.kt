@@ -26,6 +26,7 @@ class MemoDatabaseHelper(context: Context) :
                 resource_image_url TEXT,
                 resource_category TEXT,
                 resource_category_label TEXT,
+                resource_categories_json TEXT NOT NULL DEFAULT '[]',
                 resource_kind TEXT,
                 resource_reading_status TEXT,
                 resource_category_status TEXT NOT NULL DEFAULT 'none',
@@ -205,6 +206,13 @@ class MemoDatabaseHelper(context: Context) :
             // 首次支持删除通知时完整同步，清理旧服务端已经永久删除的缓存。
             database.delete(TABLE_SYNC_STATE, null, null)
         }
+        if (oldVersion < 14) {
+            // 多分类只缓存在内存时，重载后 extra-only 成员会消失。
+            database.execSQL(
+                "ALTER TABLE memo ADD COLUMN resource_categories_json TEXT " +
+                    "NOT NULL DEFAULT '[]'",
+            )
+        }
     }
 
     @Synchronized
@@ -259,6 +267,10 @@ class MemoDatabaseHelper(context: Context) :
             put(COLUMN_RESOURCE_IMAGE_URL, memo.resourceImageUrl)
             put(COLUMN_RESOURCE_CATEGORY, memo.resourceCategory)
             put(COLUMN_RESOURCE_CATEGORY_LABEL, memo.resourceCategoryLabel)
+            put(
+                COLUMN_RESOURCE_CATEGORIES,
+                JSONArray(memo.resourceCategories).toString(),
+            )
             put(COLUMN_RESOURCE_KIND, memo.resourceKind)
             put(COLUMN_RESOURCE_READING_STATUS, memo.resourceReadingStatus)
             put(COLUMN_RESOURCE_CATEGORY_STATUS, memo.resourceCategoryStatus)
@@ -460,6 +472,15 @@ class MemoDatabaseHelper(context: Context) :
                 }
             }
         }
+        val resourceCategories = JSONArray(
+            getString(getColumnIndexOrThrow(COLUMN_RESOURCE_CATEGORIES)),
+        ).let { values ->
+            buildList {
+                for (index in 0 until values.length()) {
+                    add(values.getString(index))
+                }
+            }
+        }
         val wordPhoneticIndex = getColumnIndexOrThrow(COLUMN_WORD_PHONETIC)
         val wordMeaningIndex = getColumnIndexOrThrow(COLUMN_WORD_MEANING)
         val wordExampleIndex = getColumnIndexOrThrow(COLUMN_WORD_EXAMPLE)
@@ -531,6 +552,7 @@ class MemoDatabaseHelper(context: Context) :
             } else {
                 getString(resourceCategoryLabelIndex)
             },
+            resourceCategories = resourceCategories,
             resourceKind = if (isNull(resourceKindIndex)) null else getString(resourceKindIndex),
             resourceReadingStatus = if (isNull(resourceReadingStatusIndex)) {
                 null
@@ -623,7 +645,7 @@ class MemoDatabaseHelper(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "memoisle.db"
-        const val DATABASE_VERSION = 13
+        const val DATABASE_VERSION = 14
         const val TABLE_MEMO = "memo"
         const val TABLE_SYNC_STATE = "sync_state"
         const val COLUMN_STATE_ID = "state_id"
@@ -642,6 +664,7 @@ class MemoDatabaseHelper(context: Context) :
         const val COLUMN_RESOURCE_IMAGE_URL = "resource_image_url"
         const val COLUMN_RESOURCE_CATEGORY = "resource_category"
         const val COLUMN_RESOURCE_CATEGORY_LABEL = "resource_category_label"
+        const val COLUMN_RESOURCE_CATEGORIES = "resource_categories_json"
         const val COLUMN_RESOURCE_KIND = "resource_kind"
         const val COLUMN_RESOURCE_READING_STATUS = "resource_reading_status"
         const val COLUMN_RESOURCE_CATEGORY_STATUS = "resource_category_status"
@@ -699,6 +722,7 @@ class MemoDatabaseHelper(context: Context) :
             COLUMN_RESOURCE_IMAGE_URL,
             COLUMN_RESOURCE_CATEGORY,
             COLUMN_RESOURCE_CATEGORY_LABEL,
+            COLUMN_RESOURCE_CATEGORIES,
             COLUMN_RESOURCE_KIND,
             COLUMN_RESOURCE_READING_STATUS,
             COLUMN_RESOURCE_CATEGORY_STATUS,
