@@ -21,6 +21,13 @@ function bookmarkTitle(anchor: Element, url: string): string {
   }
 }
 
+// Firefox 导出的书签用 TAGS="a,b" 记录标签；Chrome/Edge 没有这个属性。
+function bookmarkTags(anchor: Element): string[] {
+  const raw = anchor.getAttribute("tags") ?? "";
+  const tags = raw.split(",").map((tag) => tag.trim().slice(0, 50)).filter(Boolean);
+  return [...new Set(tags)].slice(0, 20);
+}
+
 function collectBookmarks(
   container: Element,
   folders: string[],
@@ -38,11 +45,13 @@ function collectBookmarks(
       const folderName = (heading?.textContent ?? "").trim();
       if (anchor) {
         const url = (anchor.getAttribute("href") ?? "").trim();
+        const tags = bookmarkTags(anchor);
         items.push({
           client_item_id: `bookmark-${items.length + 1}`,
           title: bookmarkTitle(anchor, url),
           url,
           folder_path: folders.length ? folders.join("/") : undefined,
+          ...(tags.length ? { tags } : {}),
         });
       }
       if (nestedList) {

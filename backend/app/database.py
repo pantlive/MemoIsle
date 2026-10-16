@@ -336,6 +336,10 @@ class Database:
                 "ALTER TABLE memo ADD COLUMN resource_quick_access_hidden BOOLEAN "
                 "NOT NULL DEFAULT 0"
             ),
+            "resource_import_tags": (
+                "ALTER TABLE memo ADD COLUMN resource_import_tags JSON "
+                "NOT NULL DEFAULT '[]'"
+            ),
             "deleted_at": "ALTER TABLE memo ADD COLUMN deleted_at DATETIME",
             "status_before_trash": (
                 "ALTER TABLE memo ADD COLUMN status_before_trash VARCHAR(20)"
@@ -459,6 +463,15 @@ class Database:
                     "json_each(job.memo_ids) AS item WHERE job.user_id = memo.user_id "
                     "AND item.value = memo.id "
                     "AND CAST(item.key AS INTEGER) < job.processed_count))",
+                ))
+            bookmark_item_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("bookmark_import_item")
+            }
+            if "tags" not in bookmark_item_columns:
+                connection.execute(text(
+                    "ALTER TABLE bookmark_import_item "
+                    "ADD COLUMN tags JSON NOT NULL DEFAULT '[]'",
                 ))
             for column_name, statement in browser_bookmark_migrations.items():
                 if column_name not in browser_bookmark_columns:

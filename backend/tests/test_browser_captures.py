@@ -326,12 +326,14 @@ def test_browser_extension_syncs_bookmarks_for_direct_web_import(
             "title": "PyTorch 文档",
             "url": "https://pytorch.org/docs/stable/",
             "folder_path": "书签栏 / 学习资料",
+            "tags": [],
         },
         {
             "client_item_id": "chrome:42",
             "title": "文章",
             "url": "https://example.com/article",
             "folder_path": "其他书签",
+            "tags": [],
         },
     ]
 

@@ -277,8 +277,8 @@ export default function BookmarkImportDialog({
             <label className="bookmark-file-picker compact">
               <span aria-hidden="true">⇧</span>
               <span>
-                <strong>选择 Chrome 导出的书签 HTML</strong>
-                <small>适合未安装新版扩展时使用；原始文件不会上传。</small>
+                <strong>选择浏览器导出的书签 HTML</strong>
+                <small>Chrome、Edge、Firefox 都可以，Firefox 书签的标签会一起保留；原始文件不会上传。</small>
               </span>
               <input
                 type="file"
@@ -300,7 +300,7 @@ export default function BookmarkImportDialog({
                 <strong>{preview.invalid_count}</strong><span>无法导入</span>
               </div>
             </div>
-            <p className="bookmark-file-name">{sourceLabel} · 保留原文件夹用于追溯，最终分类由系统自动判断。</p>
+            <p className="bookmark-file-name">{sourceLabel} · 原来的文件夹（和书签标签）会先交给 Jev 判断，正确就沿用对应的分类，否则由系统重新分类。</p>
             <div className="bookmark-preview-list">
               {previewGroups.map(([folder, folderItems]) => (
                 <section key={folder}>

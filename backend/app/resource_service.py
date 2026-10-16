@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
+import httpx
 from sqlalchemy import inspect, select, update
 from sqlalchemy.orm import Session
 
+from app.bookmark_folder_classification import (
+    check_bookmark_folder,
+    folder_conflict_assessment,
+    with_folder_evidence,
+)
 from app.category_service import (
     category_exemplars,
     category_rejected_examples,
@@ -25,8 +32,10 @@ from app.resource_classification_policy import (
     apply_classification_health_gate,
     health_allows_ai_classification,
 )
+from app.resource_classification_quality import BookmarkFolderEvidence
 from app.resource_processing import (
     CategoryDecision,
+    ClassificationCategory,
     ResourceFetchError,
     ResourceMetadata,
     UnsafeResourceUrlError,
@@ -160,6 +169,36 @@ def mark_processing(session: Session, memo: Memo) -> None:
     session.commit()
 
 
+def _check_folder_isolated(
+    session: Session,
+    user_id: str,
+    memo: Memo,
+    metadata: ResourceMetadata,
+    categories: Sequence[ClassificationCategory],
+    settings: Settings,
+) -> tuple[CategoryDecision | None, BookmarkFolderEvidence | None]:
+    """用独立会话读写文件夹缓存，不提交主会话里尚未写入的元数据。"""
+
+    assert settings.jev_api_key is not None
+    with Session(bind=session.get_bind()) as folder_session:
+        try:
+            return check_bookmark_folder(
+                folder_session,
+                user_id,
+                memo.resource_import_folder,
+                metadata,
+                categories,
+                settings.jev_api_key,
+                settings.jev_base_url,
+                settings.jev_model,
+                settings.jev_min_confidence,
+                tags=list(memo.resource_import_tags or []),
+            )
+        except (httpx.HTTPError, httpx.InvalidURL):
+            # 单页刷新不因模型故障失败，照常走完整分类。
+            return None, None
+
+
 def enrich_resource(
     session: Session,
     user_id: str,
@@ -291,35 +330,55 @@ def enrich_resource(
                 # 书签批次先抓取元数据，再由独立自动队列分类，避免导入被模型阻塞。
                 and memo.resource_import_batch_id is None
             )
-            decision = classify_resource(
-                metadata,
-                llm_base_url=settings.llm_base_url if allow_model else None,
-                llm_api_key=settings.llm_api_key if allow_model else None,
-                llm_model=settings.llm_model if allow_model else "",
-                user_rules=user_rules,
-                category_options=category_options,
-                jev_api_key=settings.jev_api_key if allow_model else None,
-                jev_base_url=settings.jev_base_url,
-                jev_model=settings.jev_model,
-                jev_min_confidence=settings.jev_min_confidence,
-                deepseek_api_key=settings.deepseek_api_key if allow_model else None,
-                deepseek_base_url=settings.deepseek_base_url,
-                deepseek_model=settings.deepseek_model,
-                deepseek_timeout_seconds=settings.deepseek_timeout_seconds,
-                classification_min_confidence=(
-                    settings.classification_min_confidence
-                ),
-                exemplars=(
-                    category_exemplars(session, user_id, category_options)
-                    if allow_model
-                    else None
-                ),
-                rejected_examples=(
-                    category_rejected_examples(session, user_id, category_options)
-                    if allow_model
-                    else None
-                ),
-            )
+            folder_decision = None
+            folder_evidence = None
+            if (
+                allow_model
+                and settings.jev_api_key
+                and settings.jev_model
+                and (memo.resource_import_folder or memo.resource_import_tags)
+            ):
+                folder_decision, folder_evidence = _check_folder_isolated(
+                    session, user_id, memo, metadata, category_options, settings
+                )
+            if folder_decision is not None:
+                decision = folder_decision
+            else:
+                decision = classify_resource(
+                    metadata,
+                    llm_base_url=settings.llm_base_url if allow_model else None,
+                    llm_api_key=settings.llm_api_key if allow_model else None,
+                    llm_model=settings.llm_model if allow_model else "",
+                    user_rules=user_rules,
+                    category_options=category_options,
+                    jev_api_key=settings.jev_api_key if allow_model else None,
+                    jev_base_url=settings.jev_base_url,
+                    jev_model=settings.jev_model,
+                    jev_min_confidence=settings.jev_min_confidence,
+                    deepseek_api_key=settings.deepseek_api_key if allow_model else None,
+                    deepseek_base_url=settings.deepseek_base_url,
+                    deepseek_model=settings.deepseek_model,
+                    deepseek_timeout_seconds=settings.deepseek_timeout_seconds,
+                    classification_min_confidence=(
+                        settings.classification_min_confidence
+                    ),
+                    exemplars=(
+                        category_exemplars(session, user_id, category_options)
+                        if allow_model
+                        else None
+                    ),
+                    rejected_examples=(
+                        category_rejected_examples(session, user_id, category_options)
+                        if allow_model
+                        else None
+                    ),
+                )
+                conflict = folder_conflict_assessment(decision, folder_evidence)
+                decision = (
+                    replace(decision, assessment=conflict)
+                    if conflict is not None
+                    else with_folder_evidence(decision, folder_evidence)
+                )
         if allow_model and (
             settings.jev_api_key
             or (settings.deepseek_api_key and settings.deepseek_model)

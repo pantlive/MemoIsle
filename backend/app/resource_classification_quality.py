@@ -33,13 +33,16 @@ class ClassificationCandidate(TypedDict):
 
 
 class BookmarkFolderEvidence(TypedDict):
-    """书签原文件夹的复核结果：kept 沿用、rejected 不符、unmapped 无对应分类。"""
+    """书签原归类的复核结果：kept 沿用、rejected 不符、unmapped 无对应分类。"""
 
     folder: str
     category_code: str | None
     category_label: str | None
     verdict: Literal["kept", "rejected", "unmapped"]
     confidence: float | None
+    # 原归类来自文件夹还是书签标签；对应关系来自 Jev 还是用户手动指定。
+    kind: NotRequired[Literal["folder", "tag"]]
+    mapping_source: NotRequired[Literal["jev", "manual"]]
 
 
 class ClassificationAssessment(TypedDict):

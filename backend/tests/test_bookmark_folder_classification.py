@@ -16,6 +16,7 @@ from app.category_service import classification_categories
 from app.models import BookmarkFolderCategory, Memo, ResourceClassificationJob
 from app.resource_classification_service import run_pending_classification_jobs
 from app.resource_processing import CategoryDecision, ResourceMetadata
+from app.resource_service import enrich_resource
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -57,7 +58,8 @@ class FakeJev:
             raise self.error
         state = payload["state"]
         if "url" not in state:
-            folder = state["bookmark_folder"]
+            # 标签请求用“#标签名”作键，和文件夹区分开。
+            folder = state.get("bookmark_folder") or f"#{state['bookmark_tag']}"
             self.mapping_calls.append(folder)
             choice, confidence = self.mapping.get(folder, ("none", 0.9))
         else:
@@ -261,6 +263,8 @@ def test_folder_mapping_is_cached_and_invalidated_by_template_change(
         "category_label": None,
         "verdict": "unmapped",
         "confidence": None,
+        "kind": "folder",
+        "mapping_source": "jev",
     }
 
     create_category(client, "阅读清单")
@@ -375,3 +379,253 @@ def test_retry_by_folder_requires_jev(client: TestClient) -> None:
     response = client.post("/api/v1/resource-classification/folders/retry")
     assert response.status_code == 400
     assert "Jev" in response.json()["detail"]
+
+
+def test_rejected_verdict_keeps_confidence(
+    client: TestClient,
+    jev: FakeJev,
+    full_classifier: list[str],
+) -> None:
+    configure_jev(client)
+    frontend = create_category(client, "前端开发")
+    jev.mapping["前端"] = (frontend, 0.9)
+    jev.verify["优惠券"] = ("none", 0.95)
+    memo_id = create_bookmark(client, "优惠券", "书签栏/前端")
+
+    run_jobs(client)
+    evidence = read_memo(client, memo_id).resource_ai_assessment["bookmark_folder"]
+    assert evidence["verdict"] == "rejected"
+    assert evidence["confidence"] == 0.95
+
+
+def test_full_classification_choosing_rejected_category_goes_to_review(
+    client: TestClient,
+    jev: FakeJev,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_jev(client)
+    frontend = create_category(client, "前端开发")
+    jev.mapping["前端"] = (frontend, 0.9)
+    jev.verify["两头不一致"] = ("none", 0.8)
+
+    def classify(_metadata: ResourceMetadata, *_args: object) -> CategoryDecision:
+        return CategoryDecision(
+            frontend,
+            "前端开发",
+            0.9,
+            "jev",
+            ("前端开发",),
+            assessment={
+                "status": "classified",
+                "reason_code": "accepted",
+                "confidence": 0.9,
+                "threshold": 0.7,
+                "candidates": [
+                    {"code": frontend, "label": "前端开发", "probability": 0.9},
+                ],
+                "input_source": "metadata",
+                "input_excerpt": None,
+                "model": "typesafe/jev",
+                "attempted_at": "2026-10-16T00:00:00+00:00",
+            },
+        )
+
+    patch_web_classifier(monkeypatch, classify)
+    memo_id = create_bookmark(client, "两头不一致", "书签栏/前端")
+    run_jobs(client)
+
+    memo = read_memo(client, memo_id)
+    # 两次判断结论相反：不写入分类，保留原分类等用户确认。
+    assert memo.resource_category != frontend
+    assert memo.resource_ai_confirmation_pending is True
+    assert memo.resource_ai_assessment["reason_code"] == "folder_conflict"
+    assert memo.resource_ai_assessment["bookmark_folder"]["verdict"] == "rejected"
+    review = client.get(
+        "/api/v1/resource-classification/review",
+        params={"reason": "folder_conflict"},
+    ).json()
+    assert [item["id"] for item in review["items"]] == [memo_id]
+
+
+def test_bookmark_tags_are_imported_and_used_as_original_category(
+    client: TestClient,
+    jev: FakeJev,
+    full_classifier: list[str],
+) -> None:
+    configure_jev(client)
+    frontend = create_category(client, "前端开发")
+    jev.mapping["#前端"] = (frontend, 0.9)
+    jev.verify["Svelte 教程"] = (frontend, 0.9)
+    response = client.post(
+        "/api/v1/bookmark-imports",
+        json={
+            "items": [
+                {
+                    "client_item_id": "firefox-1",
+                    "title": "Svelte 教程",
+                    "url": "https://svelte.example.com/tutorial",
+                    "folder_path": "书签菜单",
+                    "tags": [" 前端 ", "前端", "", "教程"],
+                }
+            ]
+        },
+    )
+    assert response.status_code in {200, 201, 202}
+    with client.app.state.database.session_factory() as session:
+        memo = session.scalar(select(Memo).where(Memo.title == "Svelte 教程"))
+        memo_id = memo.id
+        assert memo.tags == ["前端", "教程"]
+        assert memo.resource_import_tags == ["前端", "教程"]
+        # 测试环境不抓取网页，直接标为可分类。
+        memo.link_health_status = "healthy"
+        memo.resource_page_title = "Svelte 教程"
+        session.commit()
+
+    run_jobs(client)
+    memo = read_memo(client, memo_id)
+    evidence = memo.resource_ai_assessment["bookmark_folder"]
+    assert memo.resource_category == frontend
+    assert evidence["kind"] == "tag"
+    assert evidence["folder"] == "前端"
+    # 根目录不算原归类，只问了第一个标签就对应上了。
+    assert jev.mapping_calls == ["#前端"]
+    assert full_classifier == []
+
+
+def test_mapping_overview_map_override_and_retry(
+    client: TestClient,
+    jev: FakeJev,
+    full_classifier: list[str],
+) -> None:
+    configure_jev(client)
+    frontend = create_category(client, "前端开发")
+    tools = create_category(client, "效率工具")
+    pages = {
+        "Vue": create_bookmark(
+            client, "Vue", "书签栏/前端", resource_category_source="rule"
+        ),
+        "Vite": create_bookmark(
+            client, "Vite", "书签栏/前端", resource_category_source="rule"
+        ),
+        "Todo": create_bookmark(
+            client, "Todo", "书签栏/杂项", resource_category_source="rule"
+        ),
+        "Note": create_bookmark(
+            client, "Note", "书签栏/稍后读", resource_category_source="rule"
+        ),
+    }
+    with client.app.state.database.session_factory() as session:
+        for memo_id in pages.values():
+            session.get(Memo, memo_id).resource_ai_auto_pending = False
+        session.commit()
+
+    overview = client.get("/api/v1/resource-classification/folders").json()
+    assert overview["pending_count"] == 3
+    assert overview["page_count"] == 4
+    assert overview["retry_count"] == 0
+    assert overview["items"][0] == {
+        "key": "前端",
+        "kind": "folder",
+        "text": "前端",
+        "page_count": 2,
+        "status": "pending",
+        "source": None,
+        "category_code": None,
+        "category_label": None,
+        "confidence": None,
+    }
+    assert {"code": frontend, "label": "前端开发"} in overview["categories"]
+
+    jev.mapping["前端"] = (frontend, 0.88)
+    mapped = client.post(
+        "/api/v1/resource-classification/folders/map", params={"limit": 2}
+    ).json()
+    assert mapped["pending_count"] == 1
+    mapped = client.post("/api/v1/resource-classification/folders/map").json()
+    assert mapped["pending_count"] == 0
+    assert jev.mapping_calls == ["前端", "杂项", "稍后读"]
+    by_key = {item["key"]: item for item in mapped["items"]}
+    assert by_key["前端"]["status"] == "mapped"
+    assert by_key["前端"]["confidence"] == 0.88
+    assert by_key["杂项"]["status"] == "unmapped"
+    assert mapped["retry_count"] == 2
+
+    # 手动把「杂项」指定为效率工具，把「前端」设为不沿用。
+    overridden = client.put(
+        "/api/v1/resource-classification/folders/override",
+        json={"key": "杂项", "mode": "category", "category_code": tools},
+    ).json()
+    by_key = {item["key"]: item for item in overridden["items"]}
+    assert by_key["杂项"]["source"] == "manual"
+    assert by_key["杂项"]["category_label"] == "效率工具"
+    overridden = client.put(
+        "/api/v1/resource-classification/folders/override",
+        json={"key": "前端", "mode": "skip"},
+    ).json()
+    assert overridden["retry_count"] == 1
+    invalid = client.put(
+        "/api/v1/resource-classification/folders/override",
+        json={"key": "前端", "mode": "category", "category_code": "missing"},
+    )
+    assert invalid.status_code == 422
+
+    jev.verify["Todo"] = (tools, 0.9)
+    response = client.post("/api/v1/resource-classification/folders/retry")
+    assert response.json()["job"]["total_count"] == 1
+    run_jobs(client)
+    assert read_memo(client, pages["Todo"]).resource_category == tools
+    assert (
+        read_memo(client, pages["Todo"]).resource_ai_assessment["bookmark_folder"][
+            "mapping_source"
+        ]
+        == "manual"
+    )
+    # 文件夹判断过后不会再问。
+    assert jev.mapping_calls == ["前端", "杂项", "稍后读"]
+
+    # 恢复由 Jev 判断后，「前端」重新沿用缓存的结果。
+    restored = client.put(
+        "/api/v1/resource-classification/folders/override",
+        json={"key": "前端", "mode": "auto"},
+    ).json()
+    assert {item["key"]: item for item in restored["items"]}["前端"]["source"] == "jev"
+
+
+def test_folder_mapping_requires_jev(client: TestClient) -> None:
+    create_bookmark(client, "网页", "书签栏/工具")
+    response = client.post("/api/v1/resource-classification/folders/map")
+    assert response.status_code == 400
+
+
+def test_single_page_refresh_checks_folder(
+    client: TestClient,
+    jev: FakeJev,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_jev(client)
+    frontend = create_category(client, "前端开发")
+    jev.mapping["前端"] = (frontend, 0.9)
+    jev.verify["Angular"] = (frontend, 0.9)
+    calls: list[str] = []
+
+    def classify(metadata: ResourceMetadata, **_kwargs: object) -> CategoryDecision:
+        calls.append(metadata.page_title or "")
+        return CategoryDecision("tool", "工具与服务", 0.9, "jev", ())
+
+    monkeypatch.setattr("app.resource_service.classify_resource", classify)
+    memo_id = create_bookmark(client, "Angular", "书签栏/前端")
+    settings = client.app.state.settings
+    with client.app.state.database.session_factory() as session:
+        memo = enrich_resource(
+            session,
+            settings.local_user_id,
+            memo_id,
+            settings,
+            metadata_fetcher=lambda url: ResourceMetadata(
+                url, "Angular", "框架文档", "Angular", None, 200
+            ),
+        )
+        assert memo.resource_category == frontend
+        assert memo.resource_page_title == "Angular"
+        assert memo.resource_ai_assessment["bookmark_folder"]["verdict"] == "kept"
+    assert calls == []

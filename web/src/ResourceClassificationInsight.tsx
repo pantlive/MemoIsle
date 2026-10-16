@@ -21,13 +21,17 @@ type FolderEvidence = NonNullable<ResourceClassificationAssessment["bookmark_fol
 
 function folderEvidenceText(evidence: FolderEvidence): string {
   const confidence = evidence.confidence === null ? "" : `（置信度 ${(evidence.confidence * 100).toFixed(0)}%）`;
+  const subject = `${evidence.kind === "tag" ? "书签标签" : "书签文件夹"}「${evidence.folder}」`;
+  const mapped = evidence.mapping_source === "manual" ? "按你的指定对应" : "对应";
   if (evidence.verdict === "kept") {
-    return `书签文件夹「${evidence.folder}」对应「${evidence.category_label}」，Jev 判定网页属于这个分类${confidence}，已沿用。`;
+    return `${subject}${mapped}「${evidence.category_label}」，Jev 判定网页属于这个分类${confidence}，已沿用。`;
   }
   if (evidence.verdict === "rejected") {
-    return `书签文件夹「${evidence.folder}」对应「${evidence.category_label}」，但 Jev 判定网页不属于它${confidence}，已按完整流程重新分类。`;
+    return `${subject}${mapped}「${evidence.category_label}」，但 Jev 判定网页不属于它${confidence}，已按完整流程重新分类。`;
   }
-  return `书签文件夹「${evidence.folder}」没有对应的已有分类，已按完整流程分类。`;
+  return evidence.mapping_source === "manual"
+    ? `${subject}已设为不沿用，已按完整流程分类。`
+    : `${subject}没有对应的已有分类，已按完整流程分类。`;
 }
 
 const reasonLabels: Record<string, string> = {
@@ -37,6 +41,7 @@ const reasonLabels: Record<string, string> = {
   invalid_response: "模型返回的分类数据无效，保留原分类。",
   no_ocr_text: "没有识别到图片文字，保留原分类，可手动选择模板。",
   no_match: "所有自定义分类的口径都不匹配，已改用系统兜底分类。",
+  folder_conflict: "Jev 判定网页不属于书签原归类对应的分类，完整分类却又选回了它；保留原分类，请人工确认。",
 };
 
 export default function ResourceClassificationInsight({
@@ -99,7 +104,7 @@ export default function ResourceClassificationInsight({
     <p>{reasonLabels[assessment.reason_code] || "本次判断未确定，保留原分类。"}</p>
     {fallbackUsed && <p className="classification-insight-fallback">系统兜底分类 · 这条没有命中你自己的细类</p>}
     {assessment.bookmark_folder && <>
-      <strong>{assessment.bookmark_folder.verdict === "kept" ? "沿用书签文件夹" : "书签文件夹复核"}</strong>
+      <strong>{assessment.bookmark_folder.verdict === "kept" ? "沿用书签原归类" : "书签原归类复核"}</strong>
       <p className="classification-insight-folder">{folderEvidenceText(assessment.bookmark_folder)}</p>
     </>}
     <p>{confidence}{` · 自动分类要求 ${(assessment.threshold * 100).toFixed(0)}%`}</p>

@@ -4,11 +4,11 @@ import {
   getResourceClassificationState,
   resumeResourceClassification,
   retryClassifiedResources,
-  retryFolderClassifications,
   retryResourceClassificationReviews,
   startResourceClassification,
 } from "./api";
 import type { ResourceClassificationState } from "./types";
+import BookmarkFolderMappingDialog from "./BookmarkFolderMappingDialog";
 import ResourceClassificationReviewDialog from "./ResourceClassificationReviewDialog";
 
 interface ResourceClassificationPanelProps {
@@ -26,6 +26,7 @@ export default function ResourceClassificationPanel({
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [folderOpen, setFolderOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const onChangedRef = useRef(onChanged);
   const previousProgress = useRef("");
@@ -112,25 +113,6 @@ export default function ResourceClassificationPanel({
     }
   };
 
-  const handleRetryFolders = async (): Promise<void> => {
-    const count = state?.folder_retry_count ?? 0;
-    if (starting || running || !count) return;
-    if (!window.confirm(
-      `按书签原文件夹重新判断 ${count} 条网页？\n\n`
-      + "Jev 先把每个文件夹对应到已有分类，再逐条判断网页是否真的属于它：属于就沿用，"
-      + "不属于再走完整分类。每条网页至少请求一次 Jev，会产生费用。人工确认和规则分类的网页不动。",
-    )) return;
-    setStarting(true);
-    setError("");
-    try {
-      setState(await retryFolderClassifications());
-    } catch (retryError) {
-      setError(retryError instanceof Error ? retryError.message : "按书签文件夹重新判断失败");
-    } finally {
-      setStarting(false);
-    }
-  };
-
   return (
     <section className="resource-classification-panel" aria-label="已有网页大模型分类">
       <div className="resource-classification-heading">
@@ -159,9 +141,9 @@ export default function ResourceClassificationPanel({
         </button>
         <button
           type="button"
-          onClick={() => void handleRetryFolders()}
+          onClick={() => setFolderOpen(true)}
           disabled={starting || running || !state || (state.folder_retry_count ?? 0) === 0}
-          title="已导入的书签按原文件夹重新判断，人工确认和规则分类的不动"
+          title="先确认文件夹对应的分类，再逐条判断已导入的书签"
         >
           按书签文件夹重新判断 {state?.folder_retry_count ?? 0}
         </button>
@@ -192,6 +174,10 @@ export default function ResourceClassificationPanel({
         {job.error && <span role="alert">{job.error}</span>}
       </div>}
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
+      {folderOpen && <BookmarkFolderMappingDialog
+        onClose={() => setFolderOpen(false)}
+        onStarted={() => setRefresh((value) => value + 1)}
+      />}
       {reviewOpen && <ResourceClassificationReviewDialog onClose={() => setReviewOpen(false)} onChanged={() => {
         onChangedRef.current();
         setRefresh((value) => value + 1);

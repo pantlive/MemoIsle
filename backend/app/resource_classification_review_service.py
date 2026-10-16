@@ -32,6 +32,7 @@ ReviewReason = Literal[
     "unknown_category",
     "invalid_response",
     "no_match",
+    "folder_conflict",
     "legacy",
 ]
 

@@ -968,6 +968,7 @@ def _reset_type_specific_fields(memo: Memo, target_type: MemoType) -> None:
     memo.resource_auto_tags = []
     memo.resource_last_enriched_at = None
     memo.resource_import_folder = None
+    memo.resource_import_tags = []
     memo.resource_import_batch_id = None
     memo.link_health_status = "unchecked"
     memo.link_health_http_status = None

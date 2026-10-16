@@ -143,6 +143,9 @@ export interface ResourceClassificationAssessment {
     category_label: string | null;
     verdict: "kept" | "rejected" | "unmapped";
     confidence: number | null;
+    // 原归类来自文件夹还是书签标签；对应关系来自 Jev 还是手动指定。
+    kind?: "folder" | "tag";
+    mapping_source?: "jev" | "manual";
   };
 }
 
@@ -220,6 +223,7 @@ export interface Memo {
   resource_auto_tags: string[];
   resource_last_enriched_at: string | null;
   resource_import_folder: string | null;
+  resource_import_tags?: string[];
   resource_import_batch_id: string | null;
   ebook_provider: CloudProvider | null;
   ebook_file_id: string | null;
@@ -453,6 +457,8 @@ export interface BookmarkInput {
   title: string;
   url: string;
   folder_path?: string | null;
+  // Firefox 书签的 TAGS 属性；Chrome/Edge 没有标签。
+  tags?: string[];
 }
 
 export interface BrowserBookmarkSnapshot {
@@ -658,4 +664,25 @@ export interface EbookJobCreateRequest {
   tags?: string[];
   collections?: string[];
   note?: string | null;
+}
+
+export interface BookmarkFolderMapping {
+  key: string;
+  kind: "folder" | "tag";
+  text: string;
+  page_count: number;
+  // pending 还没判断；mapped 对应到分类；unmapped 没有对应分类或设为不沿用。
+  status: "pending" | "mapped" | "unmapped";
+  source: "jev" | "manual" | null;
+  category_code: string | null;
+  category_label: string | null;
+  confidence: number | null;
+}
+
+export interface BookmarkFolderMappingList {
+  items: BookmarkFolderMapping[];
+  categories: Array<{ code: string; label: string }>;
+  pending_count: number;
+  page_count: number;
+  retry_count: number;
 }

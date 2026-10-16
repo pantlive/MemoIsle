@@ -14,6 +14,7 @@ const reasons: Record<string, string> = {
   unknown_category: "模板中无此类别",
   invalid_response: "分类数据无效",
   no_match: "口径都不匹配",
+  folder_conflict: "与书签文件夹判断相反",
   legacy: "未保存候选",
 };
 const skipReasons: Record<string, string> = {

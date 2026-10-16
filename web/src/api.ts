@@ -3,6 +3,7 @@ import type {
   AuthProvider,
   AuthSession,
   AuthUser,
+  BookmarkFolderMappingList,
   BookmarkImportBatch,
   BookmarkImportPreview,
   BookmarkInput,
@@ -544,6 +545,25 @@ export async function retryClassifiedResources(): Promise<ResourceClassification
 
 export async function retryFolderClassifications(): Promise<ResourceClassificationState> {
   return request<ResourceClassificationState>("/resource-classification/folders/retry", { method: "POST" });
+}
+
+export async function getBookmarkFolderMappings(): Promise<BookmarkFolderMappingList> {
+  return request<BookmarkFolderMappingList>("/resource-classification/folders");
+}
+
+export async function mapPendingBookmarkFolders(limit = 5): Promise<BookmarkFolderMappingList> {
+  return request<BookmarkFolderMappingList>(`/resource-classification/folders/map?limit=${limit}`, { method: "POST" });
+}
+
+export async function setBookmarkFolderOverride(
+  key: string,
+  mode: "category" | "skip" | "auto",
+  categoryCode?: string,
+): Promise<BookmarkFolderMappingList> {
+  return request<BookmarkFolderMappingList>("/resource-classification/folders/override", {
+    method: "PUT",
+    body: JSON.stringify({ key, mode, category_code: categoryCode ?? null }),
+  });
 }
 
 export async function getResourceClassificationReviews(

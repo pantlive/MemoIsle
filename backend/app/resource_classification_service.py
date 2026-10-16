@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import uuid4
 
 import httpx
@@ -14,8 +16,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.bookmark_folder_classification import (
+    OriginalLabel,
+    categories_fingerprint,
     check_bookmark_folder,
-    meaningful_folder_path,
+    folder_conflict_assessment,
+    label_from_key,
+    map_folder_to_category,
+    original_labels,
+    set_folder_override,
+    store_folder_mapping,
+    stored_mappings,
     with_folder_evidence,
 )
 from app.category_service import (
@@ -53,6 +63,8 @@ from app.resource_processing import (
 )
 from app.resource_service import fallback_metadata, metadata_fingerprint
 from app.schemas import (
+    BookmarkFolderMappingList,
+    BookmarkFolderMappingRead,
     MemoType,
     ResourceClassificationJobRead,
     ResourceClassificationState,
@@ -198,12 +210,10 @@ def classification_state(
         )
         or 0,
         classified_retry_count=session.scalar(
-            select(func.count())
-            .select_from(Memo)
-            .where(*classified_filters(user_id)),
+            select(func.count()).select_from(Memo).where(*classified_filters(user_id)),
         )
         or 0,
-        folder_retry_count=len(folder_retry_ids(session, user_id)),
+        folder_retry_count=len(folder_candidates(session, user_id)),
         job=ResourceClassificationJobRead.model_validate(job) if job else None,
     )
 
@@ -312,9 +322,7 @@ def retry_review_classifications(
             updated_at=datetime.now(UTC),
         )
     )
-    job = _publish_job(
-        session, user_id, current, resolved, memo_ids, automatic=False
-    )
+    job = _publish_job(session, user_id, current, resolved, memo_ids, automatic=False)
     remaining = set(job.memo_ids[job.processed_count :])
     if remaining.issuperset(memo_ids):
         return job
@@ -372,9 +380,7 @@ def retry_classified_classifications(
             updated_at=datetime.now(UTC),
         )
     )
-    job = _publish_job(
-        session, user_id, current, resolved, memo_ids, automatic=False
-    )
+    job = _publish_job(session, user_id, current, resolved, memo_ids, automatic=False)
     remaining = set(job.memo_ids[job.processed_count :])
     if remaining.issuperset(memo_ids):
         return job
@@ -384,11 +390,14 @@ def retry_classified_classifications(
 
 
 def folder_retry_filters(user_id: str) -> tuple[ColumnElement[bool], ...]:
-    """带书签文件夹、可交给模型的网页；人工确认、规则保护和确认失效的不动。"""
+    """带书签原归类、可交给模型的网页；人工确认、规则保护和确认失效的不动。"""
 
     return (
         *resource_filters(user_id),
-        Memo.resource_import_folder.is_not(None),
+        or_(
+            Memo.resource_import_folder.is_not(None),
+            func.json_array_length(Memo.resource_import_tags) > 0,
+        ),
         Memo.link_health_status != "failed",
         Memo.resource_ai_confirmation.is_(None),
         or_(
@@ -398,15 +407,134 @@ def folder_retry_filters(user_id: str) -> tuple[ColumnElement[bool], ...]:
     )
 
 
-def folder_retry_ids(session: Session, user_id: str) -> list[str]:
-    """只收文件夹去掉浏览器根目录后仍有内容的网页，直接放在书签栏的没有可沿用的归类。"""
+def folder_candidates(
+    session: Session,
+    user_id: str,
+) -> list[tuple[str, list[OriginalLabel]]]:
+    """直接放在书签栏、也没有标签的网页没有可沿用的归类，不算在内。"""
 
     rows = session.execute(
-        select(Memo.id, Memo.resource_import_folder)
+        select(Memo.id, Memo.resource_import_folder, Memo.resource_import_tags)
         .where(*folder_retry_filters(user_id))
         .order_by(Memo.created_at.asc(), Memo.id.asc()),
     ).all()
-    return [memo_id for memo_id, folder in rows if meaningful_folder_path(folder)]
+    result = []
+    for memo_id, folder, tags in rows:
+        labels = original_labels(folder, tags)
+        if labels:
+            result.append((memo_id, labels))
+    return result
+
+
+def folder_mapping_overview(
+    session: Session, user_id: str
+) -> BookmarkFolderMappingList:
+    """列出每个文件夹和书签标签对应到哪个分类，以及重新判断会涉及多少网页。"""
+
+    categories = classification_categories(session, user_id)
+    by_code = {category.code: category for category in categories}
+    fingerprint = categories_fingerprint(categories)
+    candidates = folder_candidates(session, user_id)
+    counts = Counter(label.key for _, labels in candidates for label in labels)
+    stored = stored_mappings(session, user_id, list(counts), fingerprint, set(by_code))
+
+    def mapped(key: str) -> bool:
+        mapping = stored.get(key)
+        return mapping is not None and mapping.category_code in by_code
+
+    items = []
+    for key, count in counts.most_common():
+        label = label_from_key(key)
+        mapping = stored.get(key)
+        category = by_code.get(mapping.category_code or "") if mapping else None
+        items.append(
+            BookmarkFolderMappingRead(
+                key=key,
+                kind=label.kind,
+                text=label.text,
+                page_count=count,
+                status="pending"
+                if mapping is None
+                else "mapped"
+                if category is not None
+                else "unmapped",
+                source=mapping.source if mapping else None,
+                category_code=category.code if category else None,
+                category_label=(category.path or category.label) if category else None,
+                confidence=mapping.confidence if mapping else None,
+            )
+        )
+    return BookmarkFolderMappingList(
+        items=items,
+        categories=[
+            {"code": category.code, "label": category.path or category.label}
+            for category in categories
+        ],
+        pending_count=sum(item.status == "pending" for item in items),
+        page_count=len(candidates),
+        retry_count=sum(
+            any(mapped(label.key) for label in labels) for _, labels in candidates
+        ),
+    )
+
+
+def jev_settings(session: Session, user_id: str, settings: Settings) -> Settings:
+    resolved = configured_settings(session, user_id, settings)
+    if not (resolved.jev_api_key and resolved.jev_model):
+        raise ResourceClassificationConfigurationError(
+            "按书签文件夹判断需要在设置 → 模型服务中配置并启用 Jev",
+        )
+    return resolved
+
+
+def map_pending_folders(
+    session: Session,
+    user_id: str,
+    settings: Settings,
+    limit: int = 5,
+) -> BookmarkFolderMappingList:
+    """让 Jev 判断还没判断过的文件夹和标签，每次只处理几个，便于界面显示进度。"""
+
+    resolved = jev_settings(session, user_id, settings)
+    overview = folder_mapping_overview(session, user_id)
+    pending = [item.key for item in overview.items if item.status == "pending"][:limit]
+    if not pending:
+        return overview
+    categories = classification_categories(session, user_id)
+    fingerprint = categories_fingerprint(categories)
+    session.rollback()
+    assert resolved.jev_api_key is not None
+    for key in pending:
+        mapping = map_folder_to_category(
+            label_from_key(key),
+            categories,
+            resolved.jev_api_key,
+            resolved.jev_base_url,
+            resolved.jev_model,
+            resolved.jev_min_confidence,
+        )
+        store_folder_mapping(
+            session, user_id, key, fingerprint, mapping, resolved.jev_model
+        )
+    return folder_mapping_overview(session, user_id)
+
+
+def update_folder_override(
+    session: Session,
+    user_id: str,
+    key: str,
+    mode: Literal["category", "skip", "auto"],
+    category_code: str | None,
+) -> BookmarkFolderMappingList:
+    """手动指定的分类必须是当前启用的分类。"""
+
+    if mode == "category" and not any(
+        category.code == category_code
+        for category in classification_categories(session, user_id)
+    ):
+        raise ValueError("指定的分类不存在或已停用")
+    set_folder_override(session, user_id, key, mode, category_code)
+    return folder_mapping_overview(session, user_id)
 
 
 def retry_folder_classifications(
@@ -421,16 +549,30 @@ def retry_folder_classifications(
         raise ResourceClassificationStateError(
             "当前分类任务还在进行，请完成后再按书签文件夹重新判断",
         )
-    memo_ids = folder_retry_ids(session, user_id)
+    resolved = jev_settings(session, user_id, settings)
+    # 只排队原归类已经对应到分类的网页；没有对应分类的重新判断也沿用不了。
+    categories = classification_categories(session, user_id)
+    valid_codes = {category.code for category in categories}
+    candidates = folder_candidates(session, user_id)
+    stored = stored_mappings(
+        session,
+        user_id,
+        [label.key for _, labels in candidates for label in labels],
+        categories_fingerprint(categories),
+        valid_codes,
+    )
+    memo_ids = [
+        memo_id
+        for memo_id, labels in candidates
+        if any(
+            label.key in stored and stored[label.key].category_code in valid_codes
+            for label in labels
+        )
+    ]
     if not memo_ids:
         if current is None:
             return _publish_job(session, user_id, None, settings, [], automatic=False)
         return current
-    resolved = configured_settings(session, user_id, settings)
-    if not (resolved.jev_api_key and resolved.jev_model):
-        raise ResourceClassificationConfigurationError(
-            "按书签文件夹判断需要在设置 → 模型服务中配置并启用 Jev",
-        )
     # 清掉完成标记，模型来源改成可进队列的来源；规则结果保留原来源。不改 version。
     session.execute(
         update(Memo)
@@ -445,9 +587,7 @@ def retry_folder_classifications(
             updated_at=datetime.now(UTC),
         )
     )
-    job = _publish_job(
-        session, user_id, current, resolved, memo_ids, automatic=False
-    )
+    job = _publish_job(session, user_id, current, resolved, memo_ids, automatic=False)
     remaining = set(job.memo_ids[job.processed_count :])
     if remaining.issuperset(memo_ids):
         return job
@@ -1003,6 +1143,7 @@ def process_classification_job(
                 processed += 1
                 continue
             raw_folder = memo.resource_import_folder
+            import_tags = list(memo.resource_import_tags or [])
             session.rollback()
             decision = None
             if resolved.jev_api_key and resolved.jev_model:
@@ -1017,6 +1158,7 @@ def process_classification_job(
                     resolved.jev_base_url,
                     resolved.jev_model,
                     resolved.jev_min_confidence,
+                    tags=import_tags,
                 )
             if decision is None:
                 decision = classify_resource(
@@ -1045,6 +1187,10 @@ def process_classification_job(
                     # 批量分类以模型判定为准，不因关键词命中就跳过。
                     consult_model_always=True,
                 )
+                conflict = folder_conflict_assessment(decision, folder_evidence)
+                if conflict is not None:
+                    # 两次判断结论相反，保留原分类，交给分类确认中心。
+                    raise UncertainClassificationError(conflict)
                 decision = with_folder_evidence(decision, folder_evidence)
         except (
             ResourceClassificationConfigurationError,
@@ -1078,7 +1224,9 @@ def process_classification_job(
                 None,
                 failed=True,
                 assessment={**error.assessment, "bookmark_folder": folder_evidence}
-                if isinstance(error, UncertainClassificationError) and folder_evidence
+                if isinstance(error, UncertainClassificationError)
+                and folder_evidence is not None
+                and "bookmark_folder" not in error.assessment
                 else error.assessment
                 if isinstance(error, UncertainClassificationError)
                 else empty_assessment(

@@ -173,6 +173,7 @@ def create_bookmark_batch(
                 source_url=source.url,
                 normalized_url=item.normalized_url or source.url.strip(),
                 folder_path=source.folder_path,
+                tags=source.tags,
                 status=persisted_status,
                 existing_memo_id=(
                     str(item.existing_memo_id)
@@ -339,7 +340,8 @@ def process_bookmark_batch(
                             body=cleaned_title or "从 Chrome 书签导入",
                             source_url=item.normalized_url,
                             source_title=cleaned_title or None,
-                            tags=[],
+                            # 书签自带的标签是用户自己打的，直接保留为条目标签。
+                            tags=list(item.tags or []),
                         ),
                     )
                 except ResourceDuplicateError as error:
@@ -373,6 +375,7 @@ def process_bookmark_batch(
                     continue
 
             memo.resource_import_folder = item.folder_path
+            memo.resource_import_tags = list(item.tags or [])
             memo.resource_import_batch_id = batch.id
             memo.updated_at = datetime.now(UTC)
             item.status = "imported"

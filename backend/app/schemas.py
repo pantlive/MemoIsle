@@ -449,6 +449,39 @@ class ResourceClassificationState(BaseModel):
     job: ResourceClassificationJobRead | None
 
 
+class BookmarkFolderMappingRead(BaseModel):
+    """一个书签文件夹或标签对应的分类。"""
+
+    key: str
+    kind: Literal["folder", "tag"]
+    text: str
+    page_count: int
+    # pending 还没判断；mapped 对应到分类；unmapped 没有对应分类或设为不沿用。
+    status: Literal["pending", "mapped", "unmapped"]
+    source: Literal["jev", "manual"] | None
+    category_code: str | None
+    category_label: str | None
+    confidence: float | None
+
+
+class BookmarkFolderMappingList(BaseModel):
+    """书签原归类的对应关系总览。"""
+
+    items: list[BookmarkFolderMappingRead]
+    categories: list[dict[str, str]]
+    pending_count: int
+    page_count: int
+    retry_count: int
+
+
+class BookmarkFolderOverrideRequest(BaseModel):
+    """手动指定对应分类、设为不沿用，或恢复由 Jev 判断。"""
+
+    key: str = Field(min_length=1, max_length=1_000)
+    mode: Literal["category", "skip", "auto"]
+    category_code: str | None = Field(default=None, max_length=50)
+
+
 class ResourceClassificationReviewCandidate(BaseModel):
     """显示当前模板路径与候选可用性，停用的类别不能采纳。"""
 
@@ -760,6 +793,7 @@ class MemoRead(BaseModel):
     resource_auto_tags: list[str]
     resource_last_enriched_at: datetime | None
     resource_import_folder: str | None
+    resource_import_tags: list[str] = Field(default_factory=list)
     resource_import_batch_id: UUID | None
     # 电子书：只暴露云盘文件引用与元数据快照，不含电子书本体。
     ebook_provider: CloudProvider | None
@@ -1569,6 +1603,16 @@ class BookmarkInput(BaseModel):
     title: str = Field(default="", max_length=300)
     url: str = Field(max_length=2_048)
     folder_path: str | None = Field(default=None, max_length=1_000)
+    # Firefox 导出的书签带 TAGS 属性；Chrome/Edge 没有标签。
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_bookmark_tags(cls, value: list[str]) -> list[str]:
+        """去掉空标签，按顺序去重并限长。"""
+
+        cleaned = (" ".join(tag.split())[:50] for tag in value)
+        return list(dict.fromkeys(tag for tag in cleaned if tag))
 
     @field_validator("client_item_id", "title")
     @classmethod

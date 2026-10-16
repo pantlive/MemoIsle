@@ -398,6 +398,12 @@ class Memo(Base):
         String(1_000),
         nullable=True,
     )
+    # 导入时书签自带的标签（Firefox 书签），和文件夹一起作为原来的归类。
+    resource_import_tags: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
     resource_import_batch_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
@@ -639,6 +645,7 @@ class BookmarkImportItem(Base):
     source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     normalized_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     folder_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     memo_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     existing_memo_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -1159,6 +1166,30 @@ class BookmarkFolderCategory(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     model: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
+class BookmarkFolderOverride(Base):
+    """用户手动指定的书签文件夹或标签对应分类，优先于 Jev 的判断。"""
+
+    __tablename__ = "bookmark_folder_override"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "folder_path",
+            name="uq_bookmark_folder_override_user_folder",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    folder_path: Mapped[str] = mapped_column(String(1_000), nullable=False)
+    # 为空表示不沿用这个文件夹，网页照常完整分类。
+    category_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,

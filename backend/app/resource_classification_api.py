@@ -1,12 +1,15 @@
 """当前账号的网页批量模型分类接口。"""
 
+from datetime import UTC, datetime
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.dependencies import get_current_user_id, get_session, get_settings
+from app.resource_classification_retry import classify_service_failure
 from app.resource_classification_review_service import (
     ReviewReason,
     confirm_classification_reviews,
@@ -16,13 +19,18 @@ from app.resource_classification_service import (
     ResourceClassificationConfigurationError,
     ResourceClassificationStateError,
     classification_state,
+    folder_mapping_overview,
+    map_pending_folders,
     resume_classification_job,
     retry_classified_classifications,
     retry_folder_classifications,
     retry_review_classifications,
     start_classification_job,
+    update_folder_override,
 )
 from app.schemas import (
+    BookmarkFolderMappingList,
+    BookmarkFolderOverrideRequest,
     ResourceClassificationReviewList,
     ResourceClassificationReviewRequest,
     ResourceClassificationReviewResult,
@@ -60,7 +68,9 @@ def list_classification_reviews_route(
     )
 
 
-@router.post("/review/retry", response_model=ResourceClassificationState, status_code=202)
+@router.post(
+    "/review/retry", response_model=ResourceClassificationState, status_code=202
+)
 def retry_classification_reviews_route(
     session: SessionDependency,
     user_id: UserDependency,
@@ -91,7 +101,9 @@ def confirm_classification_reviews_route(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-@router.post("/classified/retry", response_model=ResourceClassificationState, status_code=202)
+@router.post(
+    "/classified/retry", response_model=ResourceClassificationState, status_code=202
+)
 def retry_classified_classifications_route(
     session: SessionDependency,
     user_id: UserDependency,
@@ -106,6 +118,51 @@ def retry_classified_classifications_route(
     except ResourceClassificationStateError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return classification_state(session, user_id)
+
+
+@router.get("/folders", response_model=BookmarkFolderMappingList)
+def list_folder_mappings_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> BookmarkFolderMappingList:
+    """列出书签文件夹和标签各自对应的分类，供重新判断前确认。"""
+
+    return folder_mapping_overview(session, user_id)
+
+
+@router.post("/folders/map", response_model=BookmarkFolderMappingList)
+def map_pending_folders_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+) -> BookmarkFolderMappingList:
+    """让 Jev 判断几个还没判断过的文件夹或标签；界面反复调用直到全部完成。"""
+
+    try:
+        return map_pending_folders(session, user_id, settings, limit)
+    except ResourceClassificationConfigurationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except (httpx.HTTPError, httpx.InvalidURL) as error:
+        session.rollback()
+        failure = classify_service_failure(error, datetime.now(UTC))
+        raise HTTPException(status_code=502, detail=failure.message) from error
+
+
+@router.put("/folders/override", response_model=BookmarkFolderMappingList)
+def update_folder_override_route(
+    session: SessionDependency,
+    user_id: UserDependency,
+    payload: BookmarkFolderOverrideRequest,
+) -> BookmarkFolderMappingList:
+    """手动指定文件夹对应的分类、设为不沿用，或恢复由 Jev 判断。"""
+
+    try:
+        return update_folder_override(
+            session, user_id, payload.key, payload.mode, payload.category_code
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @router.post(

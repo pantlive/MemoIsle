@@ -6816,3 +6816,96 @@ button.template-node-copy {
   font-size: 13px;
   line-height: 1.7;
 }
+
+.folder-mapping-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 14px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.folder-mapping-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  padding: 10px 12px;
+}
+
+.folder-mapping-step p {
+  margin: 0;
+}
+
+.classification-review-dialog button.folder-mapping-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
+.folder-mapping-filter {
+  margin: 0 0 8px;
+}
+
+.folder-mapping-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-mapping-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+}
+
+.folder-mapping-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-mapping-name strong {
+  font-size: 14px;
+}
+
+.folder-mapping-name small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.folder-mapping-kind {
+  border-radius: 999px;
+  background: var(--primary-soft);
+  padding: 1px 8px;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.folder-mapping-list li.unmapped .folder-mapping-name strong {
+  color: var(--muted);
+}
+
+.folder-mapping-error {
+  color: var(--danger);
+}
+
+@media (max-width: 640px) {
+  .folder-mapping-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
