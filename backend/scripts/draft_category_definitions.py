@@ -17,6 +17,7 @@ from _classification_cli import (  # noqa: E402
 )
 from app.config import Settings  # noqa: E402
 from app.database import Database  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 MAX_DEFINITION_CHARS = 600
@@ -95,6 +96,18 @@ def request_definitions(
     return drafts
 
 
+def default_output(settings: Settings) -> Path:
+    """草稿含真实网页标题，默认写到数据目录，不放进仓库。"""
+
+    database = make_url(settings.database_url).database
+    base = (
+        Path(database).parent
+        if database and database != ":memory:"
+        else settings.audio_directory.parent
+    )
+    return base / "classification-drafts" / "classification-definitions-draft.json"
+
+
 def main() -> None:
     """入口：读取数据库 → 起草口径 → 打印并写出 JSON。"""
 
@@ -102,8 +115,8 @@ def main() -> None:
     parser.add_argument("--user-id", default=None, help="默认取库里的第一个账号")
     parser.add_argument(
         "--output",
-        default="docs/classification-definitions-draft.json",
-        help="草稿写入路径",
+        default=None,
+        help="草稿写入路径；默认放在数据库旁的 classification-drafts 目录",
     )
     args = parser.parse_args()
 
@@ -134,7 +147,8 @@ def main() -> None:
     with httpx.Client() as client:
         drafts = request_definitions(nodes, samples, resolved, client)
 
-    output = Path(args.output)
+    output = Path(args.output) if args.output else default_output(settings)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps({"categories": drafts}, ensure_ascii=False, indent=2),
         encoding="utf-8",

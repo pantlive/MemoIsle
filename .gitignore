@@ -234,3 +234,6 @@ __marimo__/
 .commandcode/
 *.iml
 .idea/
+
+# 由真实收藏库生成的分类样本，含网页标题，不入库。
+docs/classification-*.json
