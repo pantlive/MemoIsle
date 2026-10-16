@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
@@ -1964,3 +1966,138 @@ def normalize_source_url(value: str | None) -> str | None:
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         raise ValueError("来源链接必须是有效的 HTTP 或 HTTPS 地址")
     return cleaned
+
+
+# 密码库：服务器只接收浏览器加密后的数据，这里只校验格式和长度。
+VAULT_KDF = "pbkdf2-sha256"
+VAULT_MIN_ITERATIONS = 600_000
+VAULT_MAX_ITERATIONS = 5_000_000
+VAULT_MAX_CIPHERTEXT_BYTES = 64 * 1024
+
+
+def _decoded_length(value: str, field: str) -> int:
+    """校验标准 Base64 并返回解码后的字节数。"""
+
+    try:
+        return len(base64.b64decode(value, validate=True))
+    except (binascii.Error, ValueError) as error:
+        raise ValueError(f"{field} 不是有效的 Base64") from error
+
+
+class VaultKeyFields(BaseModel):
+    """主密码派生参数与包裹后的库密钥。"""
+
+    kdf: Literal["pbkdf2-sha256"] = VAULT_KDF
+    kdf_iterations: int = Field(ge=VAULT_MIN_ITERATIONS, le=VAULT_MAX_ITERATIONS)
+    kdf_salt: str = Field(max_length=64)
+    # AES-256 库密钥经 AES-GCM 包裹：32 字节密钥 + 16 字节认证标签。
+    wrapped_key: str = Field(max_length=128)
+    wrap_iv: str = Field(max_length=32)
+
+    @field_validator("kdf_salt")
+    @classmethod
+    def validate_salt(cls, value: str) -> str:
+        """盐至少 16 字节。"""
+
+        if _decoded_length(value, "kdf_salt") < 16:
+            raise ValueError("kdf_salt 至少 16 字节")
+        return value
+
+    @field_validator("wrapped_key")
+    @classmethod
+    def validate_wrapped_key(cls, value: str) -> str:
+        """只接受包裹后的 256 位密钥。"""
+
+        if _decoded_length(value, "wrapped_key") != 48:
+            raise ValueError("wrapped_key 长度无效")
+        return value
+
+    @field_validator("wrap_iv")
+    @classmethod
+    def validate_wrap_iv(cls, value: str) -> str:
+        """AES-GCM 使用 12 字节随机 IV。"""
+
+        if _decoded_length(value, "wrap_iv") != 12:
+            raise ValueError("wrap_iv 必须是 12 字节")
+        return value
+
+
+class VaultKeyCreate(VaultKeyFields):
+    """首次设置主密码。"""
+
+
+class VaultKeyUpdate(VaultKeyFields):
+    """更改主密码：用新主密码重新包裹同一把库密钥。"""
+
+    expected_version: int = Field(ge=1)
+
+
+class VaultStatus(BaseModel):
+    """密码库是否已设置，以及解锁所需的包裹参数。"""
+
+    configured: bool
+    kdf: str | None = None
+    kdf_iterations: int | None = None
+    kdf_salt: str | None = None
+    wrapped_key: str | None = None
+    wrap_iv: str | None = None
+    version: int | None = None
+    item_count: int = 0
+
+
+class VaultItemFields(BaseModel):
+    """加密后的条目内容。"""
+
+    ciphertext: str = Field(min_length=1)
+    iv: str = Field(max_length=32)
+
+    @field_validator("ciphertext")
+    @classmethod
+    def validate_ciphertext(cls, value: str) -> str:
+        """限制单条密文大小，至少要包含 GCM 认证标签。"""
+
+        size = _decoded_length(value, "ciphertext")
+        if size < 16 or size > VAULT_MAX_CIPHERTEXT_BYTES:
+            raise ValueError("ciphertext 大小无效")
+        return value
+
+    @field_validator("iv")
+    @classmethod
+    def validate_iv(cls, value: str) -> str:
+        """AES-GCM 使用 12 字节随机 IV。"""
+
+        if _decoded_length(value, "iv") != 12:
+            raise ValueError("iv 必须是 12 字节")
+        return value
+
+
+class VaultItemCreate(VaultItemFields):
+    """新建条目；ID 由浏览器生成，因为它参与加密的附加认证数据。"""
+
+    id: UUID
+
+
+class VaultItemUpdate(VaultItemFields):
+    """带版本号更新条目。"""
+
+    expected_version: int = Field(ge=1)
+
+
+class VaultItemRead(BaseModel):
+    """返回给浏览器解密的条目。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    ciphertext: str
+    iv: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_time(self, value: datetime) -> str:
+        """统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")

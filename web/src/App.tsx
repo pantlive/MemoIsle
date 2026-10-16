@@ -29,6 +29,8 @@ import { pendingHealthIssueCount } from "./linkHealth";
 import ReviewPanel, { type ReviewQueueFilter } from "./ReviewPanel";
 import QuickAccess from "./QuickAccess";
 import ShortcutHelpDialog from "./ShortcutHelpDialog";
+import VaultPanel from "./VaultPanel";
+import { lockVaultSession } from "./vaultSession";
 import SpeechPronunciation from "./SpeechPronunciation";
 import WordDictionaryPreview from "./WordDictionaryPreview";
 import WordPronunciation from "./WordPronunciation";
@@ -153,7 +155,7 @@ interface NavigationItem {
   label: string;
   icon: string;
   view?: ActiveView;
-  action?: "health" | "settings";
+  action?: "health" | "settings" | "vault";
 }
 
 interface PendingResource {
@@ -182,6 +184,7 @@ const navigation: NavigationItem[] = [
   { label: "灵感", icon: "✦", view: "idea" },
   { label: "回顾", icon: "◷", view: "review" },
   { label: "回收站", icon: "♻", view: "trash" },
+  { label: "密码库", icon: "◈", action: "vault" },
   { label: "设置", icon: "⚙", action: "settings" },
 ];
 
@@ -619,6 +622,12 @@ export default function App({ authUser, onLogout }: AppProps) {
   const [resourcePreviewMemo, setResourcePreviewMemo] = useState<Memo | null>(null);
   const [resourcePreviewEditing, setResourcePreviewEditing] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  // 密码库是独立页面，不属于任何内容类型；切换到任何内容视图都会离开它。
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const vaultOpenRef = useRef(vaultOpen);
+  vaultOpenRef.current = vaultOpen;
+  // 登录失效或切换账号时整个工作台卸载，库密钥不能留给下一个账号。
+  useEffect(() => () => lockVaultSession(), []);
   // 列表在数据刷新或弹窗关闭后要恢复焦点的行；"first" 表示新页面的第一行。
   const pendingRowFocusRef = useRef<string[] | "first" | null>(null);
   const previewReturnIdRef = useRef<string[] | null>(null);
@@ -1249,6 +1258,7 @@ export default function App({ authUser, onLogout }: AppProps) {
   ]);
 
   const changeActiveType = (type: ActiveView, preserveCapture = false) => {
+    setVaultOpen(false);
     if (type === activeType) {
       return;
     }
@@ -1439,6 +1449,7 @@ export default function App({ authUser, onLogout }: AppProps) {
   };
 
   const focusCapture = useCallback(() => {
+    setVaultOpen(false);
     if (
       activeType === "all" ||
       activeType === "inbox" ||
@@ -1798,6 +1809,10 @@ export default function App({ authUser, onLogout }: AppProps) {
         setShortcutHelpOpen(true);
         return;
       }
+      // 密码库页面不响应内容列表的单键快捷键，避免误触。
+      if (vaultOpenRef.current) {
+        return;
+      }
       if (activeTypeRef.current === "resource" && resourceListKeyRef.current(event)) {
         return;
       }
@@ -1849,6 +1864,7 @@ export default function App({ authUser, onLogout }: AppProps) {
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
+    if (value.trim()) setVaultOpen(false);
     if (
       value.trim() &&
       activeType !== "all" &&
@@ -3690,7 +3706,9 @@ export default function App({ authUser, onLogout }: AppProps) {
           {navigation.map((item) => {
             const enabled = item.view !== undefined || item.action !== undefined;
             // 首页现在是与「全部内容」合并后的唯一入口，需要正常显示选中态。
-            const active = item.view === activeType;
+            const active = item.action === "vault"
+              ? vaultOpen
+              : !vaultOpen && item.view === activeType;
             return (
               <button
                 className={active ? "nav-item active" : "nav-item"}
@@ -3705,6 +3723,9 @@ export default function App({ authUser, onLogout }: AppProps) {
                     setHealthCenterOpen(true);
                   } else if (item.action === "settings") {
                     setModelSettingsOpen(true);
+                  } else if (item.action === "vault") {
+                    setSelectedId(null);
+                    setVaultOpen(true);
                   }
                 }}
                 title={enabled ? undefined : "将在后续里程碑开放"}
@@ -3739,7 +3760,11 @@ export default function App({ authUser, onLogout }: AppProps) {
           <span>{authUser.email ?? authUser.display_name}</span>
           <button
             className="account-logout"
-            onClick={() => void onLogout()}
+            onClick={() => {
+              // 退出登录前先锁定，内存里不留解锁后的库密钥。
+              lockVaultSession();
+              void onLogout();
+            }}
             type="button"
           >退出</button>
         </div>
@@ -3831,10 +3856,22 @@ export default function App({ authUser, onLogout }: AppProps) {
           >
             <span aria-hidden="true">♻</span><span className="top-bar-label">回收站</span>
           </button>
+          <button
+            className={`trash-shortcut${vaultOpen ? " active" : ""}`}
+            type="button"
+            onClick={() => {
+              setSelectedId(null);
+              setVaultOpen(true);
+            }}
+            aria-label="密码库"
+          >
+            <span aria-hidden="true">◈</span><span className="top-bar-label">密码库</span>
+          </button>
           <button className="compact-new" onClick={focusCapture}>＋ 新建</button>
         </header>
 
         <main className="main-content">
+          {vaultOpen ? <VaultPanel /> : <>
           <div className="page-heading">
             <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1></div>
             <span>
@@ -4963,6 +5000,7 @@ export default function App({ authUser, onLogout }: AppProps) {
             )}
           </section>
           )}
+          </>}
         </main>
       </div>
 

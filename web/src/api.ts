@@ -234,6 +234,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       : undefined;
     throw new ApiError(message, response.status, code, current);
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 
@@ -638,6 +641,83 @@ export async function recordResourceOpen(memoId: string): Promise<ResourceOpenSt
   return request<ResourceOpenStats>(`/resources/${memoId}/open`, {
     method: "POST",
     keepalive: true,
+  });
+}
+
+export interface VaultKeyMaterial {
+  kdf: string;
+  kdf_iterations: number;
+  kdf_salt: string;
+  wrapped_key: string;
+  wrap_iv: string;
+}
+
+export interface VaultStatus extends Partial<VaultKeyMaterial> {
+  configured: boolean;
+  version: number | null;
+  item_count: number;
+}
+
+export interface VaultItemRecord {
+  id: string;
+  ciphertext: string;
+  iv: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// 密码库接口只收发密文，主密码和库密钥从不出现在请求里。
+export async function getVaultStatus(): Promise<VaultStatus> {
+  return request<VaultStatus>("/vault");
+}
+
+export async function createVault(material: VaultKeyMaterial): Promise<VaultStatus> {
+  return request<VaultStatus>("/vault", { method: "POST", body: JSON.stringify(material) });
+}
+
+export async function updateVaultKey(
+  material: VaultKeyMaterial,
+  expectedVersion: number,
+): Promise<VaultStatus> {
+  return request<VaultStatus>("/vault/key", {
+    method: "PUT",
+    body: JSON.stringify({ ...material, expected_version: expectedVersion }),
+  });
+}
+
+export async function resetVault(): Promise<void> {
+  return request<void>("/vault?confirm=delete-all-vault-items", { method: "DELETE" });
+}
+
+export async function listVaultItems(): Promise<VaultItemRecord[]> {
+  return request<VaultItemRecord[]>("/vault/items");
+}
+
+export async function createVaultItem(
+  id: string,
+  encrypted: { ciphertext: string; iv: string },
+): Promise<VaultItemRecord> {
+  return request<VaultItemRecord>("/vault/items", {
+    method: "POST",
+    body: JSON.stringify({ id, ...encrypted }),
+  });
+}
+
+export async function updateVaultItem(
+  id: string,
+  encrypted: { ciphertext: string; iv: string },
+  expectedVersion: number,
+): Promise<VaultItemRecord> {
+  return request<VaultItemRecord>(`/vault/items/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...encrypted, expected_version: expectedVersion }),
+  });
+}
+
+export async function deleteVaultItem(id: string, expectedVersion: number): Promise<void> {
+  return request<void>(`/vault/items/${id}?expected_version=${expectedVersion}`, {
+    method: "DELETE",
   });
 }
 

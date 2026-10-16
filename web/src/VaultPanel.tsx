@@ -1,0 +1,686 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+
+import {
+  ApiError,
+  createVault,
+  createVaultItem,
+  deleteVaultItem,
+  getVaultStatus,
+  listVaultItems,
+  resetVault,
+  updateVaultItem,
+  updateVaultKey,
+  type VaultItemRecord,
+  type VaultStatus,
+} from "./api";
+import {
+  MIN_MASTER_PASSWORD_LENGTH,
+  WrongMasterPasswordError,
+  createVaultKey,
+  decryptVaultItem,
+  emptyVaultItem,
+  encryptVaultItem,
+  rewrapVaultKey,
+  unlockVault,
+  vaultKindLabels,
+  type VaultEntry,
+  type VaultItemData,
+  type VaultKind,
+} from "./vault";
+import VaultItemDialog from "./VaultItemDialog";
+import {
+  VAULT_AUTO_LOCK_MS,
+  getVaultSessionKey,
+  lockVaultSession,
+  startVaultSession,
+  subscribeVaultSession,
+  touchVaultSession,
+} from "./vaultSession";
+
+const CLIPBOARD_CLEAR_MS = 30_000;
+const RESET_PHRASE = "清空密码库";
+// 用汉字做类型图标，任何字体都能正常显示。
+const kindIcons: Record<VaultKind, string> = { login: "账", secret: "钥", recovery: "码" };
+
+type Phase = "loading" | "error" | "insecure" | "setup" | "locked" | "unlocked";
+
+// WebCrypto 只在 HTTPS 或 localhost 下可用；局域网 http 地址打开时无法加密。
+const cryptoAvailable = (): boolean => (
+  window.isSecureContext && typeof crypto !== "undefined" && crypto.subtle !== undefined
+);
+type KindFilter = VaultKind | "all";
+
+interface EditorState {
+  entry: VaultEntry | null;
+  data: VaultItemData;
+}
+
+function describe(error: unknown): string {
+  if (error instanceof WrongMasterPasswordError) return error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return "操作失败，请稍后重试。";
+}
+
+function entrySubtitle(data: VaultItemData): string {
+  if (data.kind === "login") return data.username || data.url || "未填写用户名";
+  if (data.kind === "secret") return data.secret ? `${data.secret.length} 个字符` : "未填写密钥";
+  const remaining = data.codes.filter((item) => !item.used).length;
+  return `${data.account ? `${data.account} · ` : ""}剩余 ${remaining} / ${data.codes.length} 个可用`;
+}
+
+function matchesQuery(data: VaultItemData, query: string): boolean {
+  if (!query) return true;
+  // 只按名称、用户名、网址、账号和备注搜索，不匹配密码和密钥本身。
+  const haystack = [
+    data.title,
+    data.notes,
+    data.kind === "login" ? `${data.username} ${data.url}` : "",
+    data.kind === "recovery" ? data.account : "",
+  ].join(" ").toLowerCase();
+  return haystack.includes(query.toLowerCase());
+}
+
+function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFocus }: {
+  password: string;
+  confirm: string;
+  onPassword: (value: string) => void;
+  onConfirm: (value: string) => void;
+  autoFocus?: boolean;
+}) {
+  const tooShort = password.length > 0 && password.length < MIN_MASTER_PASSWORD_LENGTH;
+  const mismatch = confirm.length > 0 && confirm !== password;
+  return (
+    <>
+      <label className="vault-field">
+        <span className="vault-field-label"><span>新主密码</span></span>
+        <input
+          type="password"
+          value={password}
+          onChange={(event) => onPassword(event.target.value)}
+          autoComplete="new-password"
+          autoFocus={autoFocus}
+          minLength={MIN_MASTER_PASSWORD_LENGTH}
+          required
+        />
+        <small className={tooShort ? "vault-hint warn" : "vault-hint"}>
+          至少 {MIN_MASTER_PASSWORD_LENGTH} 个字符；用几个不相关的词组成的长句更好记也更安全。
+        </small>
+      </label>
+      <label className="vault-field">
+        <span className="vault-field-label"><span>再输入一次</span></span>
+        <input
+          type="password"
+          value={confirm}
+          onChange={(event) => onConfirm(event.target.value)}
+          autoComplete="new-password"
+          required
+        />
+        {mismatch && <small className="vault-hint warn">两次输入不一致。</small>}
+      </label>
+    </>
+  );
+}
+
+function masterPasswordReady(password: string, confirm: string): boolean {
+  return password.length >= MIN_MASTER_PASSWORD_LENGTH && password === confirm;
+}
+
+export default function VaultPanel() {
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [status, setStatus] = useState<VaultStatus | null>(null);
+  const [entries, setEntries] = useState<VaultEntry[]>([]);
+  const [brokenCount, setBrokenCount] = useState(0);
+  const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [dialogError, setDialogError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [formError, setFormError] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetPhrase, setResetPhrase] = useState("");
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const clipboardTimer = useRef<number | null>(null);
+
+  const clearSecrets = () => {
+    setPassword("");
+    setConfirm("");
+    setCurrentPassword("");
+  };
+
+  const loadEntries = useCallback(async (key: CryptoKey) => {
+    const records = await listVaultItems();
+    const results = await Promise.allSettled(records.map((record) => decryptVaultItem(key, record)));
+    const decrypted = results
+      .filter((result): result is PromiseFulfilledResult<VaultEntry> => result.status === "fulfilled")
+      .map((result) => result.value);
+    setEntries(decrypted);
+    setBrokenCount(results.length - decrypted.length);
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    if (!cryptoAvailable()) {
+      setPhase("insecure");
+      return;
+    }
+    setPhase("loading");
+    try {
+      const next = await getVaultStatus();
+      setStatus(next);
+      const key = getVaultSessionKey();
+      if (!next.configured) {
+        lockVaultSession();
+        setPhase("setup");
+      } else if (key) {
+        await loadEntries(key);
+        setPhase("unlocked");
+      } else {
+        setPhase("locked");
+      }
+    } catch (error) {
+      setFormError(describe(error));
+      setPhase("error");
+    }
+  }, [loadEntries]);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  // 自动锁定或在别处锁定后，立刻清掉内存里的明文条目。
+  useEffect(() => subscribeVaultSession(() => {
+    if (getVaultSessionKey()) return;
+    setEntries([]);
+    setEditor(null);
+    setChangeOpen(false);
+    setPhase((current) => (current === "unlocked" ? "locked" : current));
+    setNotice("密码库已锁定。");
+  }), []);
+
+  useEffect(() => {
+    if (phase !== "unlocked") return;
+    const touch = () => touchVaultSession();
+    window.addEventListener("pointerdown", touch);
+    window.addEventListener("keydown", touch);
+    return () => {
+      window.removeEventListener("pointerdown", touch);
+      window.removeEventListener("keydown", touch);
+    };
+  }, [phase]);
+
+  useEffect(() => () => {
+    if (clipboardTimer.current !== null) window.clearTimeout(clipboardTimer.current);
+  }, []);
+
+  const copyValue = useCallback(async (value: string, label: string) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      setNotice("浏览器不允许写入剪贴板，请手动复制。");
+      return;
+    }
+    setNotice(`已复制${label}，${CLIPBOARD_CLEAR_MS / 1000} 秒后清空剪贴板。`);
+    if (clipboardTimer.current !== null) window.clearTimeout(clipboardTimer.current);
+    clipboardTimer.current = window.setTimeout(() => {
+      clipboardTimer.current = null;
+      void (async () => {
+        // 能读剪贴板时只在内容没变时清空，避免覆盖用户之后复制的其他内容。
+        try {
+          const current = await navigator.clipboard.readText();
+          if (current !== value) return;
+        } catch {
+          // 读不到就直接清空，宁可多清一次也不把密码留在剪贴板里。
+        }
+        await navigator.clipboard.writeText("").catch(() => undefined);
+      })();
+    }, CLIPBOARD_CLEAR_MS);
+  }, []);
+
+  const handleSetup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!masterPasswordReady(password, confirm) || !acknowledged) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      const { material, key } = await createVaultKey(password);
+      const created = await createVault(material);
+      clearSecrets();
+      setStatus(created);
+      startVaultSession(key);
+      setEntries([]);
+      setPhase("unlocked");
+      setNotice("密码库已创建。主密码不会上传，请务必记住它。");
+    } catch (error) {
+      setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUnlock = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!status || !password) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      // 每次解锁都取最新参数，主密码可能刚在其他设备上改过。
+      const latest = await getVaultStatus();
+      setStatus(latest);
+      if (!latest.configured) {
+        setPhase("setup");
+        return;
+      }
+      const key = await unlockVault(password, latest);
+      clearSecrets();
+      startVaultSession(key);
+      await loadEntries(key);
+      setPhase("unlocked");
+      setNotice(`已解锁，${VAULT_AUTO_LOCK_MS / 60_000} 分钟无操作会自动锁定。`);
+    } catch (error) {
+      setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (resetPhrase !== RESET_PHRASE) return;
+    setBusy(true);
+    try {
+      await resetVault();
+      lockVaultSession();
+      setResetOpen(false);
+      setResetPhrase("");
+      setNotice("密码库已清空，可以重新设置主密码。");
+      await refreshStatus();
+    } catch (error) {
+      setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChangePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!status || !masterPasswordReady(password, confirm) || !currentPassword) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      const latest = await getVaultStatus();
+      const { material, key } = await rewrapVaultKey(currentPassword, password, latest);
+      const updated = await updateVaultKey(material, latest.version ?? 1);
+      clearSecrets();
+      setStatus(updated);
+      startVaultSession(key);
+      setChangeOpen(false);
+      setNotice("主密码已更改，其他设备下次解锁时使用新主密码。");
+    } catch (error) {
+      setFormError(
+        error instanceof ApiError && error.status === 409
+          ? "主密码刚在其他地方改过，请刷新后重试。"
+          : describe(error),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openNew = (kind: VaultKind) => {
+    setDialogError("");
+    setEditor({ entry: null, data: emptyVaultItem(kind) });
+  };
+
+  const handleSave = async (data: VaultItemData) => {
+    const key = getVaultSessionKey();
+    if (!key || !editor) return;
+    setBusy(true);
+    setDialogError("");
+    const id = editor.entry?.id ?? crypto.randomUUID();
+    try {
+      const encrypted = await encryptVaultItem(key, id, data);
+      const record = editor.entry
+        ? await updateVaultItem(id, encrypted, editor.entry.version)
+        : await createVaultItem(id, encrypted);
+      const saved = await decryptVaultItem(key, record);
+      setEntries((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)]);
+      setEditor(null);
+      setNotice(`已加密保存「${saved.data.title}」。`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && error.current) {
+        // 别处改过：载入最新内容，让用户在新版本上重新修改。
+        const latest = await decryptVaultItem(key, error.current as unknown as VaultItemRecord);
+        setEntries((current) => current.map((entry) => (entry.id === latest.id ? latest : entry)));
+        setEditor({ entry: latest, data: latest.data });
+        setDialogError("这一条刚在别处修改过，已载入最新内容，请重新修改后保存。");
+      } else {
+        setDialogError(describe(error));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    const entry = editor?.entry;
+    if (!entry || !window.confirm(`永久删除「${entry.data.title}」？删除后无法恢复。`)) return;
+    setBusy(true);
+    try {
+      await deleteVaultItem(entry.id, entry.version);
+      setEntries((current) => current.filter((item) => item.id !== entry.id));
+      setEditor(null);
+      setNotice(`已删除「${entry.data.title}」。`);
+    } catch (error) {
+      setDialogError(
+        error instanceof ApiError && error.status === 409
+          ? "这一条刚在别处修改过，请关闭后刷新再删除。"
+          : describe(error),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeEditor = useCallback(() => setEditor(null), []);
+
+  const counts = useMemo(() => {
+    const result: Record<KindFilter, number> = { all: entries.length, login: 0, secret: 0, recovery: 0 };
+    for (const entry of entries) result[entry.data.kind] += 1;
+    return result;
+  }, [entries]);
+
+  const visibleEntries = useMemo(() => entries
+    .filter((entry) => kindFilter === "all" || entry.data.kind === kindFilter)
+    .filter((entry) => matchesQuery(entry.data, query.trim()))
+    .sort((left, right) => left.data.title.localeCompare(right.data.title, "zh-CN")), [entries, kindFilter, query]);
+
+  return (
+    <section className="vault-panel" aria-labelledby="vault-title">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">端到端加密 · 服务器只保存密文</p>
+          <h1 id="vault-title">密码库</h1>
+        </div>
+        {phase === "unlocked" && (
+          <span className="vault-heading-actions">
+            <button type="button" onClick={() => { clearSecrets(); setFormError(""); setChangeOpen(true); }}>
+              更改主密码
+            </button>
+            <button type="button" onClick={() => lockVaultSession()}>锁定</button>
+          </span>
+        )}
+      </div>
+
+      {notice && (
+        <div className="status-message" role="status">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice("")} aria-label="关闭提示">×</button>
+        </div>
+      )}
+
+      {phase === "loading" && <div className="state-panel">正在读取密码库……</div>}
+
+      {phase === "insecure" && (
+        <div className="state-panel error-state">
+          <p>
+            当前地址不是 HTTPS，浏览器不提供加密功能，密码库无法使用。
+            请通过 https:// 或本机的 localhost 打开 MemoIsle。
+          </p>
+        </div>
+      )}
+
+      {phase === "error" && (
+        <div className="state-panel error-state">
+          <p>{formError || "暂时无法读取密码库。"}</p>
+          <button type="button" onClick={() => void refreshStatus()}>重试</button>
+        </div>
+      )}
+
+      {phase === "setup" && (
+        <form className="vault-card vault-gate" onSubmit={(event) => void handleSetup(event)}>
+          <h2>设置主密码</h2>
+          <p>
+            主密码只在这台浏览器里用来加密，不会上传。MemoIsle 服务器只保存加密后的内容，
+            即使数据库泄露也读不出来。
+          </p>
+          <MasterPasswordFields
+            password={password}
+            confirm={confirm}
+            onPassword={setPassword}
+            onConfirm={setConfirm}
+            autoFocus
+          />
+          <label className="vault-acknowledge">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(event) => setAcknowledged(event.target.checked)}
+            />
+            我知道忘记主密码后，任何人都无法找回密码库里的内容。
+          </label>
+          {formError && <p className="vault-error" role="alert">{formError}</p>}
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy || !acknowledged || !masterPasswordReady(password, confirm)}
+          >
+            {busy ? "正在生成密钥…" : "创建密码库"}
+          </button>
+        </form>
+      )}
+
+      {phase === "locked" && (
+        <div className="vault-card vault-gate">
+          <form onSubmit={(event) => void handleUnlock(event)}>
+            <h2>密码库已锁定</h2>
+            <p>
+              输入主密码解锁{status?.item_count ? `，共 ${status.item_count} 条` : ""}。
+              解锁在本机浏览器里完成，主密码不会发送到服务器。
+            </p>
+            <label className="vault-field">
+              <span className="vault-field-label"><span>主密码</span></span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                autoFocus
+                required
+              />
+            </label>
+            {formError && <p className="vault-error" role="alert">{formError}</p>}
+            <button type="submit" className="primary" disabled={busy || !password}>
+              {busy ? "解锁中…" : "解锁"}
+            </button>
+          </form>
+          <details
+            className="vault-reset"
+            open={resetOpen}
+            onToggle={(event) => setResetOpen((event.target as HTMLDetailsElement).open)}
+          >
+            <summary>忘记主密码？</summary>
+            <p>
+              主密码无法找回，也无法重置后保留内容。唯一的办法是清空整个密码库，
+              {status?.item_count ? `其中的 ${status.item_count} 条会` : "所有内容会"}永久删除，然后重新设置主密码。
+            </p>
+            <label className="vault-field">
+              <span className="vault-field-label"><span>输入「{RESET_PHRASE}」确认</span></span>
+              <input value={resetPhrase} onChange={(event) => setResetPhrase(event.target.value)} />
+            </label>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={busy || resetPhrase !== RESET_PHRASE}
+              onClick={() => void handleReset()}
+            >
+              永久清空密码库
+            </button>
+          </details>
+        </div>
+      )}
+
+      {phase === "unlocked" && (
+        <>
+          <div className="vault-toolbar">
+            <div className="resource-search vault-search">
+              <span aria-hidden="true">⌕</span>
+              <input
+                aria-label="搜索密码库"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="按名称、用户名、网址或备注搜索"
+                autoComplete="off"
+              />
+            </div>
+            <div className="vault-new-actions" aria-label="新建">
+              {(["login", "secret", "recovery"] as VaultKind[]).map((kind) => (
+                <button key={kind} type="button" onClick={() => openNew(kind)}>
+                  ＋ {vaultKindLabels[kind]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="category-filter vault-kind-filter" role="group" aria-label="按类型筛选">
+            {(["all", "login", "secret", "recovery"] as KindFilter[]).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className={kindFilter === kind ? "active" : ""}
+                aria-pressed={kindFilter === kind}
+                onClick={() => setKindFilter(kind)}
+              >
+                {kind === "all" ? "全部" : vaultKindLabels[kind]} {counts[kind]}
+              </button>
+            ))}
+          </div>
+          {brokenCount > 0 && (
+            <p className="vault-error" role="alert">
+              有 {brokenCount} 条无法解密，可能已损坏或被篡改，已跳过显示。
+            </p>
+          )}
+          {entries.length === 0 && (
+            <div className="state-panel empty-state">
+              <h3>密码库还是空的</h3>
+              <p>可以保存网站账号密码、API Key 或 SSH 私钥，以及两步验证的恢复码。</p>
+            </div>
+          )}
+          {entries.length > 0 && visibleEntries.length === 0 && (
+            <div className="state-panel">没有匹配的条目。</div>
+          )}
+          <ul className="vault-list">
+            {visibleEntries.map((entry) => {
+              const { data } = entry;
+              const nextCode = data.kind === "recovery" ? data.codes.find((item) => !item.used) : undefined;
+              return (
+                <li key={entry.id} className="vault-row">
+                  <button
+                    type="button"
+                    className="vault-row-main"
+                    onClick={() => {
+                      setDialogError("");
+                      setEditor({ entry, data });
+                    }}
+                  >
+                    <span className={`vault-kind-icon ${data.kind}`} aria-hidden="true">{kindIcons[data.kind]}</span>
+                    <span className="vault-row-text">
+                      <strong>{data.title}</strong>
+                      <small>{vaultKindLabels[data.kind]} · {entrySubtitle(data)}</small>
+                    </span>
+                  </button>
+                  <span className="vault-row-actions">
+                    {data.kind === "login" && (
+                      <>
+                        <button type="button" disabled={!data.username} onClick={() => void copyValue(data.username, "用户名")}>复制用户名</button>
+                        <button type="button" disabled={!data.password} onClick={() => void copyValue(data.password, "密码")}>复制密码</button>
+                      </>
+                    )}
+                    {data.kind === "secret" && (
+                      <button type="button" disabled={!data.secret} onClick={() => void copyValue(data.secret, "密钥")}>复制密钥</button>
+                    )}
+                    {data.kind === "recovery" && (
+                      <button
+                        type="button"
+                        disabled={!nextCode}
+                        title="复制第一个还没用过的恢复码；用完后记得在详情里标记已用"
+                        onClick={() => nextCode && void copyValue(nextCode.code, "恢复码")}
+                      >
+                        {nextCode ? "复制未用的恢复码" : "恢复码已用完"}
+                      </button>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
+      {editor && (
+        <VaultItemDialog
+          initial={editor.data}
+          isNew={editor.entry === null}
+          busy={busy}
+          error={dialogError}
+          onSave={(data) => void handleSave(data)}
+          onDelete={() => void handleDelete()}
+          onClose={closeEditor}
+          onCopy={(value, label) => void copyValue(value, label)}
+        />
+      )}
+
+      {changeOpen && (
+        <div className="dialog-backdrop">
+          <form
+            className="vault-item-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vault-change-title"
+            onSubmit={(event) => void handleChangePassword(event)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !busy) setChangeOpen(false);
+            }}
+          >
+            <div className="dialog-header">
+              <h2 id="vault-change-title">更改主密码</h2>
+              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setChangeOpen(false)}>×</button>
+            </div>
+            <div className="vault-form">
+              <label className="vault-field">
+                <span className="vault-field-label"><span>当前主密码</span></span>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  autoComplete="current-password"
+                  autoFocus
+                  required
+                />
+              </label>
+              <MasterPasswordFields
+                password={password}
+                confirm={confirm}
+                onPassword={setPassword}
+                onConfirm={setConfirm}
+              />
+              {formError && <p className="vault-error" role="alert">{formError}</p>}
+              <div className="dialog-actions">
+                <button type="button" onClick={() => setChangeOpen(false)} disabled={busy}>取消</button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={busy || !currentPassword || !masterPasswordReady(password, confirm)}
+                >
+                  {busy ? "重新加密中…" : "更改主密码"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}

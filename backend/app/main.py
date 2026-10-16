@@ -21,6 +21,7 @@ from app.memo_tools_api import router as memo_tools_router
 from app.model_settings_api import router as model_settings_router
 from app.resource_classification_api import router as resource_classification_router
 from app.resource_classification_service import resource_classification_loop
+from app.vault_api import router as vault_router
 
 
 def create_app(
@@ -110,6 +111,7 @@ def create_app(
     application.include_router(model_settings_router, prefix="/api/v1")
     application.include_router(memo_tools_router, prefix="/api/v1")
     application.include_router(resource_classification_router, prefix="/api/v1")
+    application.include_router(vault_router, prefix="/api/v1")
     return application
 
 

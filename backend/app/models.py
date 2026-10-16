@@ -1080,3 +1080,55 @@ class EbookTransferJob(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+
+class VaultKey(Base):
+    """密码库的库密钥，已被主密码派生的密钥包裹。
+
+    服务器只保存派生参数和包裹后的密文，无法得到主密码或库密钥。
+    """
+
+    __tablename__ = "vault_key"
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kdf: Mapped[str] = mapped_column(String(30), nullable=False)
+    kdf_iterations: Mapped[int] = mapped_column(Integer, nullable=False)
+    kdf_salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    wrapped_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    wrap_iv: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class VaultItem(Base):
+    """密码库条目；标题、类型和内容都在浏览器里加密后才上传。"""
+
+    __tablename__ = "vault_item"
+    __table_args__ = (Index("ix_vault_item_user_updated", "user_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    iv: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )

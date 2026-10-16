@@ -188,6 +188,12 @@ Web / Android 搜索
 | POST | `/api/v1/resources/{id}/open` | 记录一次打开原网页；只累加打开次数和最近打开时间，不改版本号与 `updated_at` |
 | GET | `/api/v1/resources/quick-access` | 快速访问：打开过、未移除、不在回收站的网页资料，按打开次数降序 |
 | PUT | `/api/v1/resources/{id}/quick-access` | 从快速访问移除或恢复；移除后继续计数，不改版本号 |
+| GET | `/api/v1/vault` | 密码库状态与解锁所需的包裹参数（盐、迭代次数、包裹后的库密钥） |
+| POST | `/api/v1/vault` | 首次设置主密码，只上传包裹后的库密钥 |
+| PUT | `/api/v1/vault/key` | 更改主密码：用新主密码重新包裹同一把库密钥，带版本号 |
+| DELETE | `/api/v1/vault?confirm=delete-all-vault-items` | 忘记主密码时永久清空密码库 |
+| GET/POST | `/api/v1/vault/items` | 读取全部密文条目 / 保存新条目（ID 由浏览器生成） |
+| PUT/DELETE | `/api/v1/vault/items/{id}` | 带版本号替换或永久删除密文条目 |
 | GET | `/api/v1/resources/link-health` | 读取巡检中心、状态摘要和账号巡检设置 |
 | PATCH | `/api/v1/resources/link-health/settings` | 更新账号巡检开关和检查频率 |
 | POST | `/api/v1/resources/link-health/site-pauses` | 暂停或恢复某个网站的全部巡检 |
