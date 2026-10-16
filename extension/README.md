@@ -45,3 +45,7 @@ Chrome 不允许普通 Web 页面无授权读取浏览器书签，因此该能�
 cd extension
 npm test
 ```
+
+## 上架商店
+
+上架 Chrome 网上应用店 / Edge 加载项商店的步骤、商店文案、权限说明和隐私政策草稿见 [store/README.md](store/README.md)。商店版用 `npm run package:store -- --web <正式 Web 地址>` 打包。
