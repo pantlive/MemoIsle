@@ -304,6 +304,7 @@ function createHarness({
     backgroundSource,
     vm.createContext({
       URL,
+      AbortController,
       chrome,
       console,
       crypto: { randomUUID },
@@ -359,7 +360,7 @@ test("安装时注册最小化的网页与图片右键菜单", () => {
 });
 
 test("扩展清单声明图片收藏所需的任意站点权限", () => {
-  assert.equal(manifest.version, "0.4.2");
+  assert.equal(manifest.version, "0.4.3");
   assert.equal(manifest.host_permissions.includes("<all_urls>"), true);
   assert.equal(manifest.host_permissions.includes("http://127.0.0.1:8000/*"), true);
   assert.equal(manifest.host_permissions.includes("http://localhost:8000/*"), true);
@@ -381,8 +382,13 @@ test("扩展清单明确申请读取当前浏览器书签", () => {
 
 test("扩展清单申请通知权限并声明图标资源", () => {
   assert.equal(manifest.permissions.includes("notifications"), true);
-  assert.equal(manifest.icons["128"], "icons/icon128.png");
-  assert.equal(manifest.action.default_icon["128"], "icons/icon128.png");
+  assert.deepEqual(manifest.icons, {
+    16: "icons/icon16.png",
+    32: "icons/icon32.png",
+    48: "icons/icon48.png",
+    128: "icons/icon128.png",
+  });
+  assert.deepEqual(manifest.action.default_icon, manifest.icons);
 });
 
 test("扩展清单只在本地 MemoIsle 页面接收登录凭证", () => {
@@ -948,13 +954,10 @@ test("浏览器标签页变化会刷新当前打开网页快照", async () => {
   const harness = createHarness();
 
   harness.listeners.tabCreated();
-  await waitFor(() => harness.calls.fetches.length === 1);
   harness.listeners.tabUpdated(7, { status: "complete" }, {});
-  await waitFor(() => harness.calls.fetches.length === 2);
   harness.listeners.tabActivated({ tabId: 7, windowId: 1 });
-  await waitFor(() => harness.calls.fetches.length === 3);
   harness.listeners.tabRemoved(7, { windowId: 1, isWindowClosing: false });
-  await waitFor(() => harness.calls.fetches.length === 4);
+  await waitFor(() => harness.calls.fetches.length === 1);
 
   assert.equal(
     harness.calls.fetches.every((request) =>
@@ -962,6 +965,10 @@ test("浏览器标签页变化会刷新当前打开网页快照", async () => {
     ),
     true,
   );
+
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  harness.listeners.tabCreated();
+  await waitFor(() => harness.calls.fetches.length === 2);
 });
 
 test("内部页、本地文件和内网地址不会提交空资料", async (context) => {

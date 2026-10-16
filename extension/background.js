@@ -46,6 +46,10 @@ const LOCAL_WEB_ORIGINS = new Set(
 let bookmarkSyncTimer = null;
 let bookmarkFullSyncTimer = null;
 let bookmarkRetryTimer = null;
+let tabSyncTimer = null;
+const TAB_SYNC_DEBOUNCE_MS = 400;
+const TAB_SYNC_FETCH_TIMEOUT_MS = 2_500;
+const CAPTURE_FETCH_TIMEOUT_MS = 12_000;
 let bookmarkSyncChain = Promise.resolve();
 let bookmarkChangeSequence = 0;
 const pendingBookmarkChanges = new Map();
@@ -270,6 +274,29 @@ async function requestHeaders() {
     headers.Authorization = `Bearer ${accessToken}`;
   }
   return headers;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs) {
+  if (typeof AbortController !== "function" || !timeoutMs) {
+    return fetch(url, options);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function scheduleOpenTabSync() {
+  if (tabSyncTimer !== null) {
+    clearTimeout(tabSyncTimer);
+  }
+  tabSyncTimer = setTimeout(() => {
+    tabSyncTimer = null;
+    void syncOpenTabs();
+  }, TAB_SYNC_DEBOUNCE_MS);
 }
 
 function enqueueBookmarkSync(operation) {
@@ -1001,14 +1028,18 @@ async function syncOpenTabs(config = null) {
         page_title: tab.title || "",
         favicon_url: tab.favIconUrl || null,
       }));
-    await fetch(`${resolvedConfig.apiBaseUrl}/browser-tabs/sync`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        extension_id: chrome.runtime.id,
-        tabs: openTabs,
-      }),
-    });
+    await fetchWithTimeout(
+      `${resolvedConfig.apiBaseUrl}/browser-tabs/sync`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          extension_id: chrome.runtime.id,
+          tabs: openTabs,
+        }),
+      },
+      TAB_SYNC_FETCH_TIMEOUT_MS,
+    );
   } catch {
     // 浏览器标签页同步失败不阻止当前页的一次性收藏流程。
   }
@@ -1037,18 +1068,22 @@ async function captureTab(tab, selectedTextOverride = null) {
         ? await readSelectedText(tab.id)
         : sanitizeSelectedText(selectedTextOverride);
     const clientId = crypto.randomUUID();
-    const response = await fetch(`${config.apiBaseUrl}/memos`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        client_id: clientId,
-        type: "resource",
-        body: selectedText || tab.url,
-        source_url: tab.url,
-        source_title: (tab.title || "").trim() || undefined,
-        tags: [],
-      }),
-    });
+    const response = await fetchWithTimeout(
+      `${config.apiBaseUrl}/memos`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          client_id: clientId,
+          type: "resource",
+          body: selectedText || tab.url,
+          source_url: tab.url,
+          source_title: (tab.title || "").trim() || undefined,
+          tags: [],
+        }),
+      },
+      CAPTURE_FETCH_TIMEOUT_MS,
+    );
     if (response.status === 401 || response.status === 403) {
       // 登录已失效，打开 Web 让用户重新登录。
       await openWebCapture(config, null, "not_authenticated");
@@ -1479,7 +1514,7 @@ chrome.bookmarks.onImportEnded.addListener(() => {
 });
 
 chrome.tabs.onCreated.addListener(() => {
-  void syncOpenTabs();
+  scheduleOpenTabSync();
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
@@ -1489,16 +1524,16 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
     changeInfo.favIconUrl !== undefined ||
     changeInfo.status === "complete"
   ) {
-    void syncOpenTabs();
+    scheduleOpenTabSync();
   }
 });
 
 chrome.tabs.onActivated.addListener(() => {
-  void syncOpenTabs();
+  scheduleOpenTabSync();
 });
 
 chrome.tabs.onRemoved.addListener(() => {
-  void syncOpenTabs();
+  scheduleOpenTabSync();
 });
 
 chrome.action.onClicked.addListener((tab) => {
