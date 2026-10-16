@@ -170,10 +170,6 @@ Android 自定义地址。令牌只在数据库保存 SHA-256 哈希，退出登
 
 ## 会议总结
 
-Windows 桌面端可在侧栏“灵感”旁进入会议录音，使用 Windows SpeechRecognizer 实时转写；
-缺少语言包时可手动粘贴转写。保存时会议纪要写入条目正文，原始转写写入 `transcript`，
-MP4/AAC 录音上传到当前账号。
-
 服务端提供 `POST /api/v1/meeting/summary`，把转写交给 OpenAI 兼容 Chat Completions 接口，
 生成会议概要、关键要点、决议、行动项和风险。未配置 `MEMOISLE_LLM_BASE_URL` 或
 `MEMOISLE_LLM_MODEL` 时返回 503；模型调用失败时返回 502，客户端可保留原文并重试。
@@ -224,7 +220,7 @@ GET    /api/v1/memos/{id}/image/thumbnail             # 读取服务端生成的
 
 上传接受 PNG、JPEG、WebP、GIF，单张不超过 20 MB，单边不超过 12000 像素且总像素
 不超过 5000 万；服务端会校验真实图片格式（不只信任 `Content-Type`），并用 EXIF
-方向生成最大边 1280 像素的缩略图。超出上述限制时 Web、Windows 桌面端和 Android
+方向生成最大边 1280 像素的缩略图。超出上述限制时 Web 和 Android
 会在客户端先压缩或缩放再上传，并提示用户压缩前后的大小与尺寸/格式变化；服务端
 对绕过客户端的大图仍返回 413/422 作为安全兜底，不做二次编码。原图和缩略图的
 文件名完全由服务端条目 ID 生成，读取时校验所有者。条目返回 `image_mime_type`、

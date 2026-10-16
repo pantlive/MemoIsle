@@ -91,7 +91,7 @@ Android Client ───┘                       │
 - `idea_detail`：`memo_id`、`idea_stage`、`transcript`、`transcript_status`。
 - `audio_asset`：`id`、`memo_id`、`object_key`、`duration_ms`、`mime_type`、`size_bytes`、`upload_status`、`checksum`。
 - `image_asset`：`memo_id`、`object_key`、`thumbnail_object_key`、`mime_type`、`size_bytes`、`width`、`height`、`hash`；当前每条图片收藏一张，文件名由服务端条目 ID 生成。
-- 图片压缩在客户端完成：超过 20 MB、单边 12000 像素或 5000 万像素时，各端先按尺寸/像素上限缩放并重新编码（Web 优先 WebP，桌面端与 Android 用 JPEG/PNG），迭代降低质量/尺寸到 20 MB 以内，再按正常上传流程提交，并用提示告知用户压缩前后的大小与变化。服务端只保留上限校验，不做二次编码。
+- 图片压缩在客户端完成：超过 20 MB、单边 12000 像素或 5000 万像素时，各端先按尺寸/像素上限缩放并重新编码（Web 优先 WebP，Android 用 JPEG/PNG），迭代降低质量/尺寸到 20 MB 以内，再按正常上传流程提交，并用提示告知用户压缩前后的大小与变化。服务端只保留上限校验，不做二次编码。
 - 图片 OCR 结果直接落在 memo 上：`image_ocr_text`、`image_ocr_status`（none/pending/processing/ready/failed/disabled）、`image_ocr_error`、`image_ocr_source`（local/llm）、`image_auto_tags`、`image_ocr_updated_at`，跨端同步与搜索共用这些字段。
 - OCR 采用可插拔渠道：`local` 用本地引擎（rapidocr-onnxruntime 优先、pytesseract 兜底，图片不出本机），`llm` 用 OpenAI 兼容视觉模型（图片转 data URL，按最大边 1600 预览压缩后发送），`auto` 本地优先、不可用时回退；默认 `none` 关闭。自动标签为“模型标签 + 本地关键词（英文词频、中文 4 字窗口）”合并去重。
 
