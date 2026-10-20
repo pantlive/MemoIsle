@@ -1354,7 +1354,7 @@ textarea:focus-visible {
 }
 
 .voice-transcription-status {
-  margin: -4px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.5;
@@ -3873,6 +3873,61 @@ button.resource-user-tag:hover {
   min-width: 34px;
   color: var(--text);
   text-align: right;
+}
+
+/* 会议模式下两条音量并排出现，行间距比单行时略大。 */
+.voice-meter + .voice-meter {
+  margin-top: 8px;
+}
+
+/* 音量条与下方转写输入框之间需要一口气的间距，否则两块会粘在一起。 */
+.voice-meter + .voice-note-label,
+.voice-meter + .voice-meeting-toggle {
+  margin-top: 16px;
+}
+
+.voice-meter.missing .voice-meter-track > span {
+  background: var(--border);
+}
+
+.voice-meter.missing strong {
+  color: var(--danger);
+}
+
+.voice-meeting-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.voice-meeting-toggle input {
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.voice-meeting-toggle span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.voice-meeting-toggle strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.voice-meeting-toggle small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .voice-actions {

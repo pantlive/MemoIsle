@@ -419,6 +419,8 @@ export interface MemoCreateRequest {
   type: MemoType;
   title?: string;
   body: string;
+  /** 会议转写；创建时一起提交，上传音频不会覆盖。 */
+  transcript?: string | null;
   source_url?: string;
   source_title?: string;
   word_phonetic?: string;

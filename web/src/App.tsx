@@ -17,6 +17,12 @@ import DataMenu from "./DataMenu";
 import MemoBatchToolbar from "./MemoBatchToolbar";
 import ResourceMonogram, { ResourceLinkGlyph } from "./ResourceIcon";
 import { normalizeWebUrl, sourceHost } from "./webUrl";
+import {
+  MeetingAudioUnavailableError,
+  startMeetingCapture,
+  supportsMeetingAudio,
+  type MeetingCapture,
+} from "./meetingAudio";
 import ResourcePreviewDialog, { type ResourceEditChanges } from "./ResourcePreviewDialog";
 import CategoryTemplatePanel from "./CategoryTemplatePanel";
 import { categoryDepth } from "./categoryTree";
@@ -136,6 +142,9 @@ function isCaptureType(view: ActiveView): view is OfflineDraftMemoType {
 }
 
 const RESOURCE_PAGE_SIZE = 10;
+// 会议录音用较低码率换更长时长，与服务端 20 MB 上限配合。
+const MEETING_AUDIO_BITRATE = 48_000;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 // 图片 OCR 为后台任务，上传后按固定间隔轮询识别结果。
 const IMAGE_OCR_POLL_INTERVAL_MS = 2_000;
 const IMAGE_OCR_POLL_MAX_ATTEMPTS = 10;
@@ -656,6 +665,9 @@ export default function App({ authUser, onLogout }: AppProps) {
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const [voiceDraftMemo, setVoiceDraftMemo] = useState<Memo | null>(null);
   const [voiceDiscardConfirmOpen, setVoiceDiscardConfirmOpen] = useState(false);
+  const [meetingMode, setMeetingMode] = useState(false);
+  const [meetingRemoteVolume, setMeetingRemoteVolume] = useState(0);
+  const [meetingRemoteMissing, setMeetingRemoteMissing] = useState(false);
   const [audioUrl, setAudioUrl] = useState("");
   const [imageUploadTasks, setImageUploadTasks] = useState<ImageUploadTask[]>([]);
   const [imageDragActive, setImageDragActive] = useState(false);
@@ -729,6 +741,8 @@ export default function App({ authUser, onLogout }: AppProps) {
   const voiceDiscardingRef = useRef(false);
   const voiceCaptureGenerationRef = useRef(0);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const meetingCaptureRef = useRef<MeetingCapture | null>(null);
+  const meetingRemoteTimerRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const volumeAnimationRef = useRef<number | null>(null);
   const speechRecognitionRef = useRef<BrowserSpeechRecognitionController | null>(null);
@@ -738,6 +752,35 @@ export default function App({ authUser, onLogout }: AppProps) {
   const recognitionBaseTextRef = useRef("");
   const loadRequestRef = useRef(0);
   const captureTokenHandledRef = useRef<string | null>(null);
+
+  const stopMeetingCapture = () => {
+    if (meetingRemoteTimerRef.current !== null) {
+      window.clearInterval(meetingRemoteTimerRef.current);
+      meetingRemoteTimerRef.current = null;
+    }
+    const capture = meetingCaptureRef.current;
+    meetingCaptureRef.current = null;
+    if (capture) {
+      capture.onSystemAudioEnded = undefined;
+      capture.stop();
+    }
+    setMeetingRemoteVolume(0);
+    setMeetingRemoteMissing(false);
+  };
+
+  /** 持续读取对方音量，让用户能确认系统声音真的被抓到了。 */
+  const startMeetingRemoteMonitor = () => {
+    if (meetingRemoteTimerRef.current !== null) {
+      window.clearInterval(meetingRemoteTimerRef.current);
+    }
+    meetingRemoteTimerRef.current = window.setInterval(() => {
+      const active = meetingCaptureRef.current;
+      if (!active) {
+        return;
+      }
+      setMeetingRemoteVolume(active.readRemoteLevel());
+    }, 120);
+  };
 
   const stopVoiceVolumeMonitor = () => {
     if (volumeAnimationRef.current !== null) {
@@ -3092,6 +3135,7 @@ export default function App({ authUser, onLogout }: AppProps) {
 
   const resetVoiceCapture = () => {
     voiceCaptureGenerationRef.current += 1;
+    stopMeetingCapture();
     stopVoiceVolumeMonitor();
     if (voiceTimerRef.current !== null) {
       window.clearInterval(voiceTimerRef.current);
@@ -3224,20 +3268,63 @@ export default function App({ authUser, onLogout }: AppProps) {
     setVoiceState("requesting");
     setMessage("");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 保留浏览器默认的语音处理（含回声消除）：
+      // 会议模式下对方的声音已经由系统音轨单独采集，若关掉回声消除，
+      // 外放出来的同一段声音会被麦克风再录一遍，叠成双重人声。
+      const microphoneStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
       if (captureGeneration !== voiceCaptureGenerationRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
+        microphoneStream.getTracks().forEach((track) => track.stop());
         return;
+      }
+      let stream = microphoneStream;
+      let meetingCapture: MeetingCapture | null = null;
+      if (meetingMode) {
+        try {
+          meetingCapture = await startMeetingCapture(microphoneStream);
+        } catch (error) {
+          if (captureGeneration !== voiceCaptureGenerationRef.current) {
+            microphoneStream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          // 用户取消共享、或浏览器不支持系统音频：继续录自己，但要说清楚缺了什么。
+          const reason =
+            error instanceof MeetingAudioUnavailableError
+              ? error.message
+              : "没有授权共享系统声音，对方的声音将无法录入。";
+          setMeetingRemoteMissing(true);
+          setMessage(`${reason}录音会继续，只包含你的麦克风。`);
+        }
+        if (meetingCapture) {
+          if (captureGeneration !== voiceCaptureGenerationRef.current) {
+            meetingCapture.stop();
+            microphoneStream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          stream = meetingCapture.stream;
+          meetingCaptureRef.current = meetingCapture;
+          setMeetingRemoteMissing(!meetingCapture.hasSystemAudio);
+          if (meetingCapture.hasSystemAudio) {
+            startMeetingRemoteMonitor();
+          }
+          meetingCapture.onSystemAudioEnded = () => {
+            setMeetingRemoteMissing(true);
+            setMeetingRemoteVolume(0);
+            setMessage("系统声音共享已停止，对方的声音不再录入；重新开始可再次授权。");
+          };
+        }
       }
       const mimeType = [
         "audio/webm;codecs=opus",
         "audio/webm",
         "audio/mp4",
       ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
-      const recorder = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined,
-      );
+      const recorder = new MediaRecorder(stream, {
+        ...(mimeType ? { mimeType } : {}),
+        // 语音编码 48 kbps 足够清晰；按此码率 20 MB 上限可录约 55 分钟。
+        ...(meetingMode ? { audioBitsPerSecond: MEETING_AUDIO_BITRATE } : {}),
+      });
       voiceChunksRef.current = [];
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -3250,6 +3337,7 @@ export default function App({ authUser, onLogout }: AppProps) {
           type: recorder.mimeType || "audio/webm",
         });
         recorder.stream.getTracks().forEach((track) => track.stop());
+        stopMeetingCapture();
         stopVoiceVolumeMonitor();
         if (voiceTimerRef.current !== null) {
           window.clearInterval(voiceTimerRef.current);
@@ -3276,6 +3364,12 @@ export default function App({ authUser, onLogout }: AppProps) {
         setVoiceSeconds(Math.max(1, Math.round(durationMs / 1_000)));
         setVoiceBlob(blob);
         setVoiceState("ready");
+        if (blob.size > MAX_AUDIO_BYTES) {
+          // 服务端上限 20 MB，超了会在上传时被拒；这里提前说明清楚。
+          setVoiceTranscriptionMessage(
+            `录音约 ${Math.round(blob.size / 1024 / 1024)} MB，超过 20 MB 上传上限，请缩短后重录。`,
+          );
+        }
         const recognizedText = voiceAutomaticTextRef.current.trim();
         if (recognizedText) {
           setVoiceText((current) => current.trim() || recognizedText);
@@ -3286,6 +3380,7 @@ export default function App({ authUser, onLogout }: AppProps) {
       };
       recorder.onerror = () => {
         recorder.stream.getTracks().forEach((track) => track.stop());
+        stopMeetingCapture();
         stopVoiceVolumeMonitor();
         voiceTranscriptionActiveRef.current = false;
         try {
@@ -3316,6 +3411,7 @@ export default function App({ authUser, onLogout }: AppProps) {
         return;
       }
       stopVoiceVolumeMonitor();
+      stopMeetingCapture();
       recorderRef.current?.stream.getTracks().forEach((track) => track.stop());
       recorderRef.current = null;
       setVoiceState("idle");
@@ -3417,10 +3513,13 @@ export default function App({ authUser, onLogout }: AppProps) {
     setVoiceState("saving");
     setMessage("");
     try {
+      const spokenText = voiceText.trim();
+      // 会议模式把转写放进 transcript 字段，详情页才能按「我 / 对方」展示。
       const draft = voiceDraftMemo ?? await createMemo({
         type: "idea",
-        body: voiceText.trim() || "语音记录",
-        tags: ["语音"],
+        body: spokenText || (meetingMode ? "会议记录" : "语音记录"),
+        transcript: meetingMode && spokenText ? spokenText : null,
+        tags: meetingMode ? ["语音", "会议"] : ["语音"],
       });
       setVoiceDraftMemo(draft);
       const uploaded = await uploadMemoAudio(
@@ -3437,7 +3536,11 @@ export default function App({ authUser, onLogout }: AppProps) {
       void refreshMemoCounts();
       setVoicePanelOpen(false);
       resetVoiceCapture();
-      setMessage("语音灵感已保存，并可在详情中播放。");
+      setMessage(
+        meetingMode
+          ? "会议录音已保存，可在详情中播放并查看转写。"
+          : "语音灵感已保存，并可在详情中播放。",
+      );
     } catch (error) {
       setVoiceState("ready");
       setMessage(describeError(error));
@@ -5504,8 +5607,10 @@ export default function App({ authUser, onLogout }: AppProps) {
           <section className="voice-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-title">
             <div className="voice-dialog-header">
               <div>
-                <span className="type-label">● 语音灵感</span>
-                <h2 id="voice-title">记录此刻的想法</h2>
+                <span className="type-label">● {meetingMode ? "会议录音" : "语音灵感"}</span>
+                <h2 id="voice-title">
+                  {meetingMode ? "记录这场会议" : "记录此刻的想法"}
+                </h2>
               </div>
               <button
                 type="button"
@@ -5534,13 +5639,28 @@ export default function App({ authUser, onLogout }: AppProps) {
               </small>
             </div>
 
-            <div className="voice-meter" aria-label={`输入音量 ${voiceVolume}%`}>
-              <span>输入音量</span>
+            <div className="voice-meter" aria-label={`我的麦克风音量 ${voiceVolume}%`}>
+              <span>{meetingMode ? "我的声音" : "输入音量"}</span>
               <div className="voice-meter-track" aria-hidden="true">
                 <span style={{ width: `${voiceVolume}%` }} />
               </div>
               <strong>{voiceVolume}%</strong>
             </div>
+
+            {meetingMode && (
+              <div
+                className={
+                  meetingRemoteMissing ? "voice-meter missing" : "voice-meter"
+                }
+                aria-label={`对方声音音量 ${meetingRemoteVolume}%`}
+              >
+                <span>对方声音</span>
+                <div className="voice-meter-track" aria-hidden="true">
+                  <span style={{ width: `${meetingRemoteVolume}%` }} />
+                </div>
+                <strong>{meetingRemoteMissing ? "未接入" : `${meetingRemoteVolume}%`}</strong>
+              </div>
+            )}
 
             <label className="voice-note-label">
               转写/配套文字（可选）
@@ -5559,10 +5679,36 @@ export default function App({ authUser, onLogout }: AppProps) {
               </p>
             )}
 
+            {(voiceState === "idle" || voiceState === "ready") && (
+              <label className="voice-meeting-toggle">
+                <input
+                  type="checkbox"
+                  checked={meetingMode}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setMeetingMode(next);
+                    if (next && !supportsMeetingAudio()) {
+                      setMessage(
+                        "当前浏览器不支持抓取系统音频，会议录音只能录到你的麦克风。建议改用 Chrome 或 Edge。",
+                      );
+                    }
+                  }}
+                />
+                <span>
+                  <strong>会议录音（含对方声音）</strong>
+                  <small>
+                    {supportsMeetingAudio()
+                      ? "开始时会请你共享屏幕并勾选「分享系统音频」，把会议客户端的声音一起录进来。Windows 上的 Chrome / Edge 支持最好。"
+                      : "当前浏览器不支持抓取系统音频，只能录到你的麦克风。"}
+                  </small>
+                </span>
+              </label>
+            )}
+
             <div className="voice-actions">
               {voiceState === "idle" && (
                 <button className="primary" onClick={() => void startVoiceCapture()}>
-                  开始录音
+                  {meetingMode ? "开始会议录音" : "开始录音"}
                 </button>
               )}
               {voiceState === "requesting" && <button disabled>正在请求麦克风权限…</button>}
@@ -5583,7 +5729,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                 <>
                   <button type="button" onClick={resetVoiceCapture}>重新录制</button>
                   <button type="button" className="primary" onClick={() => void saveVoiceCapture()}>
-                    保存语音灵感
+                    {meetingMode ? "保存会议记录" : "保存语音灵感"}
                   </button>
                 </>
               )}
