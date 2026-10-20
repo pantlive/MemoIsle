@@ -1441,6 +1441,9 @@ textarea:focus-visible {
 
 .type-pill,
 .type-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 0;
   border-radius: 999px;
   background: var(--primary-soft);
@@ -2440,11 +2443,33 @@ button.resource-user-tag:hover {
   border-radius: 10px;
   background: #fff2df;
   color: #9c5d17;
+  line-height: 1;
+}
+
+.memo-type-icon > svg,
+.empty-icon > svg,
+.web-attachment-icon > svg,
+.capture-command-icon > svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .memo-type-icon.resource {
   background: var(--primary-soft);
   color: var(--primary);
+  /* 只有 1px 内描边，不做渐变和投影，保持设计文档里的扁平表面。 */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+/* 站点首字：Sora 的 G/M 比中文更窄，靠字重和微调字距让两者看起来一样重。 */
+.resource-monogram {
+  display: block;
+  font-family: Sora, "Noto Sans SC", sans-serif;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  /* 大写字母的视觉重心比几何中心低一点，往上提 1px 更稳。 */
+  transform: translateY(-0.5px);
 }
 
 .memo-type-icon.word {
@@ -2630,6 +2655,12 @@ button.resource-user-tag:hover {
 
 .empty-icon {
   margin: 0 auto;
+}
+
+.empty-icon.resource {
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent);
 }
 
 .error-state button {

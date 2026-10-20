@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
+import { ResourceLinkGlyph as ResourceLinkIcon } from "./ResourceIcon";
 import type { Memo, MemoType } from "./types";
 import { normalizeWebUrl, sourceHost } from "./webUrl";
 
@@ -177,7 +178,7 @@ export default function ResourcePreviewDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label">↗ 网页资料</span>
+            <span className="type-label"><ResourceLinkIcon size={13} />网页资料</span>
             <h2 id="resource-preview-title">{editing ? "编辑网页资料" : memo.title}</h2>
           </div>
           <button

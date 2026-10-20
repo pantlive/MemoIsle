@@ -15,6 +15,7 @@ import ResourceClassificationPanel from "./ResourceClassificationPanel";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
 import DataMenu from "./DataMenu";
 import MemoBatchToolbar from "./MemoBatchToolbar";
+import ResourceMonogram, { ResourceLinkGlyph } from "./ResourceIcon";
 import { normalizeWebUrl, sourceHost } from "./webUrl";
 import ResourcePreviewDialog, { type ResourceEditChanges } from "./ResourcePreviewDialog";
 import CategoryTemplatePanel from "./CategoryTemplatePanel";
@@ -154,7 +155,9 @@ interface AppProps {
 
 interface NavigationItem {
   label: string;
+  /** 文字字形图标；资源链接一项改用矢量图，见 vectorIcon。 */
   icon: string;
+  vectorIcon?: "resource-link";
   view?: ActiveView;
   action?: "health" | "settings" | "vault";
 }
@@ -179,7 +182,7 @@ const navigation: NavigationItem[] = [
   { label: "首页", icon: "⌂", view: "all" },
   { label: "收件箱", icon: "▣", view: "inbox" },
   { label: "英语单词", icon: "Aa", view: "word" },
-  { label: "网页资料", icon: "↗", view: "resource" },
+  { label: "网页资料", icon: "↗", vectorIcon: "resource-link", view: "resource" },
   { label: "图片收藏", icon: "▧", view: "image" },
   { label: "网页巡检", icon: "!", action: "health" },
   { label: "灵感", icon: "✦", view: "idea" },
@@ -3732,7 +3735,13 @@ export default function App({ authUser, onLogout }: AppProps) {
                 }}
                 title={enabled ? undefined : "将在后续里程碑开放"}
               >
-                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                <span className="nav-icon" aria-hidden="true">
+                  {item.vectorIcon === "resource-link" ? (
+                    <ResourceLinkGlyph size={15} />
+                  ) : (
+                    item.icon
+                  )}
+                </span>
                 {item.label}
                 {item.view === "inbox" && memoCounts !== null && (
                   <span className="nav-count">{memoCounts.inbox_count}</span>
@@ -4122,7 +4131,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                     }}
                   />
                 ) : (
-                  <span className="web-attachment-icon">↗</span>
+                  <span className="web-attachment-icon"><ResourceLinkGlyph /></span>
                 )}
                 <span>
                   <em>@网页</em>
@@ -4289,7 +4298,7 @@ export default function App({ authUser, onLogout }: AppProps) {
                         {tab.favicon_url ? (
                           <img src={tab.favicon_url} alt="" />
                         ) : (
-                          <span className="capture-command-icon">↗</span>
+                          <span className="capture-command-icon"><ResourceLinkGlyph /></span>
                         )}
                         <span>
                           <strong>
@@ -4367,7 +4376,9 @@ export default function App({ authUser, onLogout }: AppProps) {
                   type="button"
                   className={activeType === "resource" ? "type-pill active" : "type-pill"}
                   onClick={() => switchType("resource")}
-                >↗ 资料</button>
+                >
+                  <ResourceLinkGlyph size={13} /> 资料
+                </button>
                 <button
                   type="button"
                   className="type-pill voice-pill"
@@ -4642,7 +4653,9 @@ export default function App({ authUser, onLogout }: AppProps) {
             )}
             {loadState === "ready" && memos.length === 0 && (
               <div className="state-panel empty-state">
-                <span className="empty-icon">{copy.icon}</span>
+                <span className={`empty-icon ${activeType}`}>
+                  {activeType === "resource" ? <ResourceLinkGlyph size={20} /> : copy.icon}
+                </span>
                 <h3>{viewQuery.trim() ? "没有找到匹配内容" : copy.emptyTitle}</h3>
                 <p>
                   {viewQuery.trim()
@@ -4767,6 +4780,11 @@ export default function App({ authUser, onLogout }: AppProps) {
                           version={memo.version}
                           alt={memo.title}
                           className="memo-image-thumb"
+                        />
+                      ) : memo.type === "resource" ? (
+                        <ResourceMonogram
+                          sourceUrl={memo.source_url}
+                          siteName={memo.resource_site_name}
                         />
                       ) : (
                         viewCopy[memo.type].icon
@@ -5648,7 +5666,10 @@ export default function App({ authUser, onLogout }: AppProps) {
 
       <nav className="mobile-navigation" aria-label="移动端主导航">
         <button className={activeType === "all" ? "active" : ""} onClick={() => switchType("all")}>⌂<span>首页</span></button>
-        <button className={activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>↗<span>资料</span></button>
+        <button className={activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
+          <ResourceLinkGlyph size={17} />
+          <span>资料</span>
+        </button>
         <button className={activeType === "image" ? "active" : ""} onClick={() => switchType("image")}>▧<span>图片</span></button>
         <button className="mobile-create" onClick={focusCapture}>＋<span>新建</span></button>
         <button className={activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}>✦<span>灵感</span></button>
