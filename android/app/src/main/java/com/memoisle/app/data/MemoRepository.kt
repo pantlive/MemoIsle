@@ -41,7 +41,9 @@ class MemoRepository(
     private val syncMutex = Mutex()
     // 图片字节按需拉取：内存缓存保证滚动列表不重复请求，原图同时落到应用缓存目录。
     private val imageCacheLock = Any()
-    private val imageBytesCache = mutableMapOf<String, ByteArray>()
+    // 按字节计的 LRU：以前是无上限 map，浏览越多占用越大。
+    // 被淘汰的图片下次会从磁盘缓存或网络重新读取。
+    private val imageBytesCache = ByteBoundedLruCache(IMAGE_MEMORY_CACHE_MAX_BYTES)
 
     @Synchronized
     fun activateUser(userId: String): Unit {
@@ -784,5 +786,45 @@ class MemoRepository(
 
     private fun publishLocalSnapshot() {
         mutableMemos.value = database.loadMemos()
+    }
+}
+
+
+/** 仓库内存缓存上限：约 48 MB，覆盖一屏多的原图与大量缩略图。 */
+private const val IMAGE_MEMORY_CACHE_MAX_BYTES = 48L * 1024 * 1024
+
+/**
+ * 按值字节数淘汰最久未访问条目的 LRU。
+ *
+ * 不用 android.util.LruCache，是为了让仓库保持可在纯 JVM 单测里运行。
+ * 调用方已经在 imageCacheLock 下访问，这里不再加锁。
+ */
+internal class ByteBoundedLruCache(private val maxBytes: Long) {
+    private val entries = LinkedHashMap<String, ByteArray>(16, 0.75f, true)
+    private var totalBytes = 0L
+
+    operator fun get(key: String): ByteArray? = entries[key]
+
+    operator fun set(key: String, value: ByteArray) {
+        entries.put(key, value)?.let { totalBytes -= it.size }
+        totalBytes += value.size
+        val iterator = entries.entries.iterator()
+        while (totalBytes > maxBytes && entries.size > 1 && iterator.hasNext()) {
+            val eldest = iterator.next()
+            if (eldest.key == key) {
+                continue
+            }
+            totalBytes -= eldest.value.size
+            iterator.remove()
+        }
+    }
+
+    fun remove(key: String) {
+        entries.remove(key)?.let { totalBytes -= it.size }
+    }
+
+    fun clear() {
+        entries.clear()
+        totalBytes = 0
     }
 }

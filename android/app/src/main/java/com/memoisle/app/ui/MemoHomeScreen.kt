@@ -213,7 +213,16 @@ fun MemoHomeScreen(
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
     var isPreparingLogout by rememberSaveable { mutableStateOf(false) }
     val normalizedSearchQuery = searchQuery.trim()
-    val visibleMemos = memos.filter { memo ->
+    // 以下派生数据只在依赖变化时重算：录音计时、输入框打字等无关重组
+    // 不再对整张 memo 表做多次过滤和全文匹配。
+    val visibleMemos = remember(
+        memos,
+        showAllMemos,
+        normalizedSearchQuery,
+        activeType,
+        libraryTypeFilter,
+        resourceCategoryFilter,
+    ) { memos.filter { memo ->
         val typeMatches = showAllMemos || normalizedSearchQuery.isNotEmpty() ||
             memo.type == activeType
         val libraryTypeMatches = !showAllMemos || libraryTypeFilter.isEmpty() ||
@@ -223,22 +232,47 @@ fun MemoHomeScreen(
             memo.assignedCategoryCodes().contains(resourceCategoryFilter)
         memo.isVisibleInLibrary() && typeMatches && libraryTypeMatches && categoryMatches &&
             memo.matchesQuery(normalizedSearchQuery)
+    } }
+    val libraryMemos = remember(memos) { memos.filter { it.isVisibleInLibrary() } }
+    val trashMemos = remember(memos, normalizedSearchQuery) {
+        memos.filter { memo ->
+            memo.isInTrash() && memo.matchesQuery(normalizedSearchQuery)
+        }
     }
-    val libraryMemos = memos.filter { it.isVisibleInLibrary() }
-    val trashMemos = memos.filter { memo ->
-        memo.isInTrash() && memo.matchesQuery(normalizedSearchQuery)
+    val inboxMemos = remember(memos, normalizedSearchQuery) {
+        memos.filter { memo ->
+            memo.status == "inbox" && memo.matchesQuery(normalizedSearchQuery)
+        }
     }
-    val inboxMemos = memos.filter { memo ->
-        memo.status == "inbox" && memo.matchesQuery(normalizedSearchQuery)
+    // 到期判断依赖当前时间：每分钟换一次键，开着应用时到点的单词也能出现，
+    // 同时避免像以前那样每次重组都重算。
+    var reviewClockMinute by remember { mutableStateOf(System.currentTimeMillis() / 60_000) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            reviewClockMinute = System.currentTimeMillis() / 60_000
+        }
     }
-    val reviewCounts = libraryMemos.todayReviewCounts()
+    val reviewCounts = remember(libraryMemos, reviewClockMinute) {
+        libraryMemos.todayReviewCounts()
+    }
     val reviewLimit = uiState.reviewSettings.dailyLimit
-    val reviewItems = libraryMemos.todayReviewItems(limit = reviewLimit)
-    val filteredReviewItems = when (reviewFilter) {
-        TYPE_WORD -> libraryMemos.filter { it.isDueWord() }.take(reviewLimit)
-        TYPE_RESOURCE -> libraryMemos.filter { it.isUnreadResource() }.take(reviewLimit)
-        TYPE_IDEA -> libraryMemos.filter { it.isInboxIdea() }.take(reviewLimit)
-        else -> reviewItems
+    val reviewItems = remember(libraryMemos, reviewLimit, reviewClockMinute) {
+        libraryMemos.todayReviewItems(limit = reviewLimit)
+    }
+    val filteredReviewItems = remember(
+        libraryMemos,
+        reviewItems,
+        reviewFilter,
+        reviewLimit,
+        reviewClockMinute,
+    ) {
+        when (reviewFilter) {
+            TYPE_WORD -> libraryMemos.filter { it.isDueWord() }.take(reviewLimit)
+            TYPE_RESOURCE -> libraryMemos.filter { it.isUnreadResource() }.take(reviewLimit)
+            TYPE_IDEA -> libraryMemos.filter { it.isInboxIdea() }.take(reviewLimit)
+            else -> reviewItems
+        }
     }
     val currentReview = filteredReviewItems.firstOrNull()
     var showReviewSettingsDialog by rememberSaveable { mutableStateOf(false) }
@@ -1374,8 +1408,10 @@ fun MemoHomeScreen(
             isRecording = isVoiceRecording,
             isPaused = isVoicePaused,
             recording = voiceRecording,
-            elapsedMs = voiceElapsedMs,
-            amplitudePercent = voiceAmplitude,
+            // 传读取函数而不是值：计时（250ms）和音量（100ms）只让对话框重组，
+            // 不再带着整个首页一起重组。
+            elapsedMs = { voiceElapsedMs },
+            amplitudePercent = { voiceAmplitude },
             isTranscribing = isVoiceTranscribing,
             transcriptionMessage = voiceTranscriptionMessage,
             isSaving = uiState.isSaving,
@@ -3634,8 +3670,8 @@ private fun VoiceCaptureDialog(
     isRecording: Boolean,
     isPaused: Boolean,
     recording: VoiceRecording?,
-    elapsedMs: Int,
-    amplitudePercent: Int,
+    elapsedMs: () -> Int,
+    amplitudePercent: () -> Int,
     isTranscribing: Boolean,
     transcriptionMessage: String?,
     isSaving: Boolean,
@@ -3648,7 +3684,7 @@ private fun VoiceCaptureDialog(
     onRequestDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
-    val seconds = elapsedMs / 1_000
+    val seconds = elapsedMs() / 1_000
     AlertDialog(
         onDismissRequest = { if (!isSaving) onRequestDismiss() },
         title = { Text("语音记录", fontWeight = FontWeight.SemiBold) },
@@ -3695,7 +3731,7 @@ private fun VoiceCaptureDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text("输入音量", color = TextMuted, fontSize = 12.sp)
-                        Text("${amplitudePercent}%", color = TextMuted, fontSize = 12.sp)
+                        Text("${amplitudePercent()}%", color = TextMuted, fontSize = 12.sp)
                     }
                     Box(
                         modifier = Modifier
@@ -3705,7 +3741,7 @@ private fun VoiceCaptureDialog(
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth((amplitudePercent / 100f).coerceIn(0f, 1f))
+                                .fillMaxWidth((amplitudePercent() / 100f).coerceIn(0f, 1f))
                                 .height(8.dp)
                                 .background(WarmAmberText, RoundedCornerShape(99.dp)),
                         )

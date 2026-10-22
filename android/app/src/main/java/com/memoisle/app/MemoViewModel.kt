@@ -597,8 +597,8 @@ class MemoViewModel(
             result
                 .onSuccess { (created, compressed) ->
                     // 上传成功后立即用本地字节填充缩略图，避免列表再次请求服务端。
-                    imageThumbnails = imageThumbnails + (created.clientId to compressed.bytes)
-                    fullImages = fullImages + (created.clientId to compressed.bytes)
+                    cacheThumbnail(created.clientId, compressed.bytes)
+                    cacheFullImage(created.clientId, compressed.bytes)
                     uiState = uiState.copy(
                         isSaving = false,
                         isUploadingImage = false,
@@ -623,6 +623,53 @@ class MemoViewModel(
                     )
                 }
         }
+    }
+
+    /**
+     * 写入缓存并按字节预算淘汰最早加入的条目。
+     *
+     * 以前缩略图只增不减，原图只在关闭详情时释放，浏览越久占用越大。
+     * Kotlin 的 Map 加法保留插入顺序，最先加入的就是最久未加入的。
+     * 重新访问已淘汰的图片会再走 repository（它有磁盘缓存），不会出错。
+     */
+    private fun Map<String, ByteArray>.withBounded(
+        key: String,
+        bytes: ByteArray,
+        maxBytes: Int,
+        maxEntries: Int,
+    ): Map<String, ByteArray> {
+        val next = LinkedHashMap(this)
+        next.remove(key)
+        next[key] = bytes
+        var total = next.values.sumOf { it.size.toLong() }
+        val iterator = next.entries.iterator()
+        while ((total > maxBytes || next.size > maxEntries) && next.size > 1 && iterator.hasNext()) {
+            val oldest = iterator.next()
+            if (oldest.key == key) {
+                continue
+            }
+            total -= oldest.value.size
+            iterator.remove()
+        }
+        return next
+    }
+
+    private fun cacheThumbnail(key: String, bytes: ByteArray) {
+        imageThumbnails = imageThumbnails.withBounded(
+            key,
+            bytes,
+            maxBytes = THUMBNAIL_CACHE_MAX_BYTES,
+            maxEntries = THUMBNAIL_CACHE_MAX_ENTRIES,
+        )
+    }
+
+    private fun cacheFullImage(key: String, bytes: ByteArray) {
+        fullImages = fullImages.withBounded(
+            key,
+            bytes,
+            maxBytes = FULL_IMAGE_CACHE_MAX_BYTES,
+            maxEntries = FULL_IMAGE_CACHE_MAX_ENTRIES,
+        )
     }
 
     fun imageThumbnail(memo: Memo): ByteArray? = imageThumbnails[memo.clientId]
@@ -658,9 +705,9 @@ class MemoViewModel(
             runCatching { repository.loadMemoImage(memo, thumbnail) }
                 .onSuccess { bytes ->
                     if (thumbnail) {
-                        imageThumbnails = imageThumbnails + (memo.clientId to bytes)
+                        cacheThumbnail(memo.clientId, bytes)
                     } else {
-                        fullImages = fullImages + (memo.clientId to bytes)
+                        cacheFullImage(memo.clientId, bytes)
                     }
                 }
                 .onFailure { error ->
@@ -1004,6 +1051,12 @@ class MemoViewModel(
     }
 
     companion object {
+        // ViewModel 层的显示缓存：缩略图小而多，原图大而少。
+        private const val THUMBNAIL_CACHE_MAX_BYTES = 16 * 1024 * 1024
+        private const val THUMBNAIL_CACHE_MAX_ENTRIES = 300
+        private const val FULL_IMAGE_CACHE_MAX_BYTES = 32 * 1024 * 1024
+        private const val FULL_IMAGE_CACHE_MAX_ENTRIES = 6
+
         fun factory(repository: MemoRepository): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
