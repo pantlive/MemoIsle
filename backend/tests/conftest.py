@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from app.config import Settings
-from app.database import Database
-from app.main import create_app
-from fastapi.testclient import TestClient
+
+# 必须在 import app 模块之前设置：conftest 顶层会 import app.main，而它模块级
+# 会执行 create_app() → from_environment()。未配置登录密钥时会在真实数据目录
+# 生成密钥文件，测试不应改动开发者的数据目录，所以用固定值兜底。
+os.environ.setdefault("MEMOISLE_AUTH_TOKEN_SECRET", "test-auth-token-secret")
+
+from app.config import Settings  # noqa: E402
+from app.database import Database  # noqa: E402
+from app.main import create_app  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 @pytest.fixture

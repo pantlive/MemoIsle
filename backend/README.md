@@ -19,7 +19,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_DATABASE_URL`：SQLAlchemy 数据库连接地址。
 - `MEMOISLE_CORS_ORIGINS`：逗号分隔的 Web 来源。
 - `MEMOISLE_AUTH_DEV_MODE`：设为 `true` 时开放本地开发登录；生产环境必须保持关闭。
-- `MEMOISLE_AUTH_TOKEN_SECRET`：登录 state 与 Bearer 会话签名密钥，生产环境必须固定配置。
+- `MEMOISLE_AUTH_TOKEN_SECRET`：登录 state 与 Bearer 会话签名密钥。未设置时自动生成并保存到数据库旁的 `.memoisle-auth.key`（权限 0600），重启后沿用；多机部署或数据库不在本地磁盘时必须显式配置同一个值。
 - `MEMOISLE_OAUTH_LOGIN_ENABLED`：设为 `true` 时才开放微信、Google、Apple 登录；当前产品范围默认关闭。
 - `MEMOISLE_GOOGLE_CLIENT_ID` / `MEMOISLE_GOOGLE_CLIENT_SECRET`：Google OAuth 客户端凭据。
 - `MEMOISLE_WECHAT_APP_ID` / `MEMOISLE_WECHAT_APP_SECRET`：微信开放平台网站应用凭据。
@@ -288,6 +288,33 @@ conda env update -f environment.yml
 Heart-Plan 的方式调用 `message +send`，取得确认令牌后自动带令牌完成发送；找不到 CLI
 时回退到 SMTP。使用 AgentlyMail 前，需让运行后端的同一系统用户完成 OAuth 授权，或通过
 `MEMOISLE_AGENTLY_CLI_PATH` 指定 CLI 路径。
+
+## 数据备份与恢复
+
+需要备份的不只是数据库。下面两个密钥文件必须和数据库放在一起备份，否则恢复后库里加密的凭据无法解密：
+
+- `.memoisle-auth.key`：登录会话签名密钥，云盘凭据默认也用它加密。显式设置了 `MEMOISLE_AUTH_TOKEN_SECRET` 时不会生成这个文件，请另外保存那个值。
+- `.memoisle-model.key`：模型服务凭据的加密密钥。
+
+`backend/scripts/backup.py` 会一起处理这些文件。数据位置读取与服务相同的 `MEMOISLE_*` 环境变量。
+
+```bash
+# 备份：服务运行中即可执行，用 SQLite 的 VACUUM INTO 生成一致快照
+python backend/scripts/backup.py create --to /mnt/backup/memoisle --keep 14
+# 只备份数据库与密钥，不带录音和图片
+python backend/scripts/backup.py create --to /mnt/backup/memoisle --no-media
+# 校验：按 manifest 里的 SHA-256 检查每个文件，并做 SQLite 完整性检查
+python backend/scripts/backup.py verify /mnt/backup/memoisle/memoisle-backup-20261022T030000Z
+# 恢复：先停止服务
+python backend/scripts/backup.py restore /mnt/backup/memoisle/memoisle-backup-20261022T030000Z
+```
+
+- 每份备份是一个独立目录，先写到临时目录，全部完成后才改名，中途失败不会留下看起来完整、实际缺文件的备份。
+- 恢复前会先校验，不通过就不动现有数据。现有数据不会被删除，而是挪到数据库旁边的 `pre-restore-<时间>` 目录，确认无误后再手动删除。
+- 恢复时会把旧的 `-wal`、`-shm` 文件一起挪走，避免旧日志回放到恢复出来的库上。
+- 定时备份可以交给 cron，例如每天凌晨 3 点：
+  `0 3 * * * cd /srv/memoisle && python backend/scripts/backup.py create --to /mnt/backup/memoisle --keep 14`
+- 备份目录里有密钥，请放在只有服务账号能读的位置。脚本会把复制出的密钥文件设为 0600。
 
 ## 测试
 

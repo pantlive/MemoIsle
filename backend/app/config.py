@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from sqlalchemy.engine import make_url
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = PROJECT_ROOT.parent / "data" / "memoisle.db"
@@ -34,6 +39,55 @@ def normalize_image_ocr_provider(value: str | None) -> str:
 
     normalized = (value or "").strip().lower()
     return normalized if normalized in IMAGE_OCR_PROVIDERS else "none"
+
+
+def auth_secret_file(database_url: str) -> Path:
+    """登录密钥文件位置：SQLite 放在数据库旁，其他数据库放默认数据目录。"""
+
+    url = make_url(database_url)
+    in_memory = url.database in (None, "", ":memory:")
+    if url.get_backend_name() == "sqlite" and not in_memory:
+        return Path(url.database).parent / ".memoisle-auth.key"
+    return DEFAULT_DATABASE_PATH.parent / ".memoisle-auth.key"
+
+
+def load_or_create_secret_file(path: Path) -> str:
+    """读取私有密钥文件；不存在时原子创建（权限 0600），并发进程共用首个结果。
+
+    目录不可写时退回进程内随机密钥并告警，而不是在 import 阶段让服务崩溃；
+    这时重启后会话会失效，告警里提示显式配置环境变量。
+    """
+
+    try:
+        if not path.exists():
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            temporary = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
+            try:
+                with temporary.open("x", encoding="utf-8") as stream:
+                    # 写入秘密前先收紧权限，再用硬链接原子发布完整文件。
+                    temporary.chmod(0o600)
+                    stream.write(secrets.token_urlsafe(32))
+                try:
+                    path.hardlink_to(temporary)
+                except FileExistsError:
+                    pass
+            finally:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        secret = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        logger.warning(
+            "无法读写登录密钥文件 %s（%s），本次使用临时密钥；"
+            "重启后会话会失效，请设置 MEMOISLE_AUTH_TOKEN_SECRET",
+            path,
+            error,
+        )
+        return secrets.token_urlsafe(32)
+    if not secret:
+        raise ValueError(f"登录密钥文件为空：{path}")
+    return secret
 
 
 def environment_flag(name: str, default: bool) -> bool:
@@ -162,8 +216,15 @@ class Settings:
         )
         auth_dev_mode = environment_flag("MEMOISLE_AUTH_DEV_MODE", False)
         auth_token_secret = os.environ.get("MEMOISLE_AUTH_TOKEN_SECRET", "")
-        created_token_secret = auth_token_secret or secrets.token_urlsafe(32)
-        # 云盘凭据默认与登录密钥同源，保证重启后仍可解密。
+        if not auth_token_secret:
+            # 未显式配置时持久化到数据库旁的私有文件，而不是每次启动随机生成：
+            # 随机密钥会让重启后所有会话失效、云盘 refresh_token 永久无法解密，
+            # 多 worker 部署时各进程的密钥也会不一致。
+            auth_token_secret = load_or_create_secret_file(
+                auth_secret_file(database_url),
+            )
+        created_token_secret = auth_token_secret
+        # 云盘凭据默认与登录密钥同源；登录密钥已固定，重启后仍可解密。
         cloud_credential_secret = (
             os.environ.get("MEMOISLE_CLOUD_CREDENTIAL_SECRET", "")
             or created_token_secret
