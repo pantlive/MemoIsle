@@ -1979,6 +1979,244 @@ class BrowserTabSyncResponse(BaseModel):
     synced_count: int
 
 
+class BrowserHistoryVisitInput(BaseModel):
+    """扩展上报的一次浏览记录。"""
+
+    page_url: str = Field(min_length=1, max_length=2_048)
+    page_title: str = Field(default="", max_length=300)
+    favicon_url: str | None = Field(default=None, max_length=2_048)
+    # 扩展本地读取的访问时间，缺失时由服务端按接收时间补齐。
+    visited_at: datetime | None = None
+    # 浏览器统计的该网址累计访问次数；重复上报时服务端取较大值。
+    visit_count: int = Field(default=1, ge=1, le=1_000_000)
+
+    @field_validator("page_url", mode="before")
+    @classmethod
+    def normalize_visit_url(cls, value: object) -> object:
+        """清理空白地址，公网校验由服务端统一执行。"""
+
+        if not isinstance(value, str):
+            return value
+        return value.strip()
+
+    @field_validator("favicon_url", mode="before")
+    @classmethod
+    def normalize_visit_favicon(cls, value: object) -> object:
+        """data: 图标常超过 2048，丢弃后不影响历史条目。"""
+
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > 2_048:
+            return None
+        return cleaned
+
+    @field_validator("page_title", mode="before")
+    @classmethod
+    def normalize_visit_title(cls, value: object) -> object:
+        """清理并截断标题。"""
+
+        if not isinstance(value, str):
+            return value
+        return " ".join(value.split()).strip()[:300]
+
+
+class BrowserHistorySyncRequest(BaseModel):
+    """扩展提交的一批浏览记录。"""
+
+    extension_id: str = Field(pattern=r"^[a-p]{32}$")
+    # 扩展实例标识：不同电脑各自一个，用来隔离同一账号的历史。
+    device_id: str = Field(default="legacy", min_length=1, max_length=64)
+    # 设备可读名称，例如「Mac · Chrome」，用于 Web 端区分来源。
+    device_name: str = Field(default="", max_length=120)
+    # 机器指纹：由系统、架构、时区等算出，扩展重装后仍是同一个值。
+    # 两台配置相同的电脑会算出同一个指纹，因此只作为「疑似同一台机器」的线索。
+    hardware_key: str = Field(default="", max_length=64)
+    # 本次安装的随机标识，重装扩展后会变。
+    install_id: str = Field(default="", max_length=64)
+    visits: list[BrowserHistoryVisitInput] = Field(
+        default_factory=list,
+        max_length=500,
+    )
+    # 浏览器已清空历史后，扩展可以要求清空「本设备」的记录。
+    replace_all: bool = False
+
+    @field_validator("device_id", mode="before")
+    @classmethod
+    def normalize_device_id(cls, value: object) -> object:
+        """只保留字母数字和短横线，避免异常字符进索引。"""
+
+        if not isinstance(value, str):
+            return value
+        cleaned = "".join(
+            character
+            for character in value.strip()
+            if character.isalnum() or character in {"-", "_"}
+        )
+        return cleaned[:64] or "legacy"
+
+    @field_validator("device_name", mode="before")
+    @classmethod
+    def normalize_device_name(cls, value: object) -> object:
+        """清理设备名称，控制长度。"""
+
+        if not isinstance(value, str):
+            return ""
+        return " ".join(value.split()).strip()[:120]
+
+    @field_validator("hardware_key", "install_id", mode="before")
+    @classmethod
+    def normalize_opaque_token(cls, value: object) -> object:
+        """指纹和安装标识只保留安全字符。"""
+
+        if not isinstance(value, str):
+            return ""
+        return "".join(
+            character
+            for character in value.strip()
+            if character.isalnum() or character in {"-", "_"}
+        )[:64]
+
+
+class BrowserHistorySyncResponse(BaseModel):
+    """浏览记录同步结果。"""
+
+    synced_count: int
+    total_count: int
+    # 服务端最终使用的设备标识。指纹撞车时服务端会派一个新 ID，
+    # 扩展据此把 identity 固定下来，后续同步都用它。
+    device_id: str = "legacy"
+    # 指纹与已有设备相同、但不是同一次安装时，给出那台设备的 ID，
+    # 由用户在界面上确认「同一台机器（合并）」还是「另一台电脑」。
+    possible_same_device_id: str | None = None
+
+
+class BrowserHistoryDeviceMerge(BaseModel):
+    """把一台设备的历史并进另一台。"""
+
+    target_device_id: str = Field(min_length=1, max_length=64)
+
+
+class BrowserHistoryDeviceUpdate(BaseModel):
+    """重命名一台设备。"""
+
+    device_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("device_name", mode="before")
+    @classmethod
+    def normalize_device_name(cls, value: object) -> object:
+        """清理名称，不允许空名。"""
+
+        if not isinstance(value, str):
+            return ""
+        return " ".join(value.split()).strip()[:120]
+
+
+class BrowserHistoryEntryRead(BaseModel):
+    """Web 展示的一条浏览历史。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    page_url: str
+    page_title: str
+    favicon_url: str | None
+    visit_count: int
+    first_visited_at: datetime
+    last_visited_at: datetime
+    # 该网址是否已经在资料库里，前端据此显示「已收藏」。
+    saved_memo_id: UUID | None = None
+    # 这条记录来自哪台设备；合并展示时给出最近一次访问的设备。
+    device_id: str = "legacy"
+    device_name: str = ""
+
+    @field_serializer("first_visited_at", "last_visited_at")
+    def serialize_utc_datetime(self, value: datetime) -> str:
+        """统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class BrowserHistoryDayGroup(BaseModel):
+    """按访问日期分组的历史条目，前端直接按块渲染。"""
+
+    # 本地日期（YYYY-MM-DD），按前端传入的时区偏移换算。
+    date: str
+    count: int
+    items: list[BrowserHistoryEntryRead]
+
+
+class BrowserHistoryDeviceRead(BaseModel):
+    """一台同步过浏览历史的设备。"""
+
+    device_id: str
+    device_name: str
+    total_count: int
+    synced_at: datetime
+    # 指纹相同说明「可能是同一台机器」（重装，或另一台同款电脑）。
+    # 给出候选设备 ID，由用户确认是合并还是并列。
+    possible_same_device_id: str | None = None
+
+    @field_serializer("synced_at")
+    def serialize_device_synced_at(self, value: datetime) -> str:
+        """统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class BrowserHistoryListResponse(BaseModel):
+    """浏览历史列表。"""
+
+    extension_connected: bool
+    synced_at: datetime | None
+    total_count: int
+    items: list[BrowserHistoryEntryRead]
+    # 按日期分块的同一批条目；items 保留给旧客户端逐条渲染。
+    days: list[BrowserHistoryDayGroup] = Field(default_factory=list)
+    # 当前实际生效的搜索窗口；None 表示不限时间（全部历史）。
+    window_days: int | None
+    # 账号是否已在设置里打开「搜索更久的历史」。
+    extended_search_enabled: bool
+    # 分页信息：每页条数、本页起点、是否还有下一页以及下一页起点。
+    page_size: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
+    # 深翻页用的游标；非空时下次传 cursor 而不是 offset，查询与深度无关。
+    next_cursor: str | None = None
+    # 当前账号下同步过历史的所有设备，用于按设备筛选。
+    devices: list[BrowserHistoryDeviceRead] = Field(default_factory=list)
+    # 本次查询实际应用的设备筛选；None 表示已按网址合并所有设备。
+    device_id: str | None = None
+
+    @field_serializer("synced_at")
+    def serialize_history_synced_at(self, value: datetime | None) -> str | None:
+        """统一输出最近同步时间。"""
+
+        if value is None:
+            return None
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class BrowserHistorySettingsRead(BaseModel):
+    """历史记录相关的账号设置。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    extended_search_enabled: bool
+
+
+class BrowserHistorySettingsUpdate(BaseModel):
+    """更新是否允许搜索更久的历史。"""
+
+    extended_search_enabled: bool
+
+
 def normalize_optional_text(value: str | None) -> str | None:
     """将空白可选文本统一转换为 ``None``。"""
 

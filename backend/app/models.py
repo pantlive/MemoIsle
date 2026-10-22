@@ -69,6 +69,12 @@ class User(Base):
         nullable=False,
         default=lambda: [1, 3, 7, 14, 30, 60],
     )
+    # 浏览历史默认只搜索最近 30 天；打开后可按 90/365 天或全部时间检索。
+    browser_history_extended_search: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -274,6 +280,8 @@ class Memo(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "client_id", name="uq_memo_user_client"),
         Index("ix_memo_user_updated", "user_id", "updated_at"),
+        # 网页资料按规范化网址去重，查重和「历史里是否已收藏」都走这个索引。
+        Index("ix_memo_user_canonical_url", "user_id", "canonical_url"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -291,6 +299,8 @@ class Memo(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # 规范化后的网址，仅网页资料有值；来源网址一变就同步重算。
+    canonical_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     source_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     resource_page_title: Mapped[str | None] = mapped_column(
         String(300),
@@ -759,6 +769,124 @@ class BrowserCapture(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+
+class BrowserHistoryEntry(Base):
+    """浏览器扩展上报的浏览历史条目。
+
+    同一账号下按设备分别保存：两台电脑访问同一网址各占一行，
+    这样「在 A 电脑清空历史」不会动到 B 电脑的记录，
+    列表默认按网址合并展示，也可以按设备筛选。
+    """
+
+    __tablename__ = "browser_history_entry"
+    __table_args__ = (
+        # 同一账号、同一设备下同一规范化网址只保留一行。
+        UniqueConstraint(
+            "user_id",
+            "device_id",
+            "url_key",
+            name="uq_browser_history_entry_user_device_url",
+        ),
+        # 列表按 (last_visited_at DESC, id DESC) 排序翻页；把 id 也放进索引，
+        # 深翻页和「同秒多条」的排序才能整段走索引，不需要临时 B 树。
+        Index(
+            "ix_browser_history_entry_user_visited",
+            "user_id",
+            "last_visited_at",
+            "id",
+        ),
+        # 按设备筛选历史时走这个索引。
+        Index(
+            "ix_browser_history_entry_user_device_visited",
+            "user_id",
+            "device_id",
+            "last_visited_at",
+        ),
+        # 合并多设备视图要「每个网址取最新一行」，这个索引让子查询走索引定位。
+        Index(
+            "ix_browser_history_entry_user_url_visited",
+            "user_id",
+            "url_key",
+            "last_visited_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # 扩展实例标识；同一浏览器上的扩展固定不变，不同电脑各自一个。
+    device_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="legacy",
+    )
+    # 规范化网址的摘要，避免超长 URL 进唯一索引。
+    url_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    page_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    page_title: Mapped[str] = mapped_column(String(300), nullable=False)
+    favicon_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    visit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_visited_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    last_visited_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
+class BrowserHistorySyncState(Base):
+    """单个设备的浏览历史同步状态。"""
+
+    __tablename__ = "browser_history_sync_state"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "device_id",
+            name="uq_browser_history_sync_state_device",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    # 设备标识；同一账号可以有多台设备。
+    device_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="legacy",
+    )
+    # 机器指纹：由系统、架构、时区等算出，扩展重装后仍然是同一个值。
+    # 两台配置完全相同的电脑会算出同一个指纹，所以它只用于「疑似同一台机器」，
+    # 不能当作唯一标识。
+    hardware_key: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="",
+        index=True,
+    )
+    # 本次安装的随机标识：重装扩展后会变。
+    # 指纹相同但 install_id 不同，说明要么是重装，要么是另一台同款电脑。
+    install_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="",
+    )
+    extension_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 设备可读名称，例如「Mac · Chrome」，由扩展上报。
+    device_name: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+        default="",
+    )
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
     )
 
 

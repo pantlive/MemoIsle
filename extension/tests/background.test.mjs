@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, webcrypto } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
@@ -34,10 +34,16 @@ function createHarness({
   },
   openTabs,
   bookmarkTree,
+  historyItems,
+  historySearch,
   fetchImpl,
   storedConfig = {},
   storedWebContext = null,
   storedAccessToken = "test-access-token",
+  storedHistoryState = null,
+  idleState = "active",
+  // 传入上一个后台实例的本地存储，模拟后台被回收后重新唤醒。
+  sharedLocalStore = null,
   notificationResult = "memoisle-capture-result",
   selectedText = "",
   createImageBitmap,
@@ -45,12 +51,18 @@ function createHarness({
 } = {}) {
   const listeners = {};
   const messageListeners = [];
-  const localStore = {};
+  const alarms = new Map();
+  // 用对象包一层，测试中途可以切换闲置状态。
+  const idle = { state: idleState };
+  const localStore = sharedLocalStore ?? {};
   if (storedWebContext) {
     localStore.memoisle_web_context = jsonValue(storedWebContext);
   }
   if (storedAccessToken) {
     localStore.memoisle_access_token = storedAccessToken;
+  }
+  if (storedHistoryState) {
+    localStore.memoisle_history_sync_state = jsonValue(storedHistoryState);
   }
   const resolvedOpenTabs = openTabs ?? [activeTab];
   const calls = {
@@ -59,6 +71,9 @@ function createHarness({
     fetches: [],
     queries: [],
     bookmarkReads: 0,
+    historyQueries: [],
+    alarmsCreated: [],
+    alarmsCleared: [],
     tabsCreated: [],
     notificationsCreated: [],
     notificationsCleared: [],
@@ -110,6 +125,21 @@ function createHarness({
         },
       };
     }
+    if (requestUrl.endsWith("/browser-history/sync")) {
+      // 服务端会回显最终使用的设备 ID，扩展据此固定后续同步的归属。
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            synced_count: Array.isArray(body.visits) ? body.visits.length : 0,
+            total_count: 1,
+            device_id: body.device_id,
+            possible_same_device_id: null,
+          };
+        },
+      };
+    }
     return { ok: true, status: 200, async json() { return {}; } };
   });
   const chrome = {
@@ -118,6 +148,9 @@ function createHarness({
       lastError: null,
       getURL(path) {
         return `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${path}`;
+      },
+      async getPlatformInfo() {
+        return { os: "mac", arch: "arm64", nacl_arch: "arm64" };
       },
       onInstalled: {
         addListener(callback) {
@@ -152,6 +185,19 @@ function createHarness({
       },
     },
     bookmarks: {
+      get(id, callback) {
+        const found = [];
+        const walk = (nodes, parentId) => {
+          for (const node of nodes || []) {
+            if (String(node.id) === String(id)) {
+              found.push({ ...node, parentId: node.parentId ?? parentId });
+            }
+            walk(node.children, node.id);
+          }
+        };
+        walk(bookmarkTree ?? [], undefined);
+        callback(found);
+      },
       getTree(callback) {
         calls.bookmarkReads += 1;
         callback(bookmarkTree ?? [{ id: "0", title: "", children: [] }]);
@@ -179,6 +225,35 @@ function createHarness({
       onImportEnded: {
         addListener(callback) {
           listeners.bookmarkImportEnded = callback;
+        },
+      },
+    },
+    history: {
+      search(query, callback) {
+        calls.historyQueries.push(jsonValue(query));
+        const items = historyItems ?? [];
+        if (historySearch) {
+          // 需要模拟「按窗口返回、单次有上限」时由用例提供实现。
+          callback(historySearch(query, items));
+          return;
+        }
+        // 默认按 chrome.history.search 的语义过滤：时间窗 + 条数上限。
+        const start = Number(query.startTime) || 0;
+        const end = Number(query.endTime) || Date.now();
+        const limit = Number(query.maxResults) || 100;
+        callback(
+          items
+            .filter(
+              (item) =>
+                item.lastVisitTime >= start && item.lastVisitTime <= end,
+            )
+            .sort((left, right) => right.lastVisitTime - left.lastVisitTime)
+            .slice(0, limit),
+        );
+      },
+      onVisitRemoved: {
+        addListener(callback) {
+          listeners.historyRemoved = callback;
         },
       },
     },
@@ -241,6 +316,37 @@ function createHarness({
       },
       async setBadgeBackgroundColor() {
         calls.badges.push({ backgroundColor: true });
+      },
+    },
+    alarms: {
+      async get(name) {
+        return alarms.get(name);
+      },
+      create(name, info) {
+        alarms.set(name, { name, ...info });
+        calls.alarmsCreated.push({ name, ...info });
+      },
+      async clear(name) {
+        calls.alarmsCleared.push(name);
+        return alarms.delete(name);
+      },
+      onAlarm: {
+        addListener(callback) {
+          listeners.alarm = callback;
+        },
+      },
+    },
+    idle: {
+      setDetectionInterval(seconds) {
+        calls.idleInterval = seconds;
+      },
+      async queryState() {
+        return idle.state;
+      },
+      onStateChanged: {
+        addListener(callback) {
+          listeners.idleChanged = callback;
+        },
       },
     },
     notifications: {
@@ -307,10 +413,18 @@ function createHarness({
       AbortController,
       chrome,
       console,
-      crypto: { randomUUID },
+      crypto: { randomUUID, subtle: webcrypto.subtle },
+      // vm 上下文没有全局 TextEncoder，指纹计算依赖它。
+      TextEncoder,
       fetch: resolvedFetch,
       clearTimeout,
-      setTimeout,
+      // 后台的重试计时器不能拖住测试进程：服务端一直失败时扩展会持续重试，
+      // 真实浏览器里后台会被回收，测试进程里没有这个机制。unref 不影响按时触发。
+      setTimeout: (callback, delay, ...rest) => {
+        const timer = setTimeout(callback, delay, ...rest);
+        timer.unref?.();
+        return timer;
+      },
       Blob,
       // 默认不提供压缩 API，便于覆盖「无法压缩」的降级路径。
       createImageBitmap,
@@ -319,7 +433,7 @@ function createHarness({
     { filename: "background.js" },
   );
 
-  return { calls, listeners, localStore };
+  return { calls, listeners, localStore, alarms, idle };
 }
 
 async function waitFor(
@@ -360,7 +474,7 @@ test("安装时注册最小化的网页与图片右键菜单", () => {
 });
 
 test("扩展清单声明图片收藏所需的任意站点权限", () => {
-  assert.equal(manifest.version, "0.4.3");
+  assert.equal(manifest.version, "0.5.0");
   assert.equal(manifest.host_permissions.includes("<all_urls>"), true);
   assert.equal(manifest.host_permissions.includes("http://127.0.0.1:8000/*"), true);
   assert.equal(manifest.host_permissions.includes("http://localhost:8000/*"), true);
@@ -971,6 +1085,180 @@ test("浏览器标签页变化会刷新当前打开网页快照", async () => {
   await waitFor(() => harness.calls.fetches.length === 2);
 });
 
+test("扩展清单申请读取浏览历史", () => {
+  assert.equal(manifest.permissions.includes("history"), true);
+});
+
+test("首次同步会上传全部浏览历史并带设备标识", async () => {
+  const harness = createHarness({
+    historyItems: [
+      {
+        url: "https://example.com/guide",
+        title: "指南",
+        lastVisitTime: Date.parse("2026-10-20T08:00:00Z"),
+        visitCount: 3,
+      },
+      {
+        // 浏览器内部页与本地地址不应上报。
+        url: "chrome://extensions",
+        title: "扩展",
+        lastVisitTime: Date.parse("2026-10-20T09:00:00Z"),
+        visitCount: 1,
+      },
+      {
+        url: "http://127.0.0.1/admin",
+        title: "本地",
+        lastVisitTime: Date.parse("2026-10-20T09:30:00Z"),
+        visitCount: 1,
+      },
+    ],
+  });
+
+  harness.listeners.installed();
+  await waitFor(() =>
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+  );
+
+  const request = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-history/sync"),
+  );
+  assert.ok(request);
+  const body = JSON.parse(request.options.body);
+  assert.equal(body.extension_id, "abcdefghijklmnopabcdefghijklmnop");
+  // 同一账号多台电脑靠 device_id 区分。
+  assert.match(body.device_id, /^[0-9a-f]{32}$/);
+  assert.equal(typeof body.device_name, "string");
+  assert.equal(body.visits.length, 1);
+  assert.deepEqual(body.visits[0], {
+    page_url: "https://example.com/guide",
+    page_title: "指南",
+    favicon_url: null,
+    visited_at: "2026-10-20T08:00:00.000Z",
+    visit_count: 3,
+  });
+
+  // 全量备份：会先二分定位最早记录，再按时间窗往回扫。
+  assert.ok(harness.calls.historyQueries.length > 1);
+  assert.equal(typeof harness.localStore.memoisle_history_sync_state.since, "number");
+  // 历史只有一条（10-20），补完就没有更早的了，不应留下断点。
+  assert.equal(
+    harness.localStore.memoisle_history_sync_state.backfillCursor,
+    undefined,
+  );
+  // 设备标识首次生成后固定下来，后续同步复用同一个。
+  assert.match(harness.localStore.memoisle_device_id, /^[0-9a-f]{32}$/);
+});
+
+test("已有游标时只读取游标之后的浏览记录", async () => {
+  const since = Date.parse("2026-10-20T10:00:00Z");
+  const harness = createHarness({
+    historyItems: [
+      {
+        url: "https://example.com/new",
+        title: "新页面",
+        lastVisitTime: since + 60_000,
+        visitCount: 1,
+      },
+    ],
+    storedHistoryState: { since },
+  });
+
+  harness.listeners.tabUpdated(7, { url: "https://example.com/new" }, {});
+  await waitFor(() =>
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+  );
+
+  // 增量读取沿用保存的游标，不重新回填 30 天。
+  assert.equal(harness.calls.historyQueries.at(-1).startTime, since);
+});
+
+test("地址变化才触发历史同步，标题变化不会", async () => {
+  const harness = createHarness();
+
+  harness.listeners.tabUpdated(7, { title: "新标题" }, {});
+  await new Promise((resolve) => setTimeout(resolve, 1_600));
+  assert.equal(harness.calls.historyQueries.length, 0);
+  assert.equal(
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+    false,
+  );
+});
+
+test("还没有登录凭证时不读取浏览器历史", async () => {
+  const harness = createHarness({
+    storedAccessToken: null,
+    historyItems: [
+      {
+        url: "https://example.com/guide",
+        title: "指南",
+        lastVisitTime: Date.now(),
+        visitCount: 1,
+      },
+    ],
+  });
+
+  harness.listeners.tabUpdated(7, { url: "https://example.com/other" }, {});
+  await new Promise((resolve) => setTimeout(resolve, 1_600));
+
+  assert.equal(harness.calls.historyQueries.length, 0);
+  assert.equal(
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+    false,
+  );
+});
+
+test("登录后立即同步历史，退出登录清掉游标", async () => {
+  // 初始未登录，登录动作才算「凭证变化」，才会补一次 30 天基线。
+  const harness = createHarness({ historyItems: [], storedAccessToken: null });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { type: "set-access-token", accessToken: "test-access-token" },
+      { tab: { url: "http://localhost:5174/" } },
+      resolve,
+    );
+  });
+  // 分段回填会连续查询多个时间窗，等游标写入后再断言。
+  await waitFor(() => typeof harness.localStore.memoisle_history_sync_state?.since === "number");
+  assert.ok(harness.calls.historyQueries.length >= 1);
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { type: "set-access-token", accessToken: null },
+      { tab: { url: "http://localhost:5174/" } },
+      resolve,
+    );
+  });
+  assert.equal(harness.localStore.memoisle_history_sync_state, undefined);
+});
+
+test("浏览器清空历史时同步清空服务端记录", async () => {
+  const harness = createHarness();
+
+  harness.listeners.historyRemoved({ allHistory: true, urls: [] });
+  await waitFor(() =>
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+  );
+
+  const request = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-history/sync"),
+  );
+  const body = JSON.parse(request.options.body);
+  assert.equal(body.replace_all, true);
+  assert.deepEqual(body.visits, []);
+});
+
+test("只删除个别网址时不整库清空", async () => {
+  const harness = createHarness();
+
+  harness.listeners.historyRemoved({ allHistory: false, urls: ["https://example.com/"] });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+    false,
+  );
+});
+
 test("内部页、本地文件和内网地址不会提交空资料", async (context) => {
   const unsupportedUrls = [
     "chrome://extensions",
@@ -1437,7 +1725,22 @@ test("后端返回带连字符的 client_id 仍视为新建收藏", async () => 
           },
         };
       }
-      return { ok: true, status: 200, async json() { return {}; } };
+      if (requestUrl.endsWith("/browser-history/sync")) {
+      // 服务端会回显最终使用的设备 ID，扩展据此固定后续同步的归属。
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            synced_count: Array.isArray(body.visits) ? body.visits.length : 0,
+            total_count: 1,
+            device_id: body.device_id,
+            possible_same_device_id: null,
+          };
+        },
+      };
+    }
+    return { ok: true, status: 200, async json() { return {}; } };
     },
   });
 
@@ -1497,7 +1800,22 @@ test("网页已在资料库时提示定位原条目且不提供撤销", async ()
           },
         };
       }
-      return { ok: true, status: 200, async json() { return {}; } };
+      if (requestUrl.endsWith("/browser-history/sync")) {
+      // 服务端会回显最终使用的设备 ID，扩展据此固定后续同步的归属。
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            synced_count: Array.isArray(body.visits) ? body.visits.length : 0,
+            total_count: 1,
+            device_id: body.device_id,
+            possible_same_device_id: null,
+          };
+        },
+      };
+    }
+    return { ok: true, status: 200, async json() { return {}; } };
     },
   });
 
@@ -1861,4 +2179,395 @@ test("图片上传返回 401 时引导重新登录", async () => {
   );
   // 上传失败时不应弹出「已收藏」通知。
   assert.equal(harness.calls.notificationsCreated.length, 0);
+});
+
+test("回填按时间窗分段，超过单次上限的时段用二分补齐", async () => {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  // 3500 条记录均匀散布在最近 30 天内，单次查询上限只有 1000。
+  const everything = Array.from({ length: 3_500 }, (_, index) => ({
+    url: `https://archive.example/p${index}`,
+    title: `记录 ${index}`,
+    lastVisitTime: now - 1_000 - index * Math.floor((29 * dayMs) / 3_500),
+    visitCount: 1,
+  }));
+
+  const harness = createHarness({
+    historyItems: everything,
+    // 按窗口真正过滤并截断，模拟 chrome.history.search 的行为。
+    historySearch(query) {
+      const start = Number(query.startTime) || 0;
+      const end = Number(query.endTime) || Date.now();
+      return everything
+        .filter((item) => item.lastVisitTime >= start && item.lastVisitTime <= end)
+        .sort((left, right) => right.lastVisitTime - left.lastVisitTime)
+        .slice(0, Number(query.maxResults) || 100);
+    },
+  });
+
+  harness.listeners.installed();
+  // 等回填真正跑完：所有记录都提交过，而不是「游标一写就断言」。
+  // 游标在第一批提交后就写入了，只看它会在一半时提前返回。
+  const syncedCount = () =>
+    harness.calls.fetches
+      .filter((item) => item.url.endsWith("/browser-history/sync"))
+      .reduce(
+        (total, call) => total + JSON.parse(call.options.body).visits.length,
+        0,
+      );
+  await waitFor(() => syncedCount() >= 3_500, 30_000);
+
+  const syncCalls = harness.calls.fetches.filter((item) =>
+    item.url.endsWith("/browser-history/sync"),
+  );
+  let synced = 0;
+  for (const call of syncCalls) {
+    synced += JSON.parse(call.options.body).visits.length;
+  }
+
+  // 单次查询最多 1000 条，但分窗加二分应当把 3500 条全部取到。
+  assert.equal(synced, 3_500, "30 天内的记录应当被完整回填");
+  assert.ok(syncCalls.length >= 2, "回填应当分批提交");
+  assert.ok(harness.calls.historyQueries.length > 1, "回填应当多次分窗查询");
+  // 每批请求不超过服务端单次上限 500 条。
+  for (const call of syncCalls) {
+    assert.ok(JSON.parse(call.options.body).visits.length <= 500);
+  }
+});
+
+test("回填总量受上限约束，且优先保留最近访问", async () => {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  // 3 万条，远超 2 万条的回填预算。
+  const everything = Array.from({ length: 30_000 }, (_, index) => ({
+    url: `https://bulk.example/p${index}`,
+    title: `记录 ${index}`,
+    lastVisitTime: now - 1_000 - index * Math.floor((29 * dayMs) / 30_000),
+    visitCount: 1,
+  }));
+
+  const harness = createHarness({
+    historyItems: everything,
+    historySearch(query) {
+      const start = Number(query.startTime) || 0;
+      const end = Number(query.endTime) || Date.now();
+      return everything
+        .filter((item) => item.lastVisitTime >= start && item.lastVisitTime <= end)
+        .sort((left, right) => right.lastVisitTime - left.lastVisitTime)
+        .slice(0, Number(query.maxResults) || 100);
+    },
+  });
+
+  harness.listeners.installed();
+  await waitFor(
+    () => typeof harness.localStore.memoisle_history_sync_state?.since === "number",
+    60_000,
+  );
+
+  const syncedUrls = new Set();
+  for (const call of harness.calls.fetches) {
+    if (!call.url.endsWith("/browser-history/sync")) continue;
+    for (const visit of JSON.parse(call.options.body).visits) {
+      syncedUrls.add(visit.page_url);
+    }
+  }
+
+  assert.ok(syncedUrls.size <= 20_000, `不应超过回填预算，实际 ${syncedUrls.size}`);
+  // 最近的一条一定在里面，最老的一条应当被舍弃。
+  assert.equal(syncedUrls.has(everything[0].url), true);
+  assert.equal(syncedUrls.has(everything.at(-1).url), false);
+});
+
+test("上报历史时带机器指纹和安装标识", async () => {
+  const harness = createHarness({
+    historyItems: [
+      { url: "https://example.com/a", title: "A", lastVisitTime: Date.now(), visitCount: 1 },
+    ],
+  });
+  await harness.listeners.installed();
+  await waitFor(() =>
+    harness.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+  );
+
+  const request = harness.calls.fetches.find((item) =>
+    item.url.endsWith("/browser-history/sync"),
+  );
+  const body = JSON.parse(request.options.body);
+  // 指纹是 SHA-256 十六进制，重装扩展后仍然不变。
+  assert.match(body.hardware_key, /^[0-9a-f]{64}$/);
+  // 安装标识每次安装都会重新生成。
+  assert.match(body.install_id, /^[0-9a-f]{32}$/);
+  // 设备 ID 必须是随机主键，不能拿指纹当 ID：
+  // 两台同款电脑指纹相同，用指纹当 ID 会让它们一开始就撞成同一台。
+  assert.match(body.device_id, /^[0-9a-f]{32}$/);
+  assert.notEqual(body.device_id, body.hardware_key.slice(0, 32));
+});
+
+test("服务端派发新设备 ID 后会记住它", async () => {
+  const harness = createHarness({
+    historyItems: [
+      { url: "https://example.com/a", title: "A", lastVisitTime: Date.now(), visitCount: 1 },
+    ],
+    fetchImpl: async (url) => {
+      const target = String(url);
+      if (target.endsWith("/browser-history/sync")) {
+        return new Response(
+          JSON.stringify({
+            synced_count: 1,
+            total_count: 1,
+            device_id: "server-assigned-id",
+            possible_same_device_id: "mac-original",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("{}", { status: 200 });
+    },
+  });
+  await harness.listeners.installed();
+  await waitFor(
+    () => harness.localStore.memoisle_device_id === "server-assigned-id",
+    3000,
+  );
+});
+
+
+// 几年的历史，单轮回填补不完，需要多轮推进。
+function multiYearHistory(now) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Array.from({ length: 400 }, (_, index) => ({
+    url: `https://archive.example/y${index}`,
+    title: `旧记录 ${index}`,
+    // 每 5 天一条，覆盖约 5.5 年；单轮最多扫 30 个 7 天窗口（约 7 个月）。
+    lastVisitTime: now - 1_000 - index * 5 * dayMs,
+    visitCount: 1,
+  }));
+}
+
+function syncedVisitCount(harness) {
+  return harness.calls.fetches
+    .filter((item) => item.url.endsWith("/browser-history/sync"))
+    .reduce((total, call) => total + JSON.parse(call.options.body).visits.length, 0);
+}
+
+test("回填没补完时注册闹钟，不再依赖会被回收的 setTimeout", async () => {
+  const harness = createHarness({ historyItems: multiYearHistory(Date.now()) });
+  harness.listeners.installed();
+  await waitFor(
+    () => harness.localStore.memoisle_history_sync_state?.backfillCursor > 0,
+    "首轮回填应留下断点",
+    10_000,
+  );
+  await waitFor(() => harness.alarms.has("memoisle-history-backfill"));
+  assert.equal(harness.calls.alarmsCreated[0].periodInMinutes, 5);
+  // 闲置检测阈值已设置。
+  assert.equal(harness.calls.idleInterval, 300);
+});
+
+test("电脑闲置时连续推进回填直到补完，并撤掉闹钟", async () => {
+  const items = multiYearHistory(Date.now());
+  const harness = createHarness({ historyItems: items, idleState: "active" });
+  harness.listeners.installed();
+  await waitFor(
+    () => harness.localStore.memoisle_history_sync_state?.backfillCursor > 0,
+    "首轮回填应留下断点",
+    10_000,
+  );
+  const afterFirstRound = syncedVisitCount(harness);
+  assert.ok(afterFirstRound < items.length, "首轮不应一次补完");
+
+  // 用户离开电脑：一次闲置事件就应连续跑多轮直到补完。
+  harness.idle.state = "idle";
+  harness.listeners.idleChanged("idle");
+  await waitFor(
+    () => harness.localStore.memoisle_history_sync_state?.backfillCursor === undefined,
+    "闲置时应补完全部历史",
+    20_000,
+  );
+  assert.equal(syncedVisitCount(harness), items.length);
+  await waitFor(() => !harness.alarms.has("memoisle-history-backfill"));
+  assert.ok(harness.calls.alarmsCleared.includes("memoisle-history-backfill"));
+});
+
+test("用户在用电脑时，闹钟触发也不做大批量回填", async () => {
+  const harness = createHarness({
+    historyItems: multiYearHistory(Date.now()),
+    idleState: "active",
+  });
+  harness.listeners.installed();
+  await waitFor(
+    () => harness.localStore.memoisle_history_sync_state?.backfillCursor > 0,
+    "首轮回填应留下断点",
+    10_000,
+  );
+  const cursor = harness.localStore.memoisle_history_sync_state.backfillCursor;
+  const before = syncedVisitCount(harness);
+
+  harness.listeners.alarm({ name: "memoisle-history-backfill" });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  assert.equal(syncedVisitCount(harness), before);
+  assert.equal(harness.localStore.memoisle_history_sync_state.backfillCursor, cursor);
+});
+
+test("锁屏后闹钟触发会继续推进回填", async () => {
+  const harness = createHarness({ historyItems: multiYearHistory(Date.now()) });
+  harness.listeners.installed();
+  await waitFor(
+    () => harness.localStore.memoisle_history_sync_state?.backfillCursor > 0,
+    "首轮回填应留下断点",
+    10_000,
+  );
+  const cursor = harness.localStore.memoisle_history_sync_state.backfillCursor;
+
+  // 一直锁屏时没有新的状态变化事件，靠闹钟续跑。
+  harness.idle.state = "locked";
+  harness.listeners.alarm({ name: "memoisle-history-backfill" });
+  await waitFor(
+    () => {
+      const next = harness.localStore.memoisle_history_sync_state?.backfillCursor;
+      return next === undefined || next < cursor;
+    },
+    "锁屏时闹钟应推进断点",
+    20_000,
+  );
+});
+
+test("待发送的浏览记录会落盘，后台重启后接着发出", async () => {
+  const visitTime = Date.now() - 60_000;
+  const historyItems = [
+    { url: "https://example.com/pending", title: "待发送", lastVisitTime: visitTime, visitCount: 1 },
+  ];
+  // 第一个后台实例：服务端暂时不可用，记录留在队列里。
+  const first = createHarness({
+    historyItems,
+    storedHistoryState: { since: visitTime - 1_000 },
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/browser-history/sync")) {
+        return { ok: false, status: 503, async json() { return {}; } };
+      }
+      return { ok: true, status: 200, async json() { return {}; } };
+    },
+  });
+  first.listeners.tabUpdated(1, { url: "https://example.com/pending" }, {});
+  await waitFor(
+    () => (first.localStore.memoisle_pending_queues?.history ?? []).some(
+      (visit) => visit.page_url === "https://example.com/pending",
+    ),
+    "发送失败的记录应写进本地存储",
+    5_000,
+  );
+
+  // 后台被回收后重新唤醒：内存清空，只剩本地存储。
+  const second = createHarness({
+    historyItems: [],
+    storedAccessToken: null,
+    sharedLocalStore: first.localStore,
+  });
+  await waitFor(
+    () => second.calls.fetches.some((item) => item.url.endsWith("/browser-history/sync")),
+    "重启后应自动重发落盘的记录",
+    5_000,
+  );
+  const body = JSON.parse(
+    second.calls.fetches.find((item) => item.url.endsWith("/browser-history/sync")).options.body,
+  );
+  assert.deepEqual(body.visits.map((visit) => visit.page_url), ["https://example.com/pending"]);
+  await waitFor(
+    () => second.localStore.memoisle_pending_queues === undefined,
+    "发送成功后应清掉落盘队列",
+    5_000,
+  );
+});
+
+test("发送途中后台被回收，这一批也不会丢", async () => {
+  const visitTime = Date.now() - 60_000;
+  let releaseRequest;
+  const first = createHarness({
+    historyItems: [
+      { url: "https://example.com/in-flight", title: "在途", lastVisitTime: visitTime, visitCount: 1 },
+    ],
+    storedHistoryState: { since: visitTime - 1_000 },
+    // 请求一直不返回，模拟发送途中后台被回收。
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/browser-history/sync")) {
+        await new Promise((resolve) => { releaseRequest = resolve; });
+      }
+      return { ok: true, status: 200, async json() { return {}; } };
+    },
+  });
+  first.listeners.tabUpdated(1, { url: "https://example.com/in-flight" }, {});
+  await waitFor(() => typeof releaseRequest === "function", "请求应已发出", 5_000);
+  // 等落盘的去抖写入完成。
+  await new Promise((resolve) => setTimeout(resolve, 120));
+
+  const saved = first.localStore.memoisle_pending_queues?.history ?? [];
+  assert.deepEqual(saved.map((visit) => visit.page_url), ["https://example.com/in-flight"]);
+  releaseRequest();
+});
+
+test("书签改动发送失败后落盘，后台重启后重新提交", async () => {
+  const bookmarkTree = [
+    { id: "0", title: "", children: [{ id: "1", title: "书签栏", parentId: "0", children: [] }] },
+  ];
+  const first = createHarness({
+    bookmarkTree,
+    // 已有完整同步的版本号，书签改动才会走增量队列。
+    sharedLocalStore: {
+      memoisle_bookmark_sync_state: { revision: 3, totalCount: 0, itemIds: [] },
+    },
+    fetchImpl: async () => ({ ok: false, status: 503, async json() { return {}; } }),
+  });
+  first.listeners.bookmarkCreated("42", {
+    id: "42",
+    title: "新书签",
+    url: "https://example.com/new-bookmark",
+    parentId: "1",
+  });
+  await waitFor(
+    () => (first.localStore.memoisle_pending_queues?.bookmarks ?? []).length > 0,
+    "书签改动应写进本地存储",
+    5_000,
+  );
+  const savedSequence = first.localStore.memoisle_pending_queues.bookmarkSequence;
+  assert.ok(savedSequence >= 1);
+
+  const second = createHarness({
+    bookmarkTree,
+    storedAccessToken: null,
+    sharedLocalStore: first.localStore,
+  });
+  await waitFor(
+    () => second.calls.fetches.some((item) => item.url.endsWith("/browser-bookmarks/delta")),
+    "重启后应重新提交书签增量",
+    5_000,
+  );
+  const delta = JSON.parse(
+    second.calls.fetches.find((item) => item.url.endsWith("/browser-bookmarks/delta")).options.body,
+  );
+  assert.deepEqual(delta.changes.map((change) => change.client_item_id), ["chrome:42"]);
+  assert.equal(delta.changes[0].item.folder_path, "书签栏");
+});
+
+test("退出登录时同时清掉落盘的待发记录", async () => {
+  const harness = createHarness({
+    sharedLocalStore: {
+      memoisle_access_token: "test-access-token",
+      memoisle_pending_queues: {
+        history: [{ page_url: "https://example.com/old-account", page_title: "旧账号", visit_count: 1 }],
+        bookmarks: [],
+        bookmarkSequence: 0,
+      },
+    },
+    fetchImpl: async () => ({ ok: false, status: 503, async json() { return {}; } }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { type: "set-access-token", accessToken: null },
+      { url: "http://localhost:5173/", tab: { url: "http://localhost:5173/" } },
+      resolve,
+    );
+  });
+  assert.equal(harness.localStore.memoisle_pending_queues, undefined);
 });

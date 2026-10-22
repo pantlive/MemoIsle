@@ -538,6 +538,67 @@ export interface BrowserOpenTabListResponse {
   items: BrowserOpenTab[];
 }
 
+export interface BrowserHistoryEntry {
+  id: string;
+  page_url: string;
+  page_title: string;
+  favicon_url: string | null;
+  visit_count: number;
+  first_visited_at: string;
+  last_visited_at: string;
+  /** 该网址已在资料库中时给出对应条目 ID。 */
+  saved_memo_id: string | null;
+  /** 这条记录来自哪台设备。 */
+  device_id: string;
+  device_name: string;
+}
+
+/** 一台同步过浏览历史的设备。 */
+export interface BrowserHistoryDevice {
+  device_id: string;
+  device_name: string;
+  total_count: number;
+  synced_at: string;
+  /** 指纹相同、疑似同一台机器的另一台设备；由用户确认是否合并。 */
+  possible_same_device_id: string | null;
+}
+
+/** 同一天的浏览历史，前端按块渲染。 */
+export interface BrowserHistoryDayGroup {
+  /** 本地日期 YYYY-MM-DD。 */
+  date: string;
+  count: number;
+  items: BrowserHistoryEntry[];
+}
+
+export interface BrowserHistoryListResponse {
+  extension_connected: boolean;
+  synced_at: string | null;
+  total_count: number;
+  items: BrowserHistoryEntry[];
+  /** 按日期分块的同批条目。 */
+  days: BrowserHistoryDayGroup[];
+  /** 实际生效的搜索窗口；null 表示不限时间（全部历史）。 */
+  window_days: number | null;
+  /** 账号是否已在设置里打开「搜索更久的历史」。 */
+  extended_search_enabled: boolean;
+  /** 本页条数、本页起点、是否还有下一页、下一页起点。 */
+  page_size: number;
+  offset: number;
+  has_more: boolean;
+  next_offset: number | null;
+  /** 深翻页用的游标；有它就优先用它翻下一页。 */
+  next_cursor: string | null;
+  /** 同步过历史的所有设备，用于按设备筛选。 */
+  devices: BrowserHistoryDevice[];
+  /** 本次查询应用的设备筛选；null 表示已合并所有设备。 */
+  device_id: string | null;
+}
+
+export interface BrowserHistorySettings {
+  extended_search_enabled: boolean;
+}
+
 export interface LinkHealthCenter {
   items: Memo[];
   counts: Record<LinkHealthStatus, number> & { review_pending?: number };

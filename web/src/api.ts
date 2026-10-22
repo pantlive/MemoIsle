@@ -9,6 +9,9 @@ import type {
   BookmarkInput,
   BrowserBookmarkSnapshot,
   BrowserCaptureContext,
+  BrowserHistoryDevice,
+  BrowserHistoryListResponse,
+  BrowserHistorySettings,
   BrowserOpenTab,
   BrowserOpenTabListResponse,
   CloudAccount,
@@ -204,6 +207,12 @@ function readApiErrorDetail(
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (import.meta.env.DEV && /^\/api\//.test(path)) {
+    // API_BASE_URL 默认就是 /api/v1，调用方再写一遍会变成
+    // /api/v1/api/v1/...，而 tsc 与打包都不会报错，只有运行时 404。
+    // 开发期直接抛错，避免同类问题再次悄悄上线。
+    throw new Error(`路径不要自带 /api 前缀：${path}`);
+  }
   const accessToken = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -837,6 +846,105 @@ export async function listOpenBrowserTabs(): Promise<BrowserOpenTab[]> {
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+export async function listBrowserHistory(options?: {
+  query?: string;
+  days?: number;
+  limit?: number;
+  offset?: number;
+  /** 本地日期 YYYY-MM-DD，传了就按日期区间查，优先于 days。 */
+  dateFrom?: string;
+  dateTo?: string;
+  /** 上一页返回的 next_cursor；传了就按游标定位，忽略 offset。 */
+  cursor?: string;
+  /** 只看某台设备；不传则合并同一账号下所有设备。 */
+  deviceId?: string;
+}): Promise<BrowserHistoryListResponse> {
+  // 唤醒扩展放在打开面板时做一次，翻页和搜索不再重复握手上传。
+  const params = new URLSearchParams();
+  if (options?.query?.trim()) params.set("q", options.query.trim());
+  // days=0 表示不限时间，是有效值，不能用真值判断跳过。
+  if (options?.days !== undefined) params.set("days", String(options.days));
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.offset) params.set("offset", String(options.offset));
+  if (options?.dateFrom) params.set("from", options.dateFrom);
+  if (options?.dateTo) params.set("to", options.dateTo);
+  if (options?.cursor) params.set("cursor", options.cursor);
+  if (options?.deviceId) params.set("device_id", options.deviceId);
+  // 日期边界必须按用户所在时区换算，否则「今天」会错位。
+  params.set("tz_offset", String(new Date().getTimezoneOffset() * -1));
+  const suffix = params.toString() ? `?${params}` : "";
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 8_000);
+  try {
+    return await request<BrowserHistoryListResponse>(
+      `/browser-history${suffix}`,
+      { signal: controller.signal },
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("读取浏览历史超时，请确认扩展已连接后重试。");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+/** 给设备改名，便于区分两台同款电脑。 */
+export async function renameBrowserHistoryDevice(
+  deviceId: string,
+  deviceName: string,
+): Promise<BrowserHistoryDevice> {
+  return request<BrowserHistoryDevice>(
+    `/browser-history/devices/${encodeURIComponent(deviceId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ device_name: deviceName }),
+    },
+  );
+}
+
+/** 删除一台设备及其历史，其他设备不受影响。 */
+export async function deleteBrowserHistoryDevice(
+  deviceId: string,
+): Promise<void> {
+  await request<void>(
+    `/browser-history/devices/${encodeURIComponent(deviceId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** 把一台设备的历史并进另一台，用于确认「同一台机器重装」。 */
+export async function mergeBrowserHistoryDevice(
+  deviceId: string,
+  targetDeviceId: string,
+): Promise<void> {
+  await request<void>(
+    `/browser-history/devices/${encodeURIComponent(deviceId)}/merge`,
+    {
+      method: "POST",
+      body: JSON.stringify({ target_device_id: targetDeviceId }),
+    },
+  );
+}
+
+export async function clearBrowserHistory(): Promise<void> {
+  await request<void>("/browser-history", { method: "DELETE" });
+}
+
+export async function getBrowserHistorySettings(): Promise<BrowserHistorySettings> {
+  return request<BrowserHistorySettings>("/browser-history/settings");
+}
+
+export async function updateBrowserHistorySettings(payload: {
+  extended_search_enabled: boolean;
+}): Promise<BrowserHistorySettings> {
+  return request<BrowserHistorySettings>("/browser-history/settings", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function browserExtensionDownloadUrl(): string {

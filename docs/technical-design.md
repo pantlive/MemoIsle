@@ -141,7 +141,9 @@ Android Client ───┘                       │
 
 - 扩展使用 Manifest V3 的 `tabs` 权限，读取当前浏览器各窗口中已打开标签页的 URL、标题和可用图标，供 Web 的 `@网页` 菜单选择；`activeTab`/`scripting` 仅在用户触发当前页动作时用于读取选中文本。
 - 扩展在安装、浏览器启动以及标签页创建、URL/标题/图标更新、切换、关闭时提交完整打开网页快照；服务端将快照中缺失的标签页标记为关闭，超过 10 分钟未同步的过期快照不展示。
-- 扩展只同步 HTTP(S) 公网页面的基础信息，不读取浏览历史、Cookie、表单内容、未选中的页面正文或用户登录态；用户明确触发动作时最多读取 10000 字选中文本。`chrome://`、`file://`、扩展页和本地/内网目标在客户端与服务端双重过滤。
+- 扩展只同步 HTTP(S) 公网页面的基础信息，不读取 Cookie、表单内容、未选中的页面正文或用户登录态；用户明确触发动作时最多读取 10000 字选中文本。`chrome://`、`file://`、扩展页和本地/内网目标在客户端与服务端双重过滤。浏览历史需要 `history` 权限：首次同步备份**全部历史**（先二分定位最早记录，再按 7 天窗口从近到远扫描，命中单次 1000 条上限就对半二分；每轮最多推进 30 个窗口约 7 个月，断点存 `backfillCursor`。MV3 后台空闲约 30 秒会被回收，`setTimeout` 不能用来续跑：平时浏览时每次推进一轮，电脑闲置 5 分钟或锁屏时由 `chrome.idle` 触发连续推进，单次最多 4 分钟；保持闲置时由 `chrome.alarms` 每 5 分钟唤醒续跑，补完即撤销闹钟。浏览触发和闲置触发共用同一个互斥入口，不会并发扫描同一段历史），之后按 `chrome.history.search` 的 `startTime` 游标增量上报，游标与重叠窗口存在 `chrome.storage.local`；未登录不读取，退出登录清空游标；浏览器清空历史时以 `replace_all` 请求清空当前设备的记录（保留回填断点，避免重扫）。服务端按 `(user_id, device_id, url_key)` 去重写入 `browser_history_entry`：扩展首次安装生成 `device_id`（存 `chrome.storage.local`）随每次上报提交，同一账号的多台电脑各存各的。列表默认按网址合并所有设备（访问次数相加、时间取最近、设备取最近访问的那台），传 `device_id` 则只看单台设备；`replace_all` 只清当前设备的记录，不会误删其他电脑的数据。
+
+设备识别不依赖 MAC 地址（浏览器无此 API，且各系统默认随机化 MAC）。扩展用「系统 + 架构 + 时区 + 语言 + CPU 核心数」算 SHA-256 得到 `hardware_key`，这些属性重装扩展后不变；另有一个每次安装重新生成的 `install_id`。服务端据此区分三种情况：指纹与 `install_id` 都一致是同一台机器；指纹相同但 `install_id` 不同，要么是重装、要么是同款电脑，返回 `possible_same_device_id` 由用户确认；指纹不同则直接当作新设备。确认合并时 `POST /browser-history/devices/{id}/merge` 把来源设备的记录并入目标（重复网址累加次数、时间取并集），还提供 `PATCH`（改名）与 `DELETE`（删除单台设备）用于清理不再同步的旧设备。设备 ID 另写一份到 `memoisle_device` Cookie（HttpOnly、一年有效）：卸载扩展会清空 `chrome.storage.local`，但 Cookie 不会被删，重装后可据此认回原设备；仅在 Cookie 中设备的 `install_id` 与本次上报一致时启用，避免同浏览器的另一个扩展实例被误吞。MV3 的 service worker 没有 DOM，`localStorage`/`document`/`screen`/`matchMedia` 均不可用，因此网页端的字体、屏幕、媒体查询类指纹在扩展里无法采集。合并视图用 `NOT EXISTS` 让每个 `url_key` 恰好剩最新一行，配合 `(user_id, url_key, last_visited_at)` 索引，游标分页天然精确且代价与库大小无关。`visit_count` 取浏览器累计次数的较大值，因此重复上报不会虚增。
 - 用户触发扩展动作时，当前页仍保存为短时一次性记录并打开 Web 快速捕获；在 Web 输入 `@` 时可选择当前浏览器其他已打开网页，切换标签页不得改变已生成附件。
 - Web 与扩展的外部消息连接只允许生产和本地开发的 MemoIsle 来源；消息校验来源、扩展标识、随机 nonce、过期时间和一次性消费状态。
 - 页面上下文只接受 HTTP(S) URL，并再次通过服务端 URL 校验；拒绝 `chrome://`、`file://`、扩展页和本地/内网目标。
@@ -220,12 +222,39 @@ Android Client ───┘                       │
 | `GET /v1/browser-extension/download` | 下载可解压安装的浏览器扩展 ZIP |
 | `POST /v1/browser-tabs/sync` | 扩展同步当前浏览器打开网页快照 |
 | `GET /v1/browser-tabs/open` | Web 读取当前浏览器可选择的打开网页 |
+| `POST /v1/browser-history/sync` | 扩展上报浏览历史；按规范化网址摘要合并，`visit_count` 取较大值 |
+| `GET /v1/browser-history` | Web 读取浏览历史，支持 `q`、`offset`、`cursor`、`limit`（≤1000）、`days`、`from`/`to`（本地日期）与 `tz_offset`（分钟）；`days` 只在账号开启扩展搜索后生效（30/90/365/0=全部）；`from`/`to` 优先于 `days`；响应按日期分块（`days[].date/count/items`），并回传 `window_days` 与分页字段 `page_size`/`offset`/`has_more`/`next_offset`/`next_cursor` |
+| `GET /v1/browser-history/settings` | 读取账号是否允许搜索更久的历史 |
+| `PATCH /v1/browser-history/settings` | 打开/关闭「搜索更久的历史」，写入 `user.browser_history_extended_search` |
+| `DELETE /v1/browser-history` | 清空当前账号的浏览历史与同步状态；资料库条目保留 |
 | `POST /v1/browser-captures/exchange` | 使用一次性凭据交换扩展授权的当前页上下文 |
 | `GET /v1/resources/link-health` | 分页读取失效、重定向和待更新资料 |
 | `POST /v1/resources/{id}/link-checks` | 人工触发一次受限健康检查 |
 | `POST /v1/resources/{id}/link-health-actions` | 忽略、恢复、采用新网址或确认元数据更新 |
 
 创建接口使用 `client_id` 保证离线重试幂等；更新接口提交 `version`，冲突时返回服务端当前版本和可恢复的客户端内容。
+
+浏览历史按 `offset` 分页，每页最多 1000 条（`MAX_HISTORY_PAGE_SIZE`），翻页没有总量上限；响应回传 `page_size`、`offset`、`has_more` 和 `next_offset`，前端用服务端的 `next_offset` 继续翻，不会被本地去重影响。
+
+历史列表的性能约束：
+
+- 索引 `(user_id, last_visited_at, id)` 覆盖排序键，翻页整段走索引，不需要临时 B 树；旧库启动时由 `_upgrade_browser_history_indexes` 自动换成三列版本。
+- 查询用 `LIMIT page_size + 1` 探测是否还有下一页，末页直接用 `offset + len(items)` 得到总数，避免无谓的 `count(*)`；只有确实还有下一页时才精确计数。
+- 分页只取列表需要的 7 列，不实例化整实体。
+- 同步时 `total_count` 按「本次新增网址数」累加，只在首轮或 `replace_all` 后校准一次，不再每次同步都全表 count。
+- 清空历史和 `replace_all` 都走批量 `DELETE`，几万条记录比逐条 ORM 删除快一个数量级。
+
+深翻页用游标而非 OFFSET：
+
+- OFFSET 分页要先跳过前面所有行，5 万条时约 14 ms，50 万条时约 23 ms，成本随深度线性增长。
+- 响应在还有下一页时回传 `next_cursor`，是 `(last_visited_at, id)` 排序键的 base64 编码；下次请求改传 `cursor` 即可。
+- 服务端用**行值比较** `(last_visited_at, id) < (?, ?)` 定位，索引范围直接命中，实测 50 万条下恒定 0.11 ms，与深度无关。拆成 `A < a OR (A = a AND id < b)` 会退化成整段扫描，慢 40 倍。
+- 传了 `cursor` 就忽略 `offset`，且不再返回 `next_offset`，避免前端混用两种模式导致跳行；坏游标静默退回 offset 分页。
+- 前端优先使用 `next_cursor`，没有时才退回 `next_offset`。
+
+日期分块按浏览器时区（`tz_offset`，范围 ±840 分钟）换算本地日期，`from`/`to` 的边界同样按该偏移换算成 UTC 半开区间 `[start, end)`。
+
+网页资料除原始 `source_url` 外还保存 `canonical_url`（规范化网址），并建有 `(user_id, canonical_url)` 索引：查重、书签导入预览和历史面板的「已收藏」标记都走这个索引，不再把整个资料库读进内存逐条比较。`canonical_url` 在创建时写入、来源网址变化时重算、转换为非网页资料时清空；旧库升级时按现有 `source_url` 回填一次。
 
 ## 6. 同步策略
 

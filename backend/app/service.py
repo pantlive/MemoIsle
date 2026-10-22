@@ -67,6 +67,17 @@ class MemoVersionConflictError(RuntimeError):
         self.current = current
 
 
+def _canonical_url_or_none(value: str | None) -> str | None:
+    """规范化来源网址；历史异常链接返回 ``None`` 而不是抛错。"""
+
+    if not value:
+        return None
+    try:
+        return canonicalize_resource_url(value)
+    except ValueError:
+        return None
+
+
 class MemoTypeError(ValueError):
     """请求的操作与条目类型不匹配。"""
 
@@ -323,33 +334,24 @@ def create_memo(
     if existing is not None:
         return existing
 
+    canonical_url: str | None = None
     if payload.type == MemoType.RESOURCE and payload.source_url is not None:
         # 相同规范网址只保留一份资料，避免扩展和手动收藏产生重复项。
         try:
-            normalized_url = canonicalize_resource_url(payload.source_url)
+            canonical_url = canonicalize_resource_url(payload.source_url)
         except ValueError:
-            normalized_url = None
-        if normalized_url is not None:
-            resources = session.scalars(
+            canonical_url = None
+        if canonical_url is not None:
+            # 规范化结果已存在 canonical_url 列上，查重不再读全表逐条比较。
+            match = session.scalar(
                 select(Memo).where(
                     Memo.user_id == user_id,
-                    Memo.type == MemoType.RESOURCE,
+                    Memo.canonical_url == canonical_url,
                     Memo.status != MemoStatus.TRASHED,
-                    Memo.source_url.is_not(None),
-                )
-            ).all()
-            for resource in resources:
-                try:
-                    if (
-                        canonicalize_resource_url(resource.source_url or "")
-                        == normalized_url
-                    ):
-                        if not payload.allow_duplicate:
-                            raise ResourceDuplicateError(resource)
-                        break
-                except ValueError:
-                    # 历史异常网址不影响当前收藏。
-                    continue
+                ),
+            )
+            if match is not None and not payload.allow_duplicate:
+                raise ResourceDuplicateError(match)
 
     if payload.type == MemoType.WORD:
         lemma = normalize_word_lemma(payload.title or "")
@@ -379,6 +381,9 @@ def create_memo(
         ),
         body=payload.body,
         source_url=payload.source_url,
+        canonical_url=(
+            canonical_url if payload.type == MemoType.RESOURCE else None
+        ),
         source_title=payload.source_title,
         resource_metadata_status=(
             ResourceProcessStatus.PENDING
@@ -844,6 +849,9 @@ def update_memo(
     _apply_trash_status_side_effects(memo, previous_status)
     if "body" in changes and "title" not in changes:
         memo.title = build_title(None, memo.body)
+    if memo.type != MemoType.RESOURCE:
+        # 转成非网页资料后不再参与网址去重。
+        memo.canonical_url = None
     if memo.type == MemoType.WORD and "title" in changes:
         memo.normalized_lemma = normalize_word_lemma(memo.title)
     if type_changed and memo.type == MemoType.WORD:
@@ -877,6 +885,8 @@ def update_memo(
     if memo.type == MemoType.RESOURCE and (
         memo.source_url != previous_source_url or type_changed
     ):
+        # 网址变了就重算规范化结果，查重和历史「已收藏」标记才能跟上。
+        memo.canonical_url = _canonical_url_or_none(memo.source_url)
         # 修改网址后重新执行元数据、分类与健康检查。
         memo.resource_ai_classified_at = None
         memo.resource_text_excerpt = None

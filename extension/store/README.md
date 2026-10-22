@@ -10,7 +10,7 @@
    - Edge：在 [Microsoft 合作伙伴中心](https://partner.microsoft.com/dashboard/microsoftedge/overview) 注册，免费。
 3. **发布隐私政策**：把 [privacy-policy.md](privacy-policy.md) 改成你的联系方式后放到一个公开网址（例如正式站点的 `/privacy`），商店表单里要填这个网址。
 4. **截图**：至少 1 张 1280×800 或 640×400 的截图，建议拍「一键收藏后的通知」「Web 里直接导入书签」「`@` 选择打开的网页」三张。
-5. **提交审核**：申请了 `<all_urls>` 和 `tabs`、`bookmarks`，审核通常会更久，需要在表单里逐项说明用途，见 [permissions.md](permissions.md)。
+5. **提交审核**：申请了 `<all_urls>` 和 `tabs`、`bookmarks`、`history`、`idle`、`alarms`，审核通常会更久，需要在表单里逐项说明用途，见 [permissions.md](permissions.md)。
 
 ## 生成上传用的 ZIP
 
@@ -30,7 +30,7 @@ npm run package:store -- --web https://memo.example.com --api https://api.exampl
 | 字段 | 内容 |
 | --- | --- |
 | 名称 | MemoIsle 网页收藏 |
-| 简短说明（≤132 字符） | 一键把当前网页、选中文本和网页图片收藏到 MemoIsle，并直接导入浏览器书签。 |
+| 简短说明（≤132 字符） | 一键把当前网页、选中文本和网页图片收藏到 MemoIsle，导入书签，并在浏览历史里快速收藏。 |
 | 类别 | 工作效率（Productivity） |
 | 语言 | 中文（简体） |
 
@@ -42,5 +42,6 @@ npm run package:store -- --web https://memo.example.com --api https://api.exampl
 > - 在网页图片上右键，选择「收藏图片到 MemoIsle」。
 > - 在 MemoIsle 里直接读取浏览器书签并批量导入，保留原来的文件夹，不用先导出 HTML。
 > - 在 MemoIsle 里输入 @，从当前打开的网页中选一个收藏。
+> - 在 MemoIsle 的「浏览历史」里搜索最近访问过的网页，一键收进资料库。
 >
-> 扩展只和你配置的 MemoIsle 服务器通信，不收集浏览历史、Cookie 或表单内容，也不向第三方发送任何数据。
+> 扩展只和你配置的 MemoIsle 服务器通信，不收集 Cookie 或表单内容，也不向第三方发送任何数据。浏览历史仅在你登录 MemoIsle 时同步，用于搜索并一键收藏。

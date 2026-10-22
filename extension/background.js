@@ -7,6 +7,43 @@ const MAX_SELECTED_TEXT_LENGTH = 10000;
 const ACCESS_TOKEN_STORAGE_KEY = "memoisle_access_token";
 const WEB_CONTEXT_STORAGE_KEY = "memoisle_web_context";
 const BOOKMARK_SYNC_STATE_STORAGE_KEY = "memoisle_bookmark_sync_state";
+const HISTORY_SYNC_STATE_STORAGE_KEY = "memoisle_history_sync_state";
+const DEVICE_ID_STORAGE_KEY = "memoisle_device_id";
+// 回填从最早的历史开始，一直补到当前；用断点游标分批推进，
+// 关掉浏览器后下次从断点继续，不会每次从头扫。
+const HISTORY_BACKFILL_BATCH_MS = 7 * 24 * 60 * 60 * 1000;
+// 单轮回填最多推进这么多条，剩下的交给下一轮，避免卡住后台。
+const HISTORY_BACKFILL_MAX_TOTAL = 20_000;
+// 单轮最多扫这么多个时间窗（每个 7 天）。30 个窗口约覆盖 7 个月，
+// 更早的历史分多轮推进，每轮工作量有限，不会让后台任务长时间占着不放。
+const HISTORY_BACKFILL_MAX_WINDOWS = 30;
+// 回填没补完时注册的闹钟。不能用 setTimeout 续跑：MV3 后台空闲约 30 秒
+// 就会被回收，计时器随之消失；chrome.alarms 能把已休眠的后台重新唤醒。
+const HISTORY_BACKFILL_ALARM = "memoisle-history-backfill";
+const HISTORY_BACKFILL_ALARM_MINUTES = 5;
+// 键盘鼠标这么久没动就算闲置；锁屏立刻算。闲置时才做大批量回填。
+const HISTORY_IDLE_DETECTION_SECONDS = 5 * 60;
+// 单次唤醒最多连续跑这么久，留出余量，避开后台单次事件约 5 分钟的上限。
+const HISTORY_IDLE_RUN_BUDGET_MS = 4 * 60 * 1000;
+// 增量同步时最多读取多少条历史（只覆盖上次同步之后的时间段）。
+const HISTORY_INCREMENTAL_MAX_TOTAL = 5_000;
+// chrome.history.search 一次最多返回这么多条。回填时按时间窗分段拉取，
+// 每窗取 1000 条，直到把整个区间走完，不会因为单次上限漏掉记录。
+const HISTORY_QUERY_PAGE_SIZE = 1000;
+// 单个时间窗的跨度。命中上限就二分窗口继续拆，避免一条一条往前挪。
+const HISTORY_BACKFILL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// 窗口拆到这个粒度（1 小时）还超上限，说明该时段访问极多：
+// 只保留最近的 1000 条并继续往前，避免无限细分卡死。
+const HISTORY_BACKFILL_MIN_WINDOW_MS = 60 * 60 * 1000;
+// 单次请求条数与清单里的上限保持一致（服务端最多 500 条）。
+const HISTORY_BATCH_SIZE = 200;
+const HISTORY_SYNC_DEBOUNCE_MS = 1_500;
+const HISTORY_SYNC_FETCH_TIMEOUT_MS = 8_000;
+const HISTORY_MAX_URL_LENGTH = 2048;
+const HISTORY_MAX_TITLE_LENGTH = 300;
+// 两次同步之间留一分钟重叠，避免浏览器写入历史与扩展读取之间存在时差。
+const HISTORY_SYNC_OVERLAP_MS = 60_000;
+const HISTORY_RETRY_DELAY_MS = 60_000;
 const CAPTURE_NOTIFICATION_ID = "memoisle-capture-result";
 const PAGE_MENU_ID = "memoisle-capture-page";
 const IMAGE_MENU_ID = "memoisle-capture-image";
@@ -47,12 +84,98 @@ let bookmarkSyncTimer = null;
 let bookmarkFullSyncTimer = null;
 let bookmarkRetryTimer = null;
 let tabSyncTimer = null;
+let historySyncTimer = null;
+let historySyncChain = Promise.resolve();
+// 待上报的访问，按网址去重；同一网址只保留最近一次访问。
+const pendingHistoryVisits = new Map();
+const HISTORY_PENDING_LIMIT = 2_000;
 const TAB_SYNC_DEBOUNCE_MS = 400;
 const TAB_SYNC_FETCH_TIMEOUT_MS = 2_500;
 const CAPTURE_FETCH_TIMEOUT_MS = 12_000;
 let bookmarkSyncChain = Promise.resolve();
 let bookmarkChangeSequence = 0;
 const pendingBookmarkChanges = new Map();
+
+// 两个待发送队列落盘保存。MV3 后台空闲约 30 秒就会被回收，只放内存里的话，
+// 还没发出去的书签改动和浏览记录会随之丢失。
+const PENDING_QUEUE_STORAGE_KEY = "memoisle_pending_queues";
+// 已从内存队列取出、正在发送的批次。落盘时一并写入：
+// 发送途中后台被回收，这批也能在下次恢复后重发（服务端按网址/ID 去重，重发安全）。
+const inFlightHistoryVisits = new Map();
+const inFlightBookmarkChanges = new Map();
+let pendingQueuePersistTimer = null;
+// 恢复完成前不能落盘，否则会用空队列覆盖掉上次保存的内容。
+let pendingQueuesRestored = false;
+const pendingQueuesReady = restorePendingQueues();
+
+function persistPendingQueues() {
+  if (!pendingQueuesRestored) {
+    return;
+  }
+  if (pendingQueuePersistTimer !== null) {
+    return;
+  }
+  // 同一轮事件里的多次改动合并成一次写入。
+  pendingQueuePersistTimer = setTimeout(() => {
+    pendingQueuePersistTimer = null;
+    void writePendingQueues();
+  }, 50);
+}
+
+async function writePendingQueues() {
+  // 内存里的新改动优先：同一网址/书签在两边都有时，用待发队列里那份。
+  const history = new Map(inFlightHistoryVisits);
+  for (const [key, visit] of pendingHistoryVisits) {
+    history.set(key, visit);
+  }
+  const bookmarks = new Map(inFlightBookmarkChanges);
+  for (const [key, change] of pendingBookmarkChanges) {
+    bookmarks.set(key, change);
+  }
+  if (history.size === 0 && bookmarks.size === 0) {
+    await chrome.storage.local.remove(PENDING_QUEUE_STORAGE_KEY);
+    return;
+  }
+  await chrome.storage.local.set({
+    [PENDING_QUEUE_STORAGE_KEY]: {
+      history: [...history.values()].slice(0, HISTORY_PENDING_LIMIT),
+      bookmarks: [...bookmarks.values()],
+      bookmarkSequence: bookmarkChangeSequence,
+    },
+  });
+}
+
+async function restorePendingQueues() {
+  try {
+    const stored = await chrome.storage.local.get(PENDING_QUEUE_STORAGE_KEY);
+    const saved = stored?.[PENDING_QUEUE_STORAGE_KEY];
+    if (saved && typeof saved === "object") {
+      for (const visit of Array.isArray(saved.history) ? saved.history : []) {
+        // 恢复期间已经有新访问进来时，以内存里更新的为准。
+        if (visit?.page_url && !pendingHistoryVisits.has(visit.page_url)) {
+          pendingHistoryVisits.set(visit.page_url, visit);
+        }
+      }
+      const savedSequence = Number(saved.bookmarkSequence) || 0;
+      // 序号只能前进：恢复出来的旧改动不能比新改动的序号更大。
+      bookmarkChangeSequence = Math.max(bookmarkChangeSequence, savedSequence);
+      for (const change of Array.isArray(saved.bookmarks) ? saved.bookmarks : []) {
+        if (change?.client_item_id && !pendingBookmarkChanges.has(change.client_item_id)) {
+          pendingBookmarkChanges.set(change.client_item_id, change);
+        }
+      }
+    }
+  } catch {
+    // 存储读不出来时按空队列继续，最坏情况等同于改动前的行为。
+  } finally {
+    pendingQueuesRestored = true;
+  }
+  if (pendingHistoryVisits.size > 0 || pendingBookmarkChanges.size > 0) {
+    // 恢复期间可能已有新改动，需要把合并结果写回去。
+    persistPendingQueues();
+  }
+  return pendingHistoryVisits.size + pendingBookmarkChanges.size;
+}
 // 最近一次由扩展直接收藏的条目，用于通知里的撤销动作。
 let lastCapturedMemo = null;
 
@@ -786,6 +909,7 @@ async function performFullBookmarkSync(config = null) {
       pendingBookmarkChanges.delete(clientItemId);
     }
   }
+  persistPendingQueues();
 }
 
 async function syncBookmarks(config = null) {
@@ -834,6 +958,7 @@ function queueBookmarkChange(change) {
     generation: bookmarkChangeSequence,
     countDelta: (previous?.countDelta || 0) + (change.countDelta || 0),
   });
+  persistPendingQueues();
   if (bookmarkFullSyncTimer !== null) {
     clearTimeout(bookmarkFullSyncTimer);
     bookmarkFullSyncTimer = null;
@@ -856,6 +981,7 @@ async function flushBookmarkChanges() {
     return;
   }
   for (const change of batch) {
+    inFlightBookmarkChanges.set(change.client_item_id, change);
     if (pendingBookmarkChanges.get(change.client_item_id)?.generation === change.generation) {
       pendingBookmarkChanges.delete(change.client_item_id);
     }
@@ -910,6 +1036,7 @@ async function flushBookmarkChanges() {
       totalCount: Number.isInteger(result.total_count) ? result.total_count : totalCount,
       itemIds: [...itemIds],
     });
+    // 服务端确认收到后才把这批从落盘队列里去掉。
   } catch (error) {
     // 网络故障时恢复未被更新事件覆盖的变更，稍后用完整快照重新校准。
     for (const change of batch) {
@@ -919,6 +1046,14 @@ async function flushBookmarkChanges() {
       }
     }
     throw error;
+  } finally {
+    // 成功、失败（已放回待发队列）或改走完整同步，这批都不再算在途。
+    for (const change of batch) {
+      if (inFlightBookmarkChanges.get(change.client_item_id) === change) {
+        inFlightBookmarkChanges.delete(change.client_item_id);
+      }
+    }
+    persistPendingQueues();
   }
 }
 
@@ -1043,6 +1178,574 @@ async function syncOpenTabs(config = null) {
   } catch {
     // 浏览器标签页同步失败不阻止当前页的一次性收藏流程。
   }
+}
+
+function queryHistory(options) {
+  return new Promise((resolve) => {
+    if (typeof chrome.history?.search !== "function") {
+      // 用户未授予 history 权限时静默跳过，不影响收藏和书签同步。
+      resolve([]);
+      return;
+    }
+    chrome.history.search(options, (results) => {
+      if (chrome.runtime.lastError) {
+        resolve([]);
+        return;
+      }
+      resolve(Array.isArray(results) ? results : []);
+    });
+  });
+}
+
+function normalizeHistoryVisit(item) {
+  const pageUrl = String(item?.url || "").trim();
+  if (!pageUrl || pageUrl.length > HISTORY_MAX_URL_LENGTH) {
+    return null;
+  }
+  if (!isSupportedPage(pageUrl)) {
+    return null;
+  }
+  const visitedAt = Number(item?.lastVisitTime);
+  const visitCount = Number(item?.visitCount);
+  return {
+    page_url: pageUrl,
+    page_title: String(item?.title || "").trim().slice(0, HISTORY_MAX_TITLE_LENGTH),
+    favicon_url: null,
+    visited_at: Number.isFinite(visitedAt) && visitedAt > 0
+      ? new Date(visitedAt).toISOString()
+      : null,
+    // 浏览器给出该网址的累计访问次数，服务端取较大值，重复上报不会虚增。
+    visit_count:
+      Number.isInteger(visitCount) && visitCount > 0 ? visitCount : 1,
+  };
+}
+
+function readDeviceName() {
+  // 用平台信息给设备一个可读名字，方便在 Web 端区分来源。
+  // 注意：扩展的 service worker 与测试环境都不保证有 navigator，必须判类型。
+  const platform = String(
+    (typeof navigator !== "undefined" &&
+      (navigator.userAgentData?.platform || navigator.platform)) ||
+      "",
+  );
+  const normalized = platform.toLowerCase();
+  if (normalized.includes("mac")) {
+    return "Mac";
+  }
+  if (normalized.includes("win")) {
+    return "Windows";
+  }
+  if (normalized.includes("linux")) {
+    return "Linux";
+  }
+  if (normalized.includes("android")) {
+    return "Android";
+  }
+  if (normalized.includes("ios") || normalized.includes("iphone")) {
+    return "iOS";
+  }
+  return platform ? platform.slice(0, 40) : "浏览器";
+}
+
+const DEVICE_INSTALL_ID_STORAGE_KEY = "memoisle_device_install_id";
+
+// 用 SHA-256 生成稳定标识。
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// 机器指纹：由「重装扩展后仍然不变」的属性算出。
+//
+// 注意这**不是**唯一标识：两台同型号、同系统、同时区、同语言的电脑会算出
+// 完全相同的值。它只用来回答「这次安装像不像之前那台机器」，
+// 最终是合并还是并列由用户在界面上确认。
+// 浏览器拿不到 MAC 地址（没有 API，且系统会随机化 MAC），不要试图找替代。
+async function readHardwareKey() {
+  // 只收集「service worker 里真的读得到」的信号。
+  // 网页端常见的屏幕尺寸、字体列表、matchMedia 在 MV3 的 worker 里都是
+  // undefined（没有 DOM），不要写进去，否则只会得到常量。
+  const parts = [];
+  try {
+    const info = await chrome.runtime.getPlatformInfo();
+    parts.push(info.os, info.arch, info.nacl_arch ?? "");
+  } catch {
+    parts.push("unknown");
+  }
+  // 区域格式：时区、日历、数字系统、周起始日。
+  // 这些反映系统区域设置，出厂相同的机器也可能因为用户改过设置而不同。
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions();
+    parts.push(
+      String(resolved.timeZone ?? ""),
+      String(resolved.calendar ?? ""),
+      String(resolved.numberingSystem ?? ""),
+    );
+  } catch {
+    parts.push("", "", "");
+  }
+  try {
+    // 周起始日能反映地区习惯（周日起 / 周一起）。
+    const locale = new Intl.Locale(
+      Intl.DateTimeFormat().resolvedOptions().locale,
+    );
+    parts.push(String(locale.weekInfo?.firstDay ?? ""));
+  } catch {
+    parts.push("");
+  }
+  // 语言列表的顺序也是信号：用户自己调整过优先级就会不同。
+  try {
+    parts.push((navigator?.languages ?? []).join(","));
+  } catch {
+    parts.push("");
+  }
+  try {
+    parts.push(String(navigator?.hardwareConcurrency ?? ""));
+  } catch {
+    parts.push("");
+  }
+  try {
+    parts.push(String(navigator?.deviceMemory ?? ""));
+  } catch {
+    parts.push("");
+  }
+  return sha256Hex(parts.join("|"));
+}
+
+async function readInstallId() {
+  const stored = await chrome.storage.local.get(DEVICE_INSTALL_ID_STORAGE_KEY);
+  const existing = stored?.[DEVICE_INSTALL_ID_STORAGE_KEY];
+  if (typeof existing === "string" && existing.trim()) {
+    return existing.trim();
+  }
+  // 每次安装（含重装）都会生成新的，用来区分「重装」和「另一台电脑」。
+  const generated = String(crypto.randomUUID()).replaceAll("-", "");
+  await chrome.storage.local.set({
+    [DEVICE_INSTALL_ID_STORAGE_KEY]: generated,
+  });
+  return generated;
+}
+
+async function readDeviceId() {
+  const stored = await chrome.storage.local.get(DEVICE_ID_STORAGE_KEY);
+  const existing = stored?.[DEVICE_ID_STORAGE_KEY];
+  if (typeof existing === "string" && existing.trim()) {
+    return existing.trim();
+  }
+  // 设备 ID 必须是随机的，不能拿指纹当主键：
+  // 两台同款电脑指纹相同，用指纹当 ID 会让它们一开始就撞成同一台。
+  // 指纹只在「ID 丢了」的时候作为找回线索。
+  const generated = String(crypto.randomUUID()).replaceAll("-", "");
+  await chrome.storage.local.set({ [DEVICE_ID_STORAGE_KEY]: generated });
+  return generated;
+}
+
+async function rememberDeviceId(deviceId) {
+  // 服务端分配了不同的设备 ID（指纹撞车）时，跟着它走，
+  // 否则每次同步都会被判定成「新设备」。
+  if (typeof deviceId !== "string" || !deviceId.trim()) {
+    return;
+  }
+  const current = await chrome.storage.local.get(DEVICE_ID_STORAGE_KEY);
+  if (current?.[DEVICE_ID_STORAGE_KEY] === deviceId) {
+    return;
+  }
+  await chrome.storage.local.set({ [DEVICE_ID_STORAGE_KEY]: deviceId });
+}
+
+async function readHistorySyncState() {
+  const stored = await chrome.storage.local.get(HISTORY_SYNC_STATE_STORAGE_KEY);
+  const state = stored?.[HISTORY_SYNC_STATE_STORAGE_KEY];
+  if (!state || typeof state !== "object") {
+    return null;
+  }
+  const since = Number(state.since);
+  // backfillCursor 是「还没补到的更早时间点」；为空表示最早的历史也补完了。
+  const backfillCursor = Number(state.backfillCursor);
+  return {
+    since: Number.isFinite(since) && since >= 0 ? since : null,
+    backfillCursor:
+      Number.isFinite(backfillCursor) && backfillCursor > 0
+        ? backfillCursor
+        : null,
+  };
+}
+
+async function saveHistorySyncState({ since, backfillCursor }) {
+  await chrome.storage.local.set({
+    [HISTORY_SYNC_STATE_STORAGE_KEY]: {
+      ...(Number.isFinite(since) ? { since } : {}),
+      ...(Number.isFinite(backfillCursor) && backfillCursor > 0
+        ? { backfillCursor }
+        : {}),
+    },
+  });
+}
+
+async function clearHistorySyncState() {
+  await chrome.storage.local.remove(HISTORY_SYNC_STATE_STORAGE_KEY);
+}
+
+function enqueueHistorySync(operation) {
+  historySyncChain = historySyncChain.then(operation, operation);
+  return historySyncChain;
+}
+
+async function postHistoryVisits(config, visits, replaceAll = false) {
+  // 带上设备标识：同一账号的多台电脑各存各的，互不覆盖。
+  const [deviceId, hardwareKey, installId, headers] = await Promise.all([
+    readDeviceId(),
+    readHardwareKey().catch(() => ""),
+    readInstallId().catch(() => ""),
+    requestHeaders(),
+  ]);
+  const response = await fetchWithTimeout(
+    `${config.apiBaseUrl}/browser-history/sync`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        extension_id: chrome.runtime.id,
+        device_id: deviceId,
+        device_name: readDeviceName(),
+        hardware_key: hardwareKey,
+        install_id: installId,
+        visits,
+        replace_all: replaceAll,
+      }),
+    },
+    HISTORY_SYNC_FETCH_TIMEOUT_MS,
+  );
+  if (!response.ok) {
+    throw new Error(`浏览历史同步失败（${response.status}）`);
+  }
+  // 服务端可能因为指纹撞车派了新的设备 ID，记住它，
+  // 否则下一次同步又会被当成新设备。
+  // 注意不能依赖 response.clone()：测试替身与部分环境只实现了 json()。
+  try {
+    const body = await response.json();
+    await rememberDeviceId(body?.device_id);
+  } catch {
+    // 响应体解析失败不影响同步本身。
+  }
+  return response;
+}
+
+async function flushHistoryVisits(config) {
+  if (pendingHistoryVisits.size === 0) {
+    return;
+  }
+  const batch = [...pendingHistoryVisits.values()].slice(0, HISTORY_BATCH_SIZE);
+  for (const visit of batch) {
+    inFlightHistoryVisits.set(visit.page_url, visit);
+    pendingHistoryVisits.delete(visit.page_url);
+  }
+  try {
+    await postHistoryVisits(config, batch);
+    // 服务端确认收到后才从落盘队列去掉；中途被回收时这批还在盘上，下次重发。
+    for (const visit of batch) {
+      if (inFlightHistoryVisits.get(visit.page_url) === visit) {
+        inFlightHistoryVisits.delete(visit.page_url);
+      }
+    }
+    persistPendingQueues();
+    // 以本批最新访问时间作为游标，下次只读这之后的历史。
+    const latest = batch.reduce((max, visit) => {
+      const visitedAt = new Date(visit.visited_at || 0).getTime();
+      return Number.isFinite(visitedAt) && visitedAt > max ? visitedAt : max;
+    }, 0);
+    if (latest > 0) {
+      const state = await readHistorySyncState();
+      if (!state?.since || latest > state.since) {
+        // 只推进增量游标，回填断点由 backfillHistory 负责。
+        await saveHistorySyncState({
+          since: latest - HISTORY_SYNC_OVERLAP_MS,
+          backfillCursor: state?.backfillCursor,
+        });
+      }
+    }
+    if (pendingHistoryVisits.size > 0) {
+      // 单次最多 500 条，剩余的分批继续发送。
+      await flushHistoryVisits(config);
+    }
+  } catch (error) {
+    // 失败时把本批放回队列，等下一次触发再试。
+    for (const visit of batch) {
+      inFlightHistoryVisits.delete(visit.page_url);
+      if (!pendingHistoryVisits.has(visit.page_url)) {
+        pendingHistoryVisits.set(visit.page_url, visit);
+      }
+    }
+    persistPendingQueues();
+    throw error;
+  }
+}
+
+async function syncHistory(config = null) {
+  const resolvedConfig = config || await readConfig();
+  const headers = await requestHeaders();
+  if (!headers.Authorization) {
+    // 还没登录时不读浏览器历史，避免把本地记录留在内存里。
+    return;
+  }
+  const state = await readHistorySyncState();
+  if (state === null) {
+    await runBackfillExclusive(resolvedConfig);
+    return;
+  }
+  // 还没补完更早的历史时，每轮先继续往前推进一段，再处理最近的新访问。
+  if (state.backfillCursor) {
+    await runBackfillExclusive(resolvedConfig);
+  }
+  const since = state.since ?? Date.now() - HISTORY_SYNC_OVERLAP_MS;
+  // chrome.history.search 按访问时间倒序返回，超出上限时保留最近的。
+  // 截断必须发生在入队之前，否则等于没限制。
+  const visits = (await readRecentHistory(since)).slice(
+    0,
+    HISTORY_INCREMENTAL_MAX_TOTAL,
+  );
+  for (const visit of visits) {
+    pendingHistoryVisits.set(visit.page_url, visit);
+  }
+  if (pendingHistoryVisits.size > HISTORY_PENDING_LIMIT) {
+    // 长时间没用 MemoIsle 后历史会积压，只保留最近的部分。
+    const ordered = [...pendingHistoryVisits.values()]
+      .sort((left, right) => String(right.visited_at).localeCompare(String(left.visited_at)));
+    pendingHistoryVisits.clear();
+    for (const visit of ordered.slice(0, HISTORY_PENDING_LIMIT)) {
+      pendingHistoryVisits.set(visit.page_url, visit);
+    }
+  }
+  persistPendingQueues();
+  await enqueueHistorySync(() => flushHistoryVisits(resolvedConfig));
+}
+
+async function readRecentHistory(since, until = Date.now()) {
+  const results = await queryHistory({
+    text: "",
+    startTime: Math.max(0, since),
+    endTime: until,
+    maxResults: HISTORY_QUERY_PAGE_SIZE,
+  });
+  return results.map(normalizeHistoryVisit).filter(Boolean);
+}
+
+// 从一个时间窗里收集访问记录。命中单次上限就把窗口二分继续拆，
+// 拆到最小粒度仍超限时保留最近的 1000 条，然后继续往前一个窗口。
+async function collectHistoryWindow(start, end, collected, budget) {
+  if (collected.size >= budget || start >= end) {
+    return;
+  }
+  const visits = await readRecentHistory(start, end);
+  const hitLimit = visits.length >= HISTORY_QUERY_PAGE_SIZE;
+  if (!hitLimit || end - start <= HISTORY_BACKFILL_MIN_WINDOW_MS) {
+    // 窗口已取完，或已经拆到最小粒度（此时收下能拿到的部分，避免死循环）。
+    // 逐条判断预算，保证不会整窗超出上限。
+    for (const visit of visits) {
+      if (collected.size >= budget) {
+        return;
+      }
+      collected.set(visit.page_url, visit);
+    }
+    return;
+  }
+  // 二分：先补后半段（更近），再补前半段（更早）。
+  // 预算耗尽时优先保住最近访问的记录，旧记录才被舍弃。
+  const middle = start + Math.floor((end - start) / 2);
+  await collectHistoryWindow(middle, end, collected, budget);
+  await collectHistoryWindow(start, middle, collected, budget);
+}
+
+// 找出浏览器里最早一条历史的访问时间，避免从「1970 年」开始空扫。
+//
+// 判据统一是「[0, mid] 里有没有记录」：有就把上界收到 mid，没有就抬高下界。
+// 从 1970 到现在约 1000 小时量级，二分 20 次左右即可收敛到 1 小时精度，
+// 查询次数只和跨度有关，和历史条目多少无关。
+async function findHistoryStartTime(now = Date.now()) {
+  // 只问「这段区间里有没有记录」。注意不能用 maxResults 采样后取最小值：
+  // chrome.history.search 按访问时间**倒序**返回，截断后拿到的是最新的几条，
+  // 最小值并不是区间里最早的那条，会把回填范围缩到只剩最近一小段。
+  const hasRecordIn = async (from, to) => {
+    const results = await queryHistory({
+      text: "",
+      startTime: from,
+      endTime: to,
+      maxResults: 1,
+    });
+    return results.length > 0;
+  };
+
+  if (!(await hasRecordIn(0, now))) {
+    // 浏览器里一条历史都没有。
+    return null;
+  }
+  // 二分：问「[low, middle] 里有没有记录」，有就把上界收到 middle，
+  // 没有就抬高下界，最终收敛到最早那条记录所在的 1 小时区间。
+  //
+  // 起点从「30 年前」开始而不是 1970：绝大多数人的历史都在这个范围内，
+  // 跨度小三分之一，查询次数也更少；真有更老的记录时下界会自然退到 0。
+  let low = Math.max(0, now - 30 * 365 * 24 * 60 * 60 * 1000);
+  let high = now;
+  if (!(await hasRecordIn(0, low))) {
+    // 30 年内没有记录，把下界退回 1970 再二分。
+    low = 0;
+  }
+  while (high - low > HISTORY_BACKFILL_MIN_WINDOW_MS) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (await hasRecordIn(low, middle)) {
+      high = middle;
+    } else {
+      low = middle;
+    }
+  }
+  // 收敛到的是「有记录的那个 1 小时窗口的上沿」，最早记录可能落在窗口内部。
+  // 回填循环用 `end > earliest` 作边界，若直接返回 high，这个窗口里
+  // 早于 high 的记录会被整段跳过。往下再让出一个最小窗口，确保覆盖到它。
+  return Math.max(0, high - HISTORY_BACKFILL_MIN_WINDOW_MS);
+}
+
+async function backfillHistory(config) {
+  // 备份浏览器的「全部」历史：先定位最早记录，再从当前时刻往回逐轮扫描，
+  // 每轮记录断点，下次接着往更早推进，直到覆盖到最早那条为止。
+  const now = Date.now();
+  const previous = await readHistorySyncState();
+  // 断点：上一轮已经补到的最早时间点。没有就表示还没开始补。
+  const upperBound = previous?.backfillCursor ?? now;
+  const earliest = await findHistoryStartTime(now);
+  const collected = new Map();
+  // 本轮扫到的最早时间点；null 表示已经一路扫到最早的历史。
+  let scannedTo = upperBound;
+  let windowsScanned = 0;
+
+  for (let end = upperBound; end > earliest; end -= HISTORY_BACKFILL_WINDOW_MS) {
+    if (collected.size >= HISTORY_BACKFILL_MAX_TOTAL) {
+      break;
+    }
+    const start = Math.max(earliest, end - HISTORY_BACKFILL_WINDOW_MS);
+    await collectHistoryWindow(
+      start,
+      end,
+      collected,
+      HISTORY_BACKFILL_MAX_TOTAL,
+    );
+    scannedTo = start;
+    windowsScanned += 1;
+    if (windowsScanned >= HISTORY_BACKFILL_MAX_WINDOWS) {
+      // 本轮工作量到顶，剩下的更早历史留给下一轮（断点已记录）。
+      break;
+    }
+  }
+  // 预算用完说明后面还有更早的记录，留下断点下次继续；
+  // 否则已经扫到最早，清空断点表示全量备份完成。
+  const backfillCursor = scannedTo > earliest ? scannedTo : null;
+
+  if (collected.size === 0) {
+    // 这一轮没扫到任何记录（可能历史很稀疏），基线仍然推进。
+    await saveHistorySyncState({
+      since: previous?.since ?? now - HISTORY_SYNC_OVERLAP_MS,
+      backfillCursor,
+    });
+    await updateBackfillAlarm(Boolean(backfillCursor));
+    return;
+  }
+
+  await enqueueHistorySync(async () => {
+    for (const visit of collected.values()) {
+      pendingHistoryVisits.set(visit.page_url, visit);
+    }
+    persistPendingQueues();
+    await flushHistoryVisits(config);
+    await saveHistorySyncState({
+      // 增量游标只在第一次回填时初始化，之后由 flushHistoryVisits 推进。
+      since:
+        previous?.since ??
+        Math.max(0, upperBound - HISTORY_SYNC_OVERLAP_MS),
+      backfillCursor,
+    });
+  });
+  // 还有更早的历史没补完就挂上闹钟，补完就撤掉。
+  await updateBackfillAlarm(Boolean(backfillCursor));
+}
+
+// 同一时刻只跑一轮回填：浏览触发的小轮次和闲置时的大批量可能同时到来，
+// 并发会把同一段历史扫两遍。
+let backfillInFlight = null;
+
+function runBackfillExclusive(config) {
+  if (!backfillInFlight) {
+    backfillInFlight = backfillHistory(config).finally(() => {
+      backfillInFlight = null;
+    });
+  }
+  return backfillInFlight;
+}
+
+async function updateBackfillAlarm(pending) {
+  if (!chrome.alarms) {
+    return;
+  }
+  if (!pending) {
+    await chrome.alarms.clear(HISTORY_BACKFILL_ALARM);
+    return;
+  }
+  const existing = await chrome.alarms.get(HISTORY_BACKFILL_ALARM);
+  if (!existing) {
+    chrome.alarms.create(HISTORY_BACKFILL_ALARM, {
+      periodInMinutes: HISTORY_BACKFILL_ALARM_MINUTES,
+    });
+  }
+}
+
+async function readIdleState() {
+  if (!chrome.idle?.queryState) {
+    // 没有闲置检测能力时不做大批量回填，只保留浏览时的小轮次。
+    return "active";
+  }
+  return chrome.idle.queryState(HISTORY_IDLE_DETECTION_SECONDS);
+}
+
+// 电脑闲置或锁屏时连续推进回填，直到补完、用户回来或本次时间用完。
+async function runIdleBackfill() {
+  if (backfillInFlight) {
+    return;
+  }
+  if ((await readIdleState()) === "active") {
+    return;
+  }
+  const headers = await requestHeaders();
+  if (!headers.Authorization) {
+    return;
+  }
+  const config = await readConfig();
+  const deadline = Date.now() + HISTORY_IDLE_RUN_BUDGET_MS;
+  while (Date.now() < deadline) {
+    const state = await readHistorySyncState();
+    if (state !== null && !state.backfillCursor) {
+      await updateBackfillAlarm(false);
+      return;
+    }
+    await runBackfillExclusive(config);
+    if ((await readIdleState()) === "active") {
+      // 用户回来用电脑了，剩下的留给下一次闲置。
+      return;
+    }
+  }
+}
+
+function scheduleHistorySync(delayMs = HISTORY_SYNC_DEBOUNCE_MS) {
+  if (historySyncTimer !== null) {
+    return;
+  }
+  historySyncTimer = setTimeout(() => {
+    historySyncTimer = null;
+    void syncHistory().catch(() => {
+      // 连接失败时退避重试；重复触发不会叠加多个定时器。
+      scheduleHistorySync(HISTORY_RETRY_DELAY_MS);
+    });
+  }, delayMs);
 }
 
 async function captureTab(tab, selectedTextOverride = null) {
@@ -1441,15 +2144,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // 同一扩展可能切换账号，旧账号的书签版本不能用于新账号增量提交。
       if (previous[ACCESS_TOKEN_STORAGE_KEY] !== accessToken) {
         await clearBookmarkSyncState();
+        // 换账号后历史游标也要重来，否则新账号会漏掉这之前的浏览记录。
+        await clearHistorySyncState();
       }
       // 登录成功后立即刷新快照，避免 Web 读取到旧的未授权结果。
       // 网页轮询只刷新标签页，避免重复上传书签或等待大型书签树导致握手超时。
       if (previous[ACCESS_TOKEN_STORAGE_KEY] !== accessToken) {
         void syncBookmarks(resolvedConfig);
+        void syncHistory(resolvedConfig).catch(() => {});
       }
       await syncOpenTabs(resolvedConfig);
     } else {
       await chrome.storage.local.remove(ACCESS_TOKEN_STORAGE_KEY);
+      // 退出登录后清空游标，下次登录重新补 30 天基线。
+      await clearHistorySyncState();
+      pendingHistoryVisits.clear();
+      inFlightHistoryVisits.clear();
+      // 退出登录后不能留着上一个账号的待发记录，立刻落盘而不是等去抖。
+      await writePendingQueues();
     }
     sendResponse({ ok: true });
   })().catch(() => {
@@ -1489,13 +2201,52 @@ chrome.runtime.onInstalled.addListener(() => {
   void readConfig().then((config) => Promise.all([
     syncOpenTabs(config),
     syncBookmarks(config),
+    syncHistory(config).catch(() => {}),
   ]));
+});
+
+// 后台被唤醒时，把上次没发完的改动接着发出去。
+void pendingQueuesReady.then(async (restored) => {
+  if (restored === 0) {
+    return;
+  }
+  const config = await readConfig();
+  if (pendingBookmarkChanges.size > 0) {
+    void enqueueBookmarkSync(() => flushBookmarkChanges()).catch(() => {
+      scheduleBookmarkRetry();
+    });
+  }
+  if (pendingHistoryVisits.size > 0) {
+    const headers = await requestHeaders();
+    if (headers.Authorization) {
+      void enqueueHistorySync(() => flushHistoryVisits(config)).catch(() => {});
+    }
+  }
+}).catch(() => {});
+
+if (chrome.idle?.setDetectionInterval) {
+  chrome.idle.setDetectionInterval(HISTORY_IDLE_DETECTION_SECONDS);
+}
+
+// 闲置/锁屏的那一刻立刻开始，不必等下一次闹钟。
+chrome.idle?.onStateChanged?.addListener((state) => {
+  if (state === "idle" || state === "locked") {
+    void runIdleBackfill().catch(() => {});
+  }
+});
+
+// 闹钟兜底：一直处于闲置时不会再有状态变化事件，靠它每隔几分钟续跑一段。
+chrome.alarms?.onAlarm?.addListener((alarm) => {
+  if (alarm.name === HISTORY_BACKFILL_ALARM) {
+    void runIdleBackfill().catch(() => {});
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void readConfig().then((config) => Promise.all([
     syncOpenTabs(config),
     syncBookmarks(config),
+    syncHistory(config).catch(() => {}),
   ]));
 });
 
@@ -1526,6 +2277,10 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
   ) {
     scheduleOpenTabSync();
   }
+  if (changeInfo.url !== undefined) {
+    // 只在地址真正变化时读一次历史，标题变化不产生新的访问记录。
+    scheduleHistorySync();
+  }
 });
 
 chrome.tabs.onActivated.addListener(() => {
@@ -1535,6 +2290,29 @@ chrome.tabs.onActivated.addListener(() => {
 chrome.tabs.onRemoved.addListener(() => {
   scheduleOpenTabSync();
 });
+
+// 用户在浏览器里清空历史时，把服务端的同账号记录一起清掉。
+if (chrome.history?.onVisitRemoved) {
+  chrome.history.onVisitRemoved.addListener((removed) => {
+    if (!removed?.allHistory) {
+      // 只删个别网址时改动很小，交给下一次增量同步即可。
+      return;
+    }
+    void enqueueHistorySync(async () => {
+      const config = await readConfig();
+      const state = await readHistorySyncState();
+      pendingHistoryVisits.clear();
+      inFlightHistoryVisits.clear();
+      await writePendingQueues();
+      await postHistoryVisits(config, [], true);
+      // 清空后增量游标归零，但保留回填断点，避免已备份的旧历史重扫。
+      await saveHistorySyncState({
+        since: Date.now() - HISTORY_SYNC_OVERLAP_MS,
+        backfillCursor: state?.backfillCursor,
+      });
+    }).catch(() => {});
+  });
+}
 
 chrome.action.onClicked.addListener((tab) => {
   void captureTab(tab);

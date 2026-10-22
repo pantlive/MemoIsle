@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import MetaData, create_engine, event, inspect, text
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
@@ -140,9 +140,16 @@ class Database:
                 "ALTER TABLE user ADD COLUMN review_intervals_days JSON "
                 "NOT NULL DEFAULT '[1,3,7,14,30,60]'"
             ),
+            "browser_history_extended_search": (
+                "ALTER TABLE user ADD COLUMN browser_history_extended_search "
+                "BOOLEAN NOT NULL DEFAULT 0"
+            ),
         }
         migrations = {
             "source_url": "ALTER TABLE memo ADD COLUMN source_url VARCHAR(2048)",
+            "canonical_url": (
+                "ALTER TABLE memo ADD COLUMN canonical_url VARCHAR(2048)"
+            ),
             "source_title": "ALTER TABLE memo ADD COLUMN source_title VARCHAR(200)",
             "resource_page_title": (
                 "ALTER TABLE memo ADD COLUMN resource_page_title VARCHAR(300)"
@@ -433,6 +440,9 @@ class Database:
                 if column_name not in columns:
                     # 迁移语句来自固定映射，不拼接外部输入。
                     connection.execute(text(statement))
+            if "canonical_url" not in columns:
+                # 旧库补列后按现有来源网址回填一次，去重与历史标记才能用上索引。
+                _backfill_canonical_urls(connection)
             if "resource_ai_classified_at" not in columns:
                 # 旧版成功的 Jev/LLM 分类同样视为已处理，升级后不重复收费。
                 connection.execute(text(
@@ -481,6 +491,7 @@ class Database:
                 if column_name not in ebook_job_columns:
                     # 迁移语句来自固定映射，不拼接外部输入。
                     connection.execute(text(statement))
+            _upgrade_browser_history_schema(connection)
             from app.word_service import normalize_word_lemma
 
             word_rows = connection.execute(
@@ -655,6 +666,159 @@ class Database:
         """释放数据库连接池。"""
 
         self.engine.dispose()
+
+
+def _upgrade_browser_history_schema(connection: Connection) -> None:
+    """把浏览历史升级成「按设备隔离」。
+
+    早期版本按 (user_id, url_key) 去重，一台设备清空历史会把另一台设备的
+    记录一起删掉。这里补上 device_id 并把唯一键换成
+    (user_id, device_id, url_key)，旧数据统一落到 ``legacy`` 设备。
+
+    同时把列表索引升级成包含 id 的版本：旧索引只有
+    (user_id, last_visited_at)，同秒多条排序要靠临时 B 树。
+    """
+
+    existing_tables = {
+        row[0]
+        for row in connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'table'"),
+        ).all()
+    }
+    if "browser_history_entry" not in existing_tables:
+        # 首次初始化由 create_all 负责，这里没有可迁移的内容。
+        return
+
+    entry_columns = {
+        row[1]
+        for row in connection.execute(
+            text("PRAGMA table_info('browser_history_entry')"),
+        ).all()
+    }
+    if "device_id" not in entry_columns:
+        connection.execute(text(
+            "ALTER TABLE browser_history_entry "
+            "ADD COLUMN device_id VARCHAR(64) NOT NULL DEFAULT 'legacy'",
+        ))
+
+    state_columns = {
+        row[1]
+        for row in connection.execute(
+            text("PRAGMA table_info('browser_history_sync_state')"),
+        ).all()
+    }
+    if "device_id" not in state_columns:
+        connection.execute(text(
+            "ALTER TABLE browser_history_sync_state "
+            "ADD COLUMN device_id VARCHAR(64) NOT NULL DEFAULT 'legacy'",
+        ))
+    if "device_name" not in state_columns:
+        connection.execute(text(
+            "ALTER TABLE browser_history_sync_state "
+            "ADD COLUMN device_name VARCHAR(120) NOT NULL DEFAULT ''",
+        ))
+    if "hardware_key" not in state_columns:
+        # 老数据的设备标识本来就是随机的，指纹留空表示「未知」，
+        # 不与新设备误判为同一台机器。
+        connection.execute(text(
+            "ALTER TABLE browser_history_sync_state "
+            "ADD COLUMN hardware_key VARCHAR(64) NOT NULL DEFAULT ''",
+        ))
+    if "install_id" not in state_columns:
+        connection.execute(text(
+            "ALTER TABLE browser_history_sync_state "
+            "ADD COLUMN install_id VARCHAR(64) NOT NULL DEFAULT ''",
+        ))
+    connection.execute(text(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_browser_history_sync_state_hardware_key "
+        "ON browser_history_sync_state (hardware_key)",
+    ))
+
+    # SQLite 不能直接改唯一约束，只能重建索引：旧的 (user_id, url_key)
+    # 会挡住「两台设备访问同一网址」，必须换成带 device_id 的版本。
+    _replace_history_unique_index(connection)
+    _upgrade_browser_history_indexes(connection)
+
+
+def _replace_history_unique_index(connection: Connection) -> None:
+    """把历史的唯一约束从 (user_id, url_key) 换成带 device_id 的版本。"""
+
+    rows = connection.execute(
+        text(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND tbl_name = 'browser_history_entry'",
+        ),
+    ).all()
+    names = {row[0] for row in rows}
+    legacy_name = "uq_browser_history_entry_user_url"
+    wanted_name = "uq_browser_history_entry_user_device_url"
+    if wanted_name in names:
+        return
+    if legacy_name in names:
+        # 唯一约束在 SQLite 里是自动索引，可直接 DROP INDEX 拆掉。
+        connection.execute(text(f"DROP INDEX IF EXISTS {legacy_name}"))
+    connection.execute(text(
+        f"CREATE UNIQUE INDEX {wanted_name} "
+        "ON browser_history_entry (user_id, device_id, url_key)",
+    ))
+
+
+def _upgrade_browser_history_indexes(connection: Connection) -> None:
+    """确保历史列表的翻页索引包含 id，并补上按设备筛选的索引。"""
+
+    rows = connection.execute(
+        text("PRAGMA index_info('ix_browser_history_entry_user_visited')"),
+    ).all()
+    if not rows:
+        return
+    columns = [row[2] for row in rows]
+    if len(columns) != 3:
+        connection.execute(
+            text("DROP INDEX IF EXISTS ix_browser_history_entry_user_visited"),
+        )
+        connection.execute(text(
+            "CREATE INDEX ix_browser_history_entry_user_visited "
+            "ON browser_history_entry (user_id, last_visited_at, id)",
+        ))
+    connection.execute(text(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_browser_history_entry_user_device_visited "
+        "ON browser_history_entry (user_id, device_id, last_visited_at)",
+    ))
+    connection.execute(text(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_browser_history_entry_user_url_visited "
+        "ON browser_history_entry (user_id, url_key, last_visited_at)",
+    ))
+
+
+def _backfill_canonical_urls(connection: Connection) -> None:
+    """为旧网页资料回填规范化网址。
+
+    规范化逻辑在 Python 里（IDNA、默认端口、去 fragment），
+    无法用一条 SQL 表达，因此逐条计算；只跑一次，之后由写入路径维护。
+    """
+
+    from app.url_normalization import canonicalize_resource_url
+
+    rows = connection.execute(
+        text(
+            "SELECT id, source_url FROM memo "
+            "WHERE type = 'resource' AND source_url IS NOT NULL "
+            "AND canonical_url IS NULL",
+        ),
+    ).all()
+    for memo_id, source_url in rows:
+        try:
+            canonical_url = canonicalize_resource_url(source_url or "")
+        except ValueError:
+            # 历史异常网址留空，不影响其余资料升级。
+            continue
+        connection.execute(
+            text("UPDATE memo SET canonical_url = :url WHERE id = :id"),
+            {"url": canonical_url, "id": memo_id},
+        )
 
 
 def is_sqlite_lock_error(error: BaseException) -> bool:

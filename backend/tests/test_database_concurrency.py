@@ -120,6 +120,43 @@ def test_commit_with_retry_recovers_from_real_sqlite_lock(
     engine.dispose()
 
 
+def test_existing_database_gains_history_setting_column(tmp_path: Path) -> None:
+    """旧库升级后补上浏览历史开关列，已有账号保持默认关闭。"""
+
+    database_path = tmp_path / "upgrade.db"
+    database = Database(f"sqlite+pysqlite:///{database_path}")
+    database.create_schema()
+    database.dispose()
+
+    # 模拟升级前的库：去掉新列，再写入一个已有账号。
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "ALTER TABLE user DROP COLUMN browser_history_extended_search",
+        )
+        connection.execute(
+            "INSERT INTO user (id, display_name, email_verified, "
+            "link_health_enabled, link_health_interval_hours, "
+            "review_daily_limit, review_intervals_days, created_at, updated_at) "
+            "VALUES ('u1', '老用户', 0, 1, 720, 10, '[1,3,7,14,30,60]', "
+            "'2026-01-01', '2026-01-01')",
+        )
+
+    upgraded = Database(f"sqlite+pysqlite:///{database_path}")
+    upgraded.create_schema()
+    try:
+        with upgraded.engine.connect() as connection:
+            columns = {
+                row[1]
+                for row in connection.exec_driver_sql("PRAGMA table_info(user)")
+            }
+            enabled = connection.exec_driver_sql(
+                "SELECT browser_history_extended_search FROM user WHERE id='u1'",
+            ).scalar()
+        assert "browser_history_extended_search" in columns
+        # 默认关闭：老账号升级后仍然只能搜索最近 30 天。
+        assert enabled == 0
+    finally:
+        upgraded.dispose()
 
 
 def test_commit_with_retry_persists_changes_under_real_lock(

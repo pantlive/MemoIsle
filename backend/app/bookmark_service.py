@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.database import Database
 from app.models import BookmarkImportBatch, BookmarkImportItem, Memo
+from app.resource_lookup import existing_resource_urls
 from app.resource_service import run_pending_resource_enrichments
 from app.schemas import (
     BookmarkImportBatchRead,
@@ -38,26 +39,14 @@ class BookmarkBatchStateError(ValueError):
 canonicalize_bookmark_url = canonicalize_resource_url
 
 
-def _existing_resource_urls(session: Session, user_id: str) -> dict[str, str]:
+def _existing_resource_urls(
+    session: Session,
+    user_id: str,
+    canonical_urls: set[str] | None = None,
+) -> dict[str, str]:
     """读取当前用户已有网页资料的规范网址与条目标识。"""
 
-    memos = session.scalars(
-        select(Memo).where(
-            Memo.user_id == user_id,
-            Memo.type == MemoType.RESOURCE,
-            Memo.status != MemoStatus.TRASHED,
-            Memo.source_url.is_not(None),
-        )
-    ).all()
-    result: dict[str, str] = {}
-    for memo in memos:
-        try:
-            normalized_url = canonicalize_bookmark_url(memo.source_url or "")
-        except ValueError:
-            # 历史异常链接不应阻断整个书签预览。
-            continue
-        result.setdefault(normalized_url, memo.id)
-    return result
+    return existing_resource_urls(session, user_id, canonical_urls)
 
 
 def preview_bookmarks(
@@ -67,17 +56,30 @@ def preview_bookmarks(
 ) -> BookmarkImportPreview:
     """校验结构化书签，并同时识别资料库与文件内重复项。"""
 
-    existing_urls = _existing_resource_urls(session, user_id)
-    seen_urls: dict[str, str | None] = dict(existing_urls)
+    # 先规范化全部书签，再一次只查这些网址，避免把整个资料库读进内存。
+    normalized: list[str | None] = []
+    invalid_errors: dict[int, str] = {}
+    for index, item in enumerate(payload.items):
+        try:
+            normalized.append(canonicalize_bookmark_url(item.url))
+        except ValueError as error:
+            normalized.append(None)
+            invalid_errors[index] = str(error)
+
+    existing_urls = _existing_resource_urls(
+        session,
+        user_id,
+        {url for url in normalized if url is not None},
+    )
+    seen_urls: dict[str, str | None] = {}
     preview_items: list[BookmarkPreviewItem] = []
     valid_count = 0
     duplicate_count = 0
     invalid_count = 0
 
-    for item in payload.items:
-        try:
-            normalized_url = canonicalize_bookmark_url(item.url)
-        except ValueError as error:
+    for index, item in enumerate(payload.items):
+        normalized_url = normalized[index]
+        if normalized_url is None:
             invalid_count += 1
             preview_items.append(
                 BookmarkPreviewItem(
@@ -87,14 +89,14 @@ def preview_bookmarks(
                     normalized_url=None,
                     folder_path=item.folder_path,
                     status="invalid",
-                    error_code=str(error),
+                    error_code=invalid_errors.get(index, "invalid_url"),
                 )
             )
             continue
 
-        if normalized_url in seen_urls:
+        # 资料库已有优先于文件内重复，提示文案才不会误导。
+        if normalized_url in existing_urls:
             duplicate_count += 1
-            existing_memo_id = seen_urls[normalized_url]
             preview_items.append(
                 BookmarkPreviewItem(
                     client_item_id=item.client_item_id,
@@ -103,14 +105,23 @@ def preview_bookmarks(
                     normalized_url=normalized_url,
                     folder_path=item.folder_path,
                     status="duplicate",
-                    existing_memo_id=(
-                        UUID(existing_memo_id) if existing_memo_id is not None else None
-                    ),
-                    error_code=(
-                        "already_saved"
-                        if existing_memo_id is not None
-                        else "duplicate_in_file"
-                    ),
+                    existing_memo_id=UUID(existing_urls[normalized_url]),
+                    error_code="already_saved",
+                )
+            )
+            continue
+
+        if normalized_url in seen_urls:
+            duplicate_count += 1
+            preview_items.append(
+                BookmarkPreviewItem(
+                    client_item_id=item.client_item_id,
+                    title=item.title,
+                    url=item.url,
+                    normalized_url=normalized_url,
+                    folder_path=item.folder_path,
+                    status="duplicate",
+                    error_code="duplicate_in_file",
                 )
             )
             continue
@@ -274,8 +285,17 @@ def process_bookmark_batch(
     _refresh_batch_progress(session, batch)
     session.commit()
 
-    known_urls = _existing_resource_urls(session, user_id)
     items = _load_batch_items(session, batch.id)
+    # 只查本批次涉及的网址，批次再大也不会退化成全库比对。
+    known_urls = _existing_resource_urls(
+        session,
+        user_id,
+        {
+            item.normalized_url
+            for item in items
+            if item.status in {"pending", "failed"} and item.normalized_url
+        },
+    )
     for item in items:
         if (
             item.status == "duplicate"

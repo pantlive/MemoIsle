@@ -32,6 +32,7 @@ import ModelSettingsDialog from "./ModelSettingsDialog";
 import EbookCollectDialog from "./EbookCollectDialog";
 import { parseClipboardWord } from "./clipboardWord";
 import LinkHealthDialog from "./LinkHealthDialog";
+import BrowserHistoryDialog from "./BrowserHistoryDialog";
 import { pendingHealthIssueCount } from "./linkHealth";
 import ReviewPanel, { type ReviewQueueFilter } from "./ReviewPanel";
 import QuickAccess from "./QuickAccess";
@@ -168,7 +169,7 @@ interface NavigationItem {
   icon: string;
   vectorIcon?: "resource-link";
   view?: ActiveView;
-  action?: "health" | "settings" | "vault";
+  action?: "health" | "settings" | "vault" | "history";
 }
 
 interface PendingResource {
@@ -194,6 +195,7 @@ const navigation: NavigationItem[] = [
   { label: "网页资料", icon: "↗", vectorIcon: "resource-link", view: "resource" },
   { label: "图片收藏", icon: "▧", view: "image" },
   { label: "网页巡检", icon: "!", action: "health" },
+  { label: "浏览历史", icon: "◶", action: "history" },
   { label: "灵感", icon: "✦", view: "idea" },
   { label: "回顾", icon: "◷", view: "review" },
   { label: "回收站", icon: "♻", view: "trash" },
@@ -592,6 +594,7 @@ export default function App({ authUser, onLogout }: AppProps) {
   const [ebookCollectOpen, setEbookCollectOpen] = useState(false);
   const [healthCenterOpen, setHealthCenterOpen] = useState(false);
   const [healthIssueCount, setHealthIssueCount] = useState(0);
+  const [browserHistoryOpen, setBrowserHistoryOpen] = useState(false);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueResponse | null>(null);
   const [reviewFilter, setReviewFilter] = useState<ReviewQueueFilter>("all");
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -2845,6 +2848,21 @@ export default function App({ authUser, onLogout }: AppProps) {
     setResourcePreviewMemo(memo);
   };
 
+  const openSavedHistoryMemo = async (memoId: string) => {
+    // 历史面板里点「已收藏」：条目可能不在当前分页/筛选里，按 ID 单独取一次。
+    const known = memos.find((item) => item.id === memoId);
+    if (known) {
+      openResourcePreview(known);
+      return;
+    }
+    try {
+      const memo = await getMemo(memoId);
+      openResourcePreview(memo);
+    } catch (error) {
+      setMessage(describeError(error));
+    }
+  };
+
   const focusPendingRow = useCallback(() => {
     const pending = pendingRowFocusRef.current;
     if (!pending) return;
@@ -3891,7 +3909,9 @@ export default function App({ authUser, onLogout }: AppProps) {
             // 首页现在是与「全部内容」合并后的唯一入口，需要正常显示选中态。
             const active = item.action === "vault"
               ? vaultOpen
-              : !vaultOpen && item.view === activeType;
+              : item.action === "history"
+                ? browserHistoryOpen
+                : !vaultOpen && item.view === activeType;
             return (
               <button
                 className={active ? "nav-item active" : "nav-item"}
@@ -3909,6 +3929,8 @@ export default function App({ authUser, onLogout }: AppProps) {
                   } else if (item.action === "vault") {
                     setSelectedId(null);
                     setVaultOpen(true);
+                  } else if (item.action === "history") {
+                    setBrowserHistoryOpen(true);
                   }
                 }}
                 title={enabled ? undefined : "将在后续里程碑开放"}
@@ -4062,6 +4084,14 @@ export default function App({ authUser, onLogout }: AppProps) {
           >
             <span aria-hidden="true">◈</span><span className="top-bar-label">密码库</span>
             {vaultReminderCount > 0 && <span className="vault-shortcut-badge" aria-hidden="true">{vaultReminderCount}</span>}
+          </button>
+          <button
+            className={`trash-shortcut${browserHistoryOpen ? " active" : ""}`}
+            type="button"
+            onClick={() => setBrowserHistoryOpen(true)}
+            aria-label="浏览历史"
+          >
+            <span aria-hidden="true">◶</span><span className="top-bar-label">浏览历史</span>
           </button>
           <button className="compact-new" onClick={focusCapture}>＋ 新建</button>
         </header>
@@ -5849,6 +5879,23 @@ export default function App({ authUser, onLogout }: AppProps) {
           onImported={() => {
             void loadCurrentMemos();
             void refreshMemoCounts();
+          }}
+        />
+      )}
+
+      {browserHistoryOpen && (
+        <BrowserHistoryDialog
+          onClose={() => setBrowserHistoryOpen(false)}
+          onSaved={() => {
+            // 历史面板只负责收藏，列表与计数交给主界面刷新。
+            void loadCurrentMemos(false);
+            void refreshMemoCounts();
+          }}
+          onOpenSaved={(memoId) => void openSavedHistoryMemo(memoId)}
+          onOpenSettings={() => {
+            // 关掉历史面板再进设置，避免两个弹窗叠在一起。
+            setBrowserHistoryOpen(false);
+            setModelSettingsOpen(true);
           }}
         />
       )}
