@@ -10,6 +10,7 @@ MemoIsle 只保存云盘文件引用与元数据快照，不保存电子书本�
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.category_service import classification_categories, classification_rules
 from app.cloud_account_service import (
+    CloudCredentialRejectedError,
     build_cloud_client,
     decrypt_credential,
     get_account_for_provider,
@@ -47,6 +49,8 @@ from app.schemas import (
     ResourceProcessStatus,
 )
 from app.service import ResourceDuplicateError, create_memo
+
+logger = logging.getLogger(__name__)
 
 # 云盘分享链接的域名特征；命中即走转存，否则按普通直链下载上传。
 SHARE_HOSTS: dict[str, tuple[str, ...]] = {
@@ -377,7 +381,7 @@ def run_ebook_job(
     job.error = None
     session.commit()
 
-    temp_path: Path | None = None
+    temp_holder: list[Path] = []
     try:
         account = _resolve_account(session, user_id, job.provider)
         credential = decrypt_credential(settings, account.credential_cipher)
@@ -386,36 +390,37 @@ def run_ebook_job(
             credential,
             settings=settings,
         )
-        folder_id = drive.ensure_folder(job.target_folder)
-        job.stage = "转存中" if job.mode == "transfer" else "下载中"
-        job.progress = 20
-        session.commit()
-
-        if job.mode == "transfer":
-            refs = drive.transfer_share(
-                job.source_url,
-                job.share_password,
-                folder_id,
-            )
+        if job.cloud_file_id:
+            # 上一次已经把文件写进云盘，只是后续步骤失败：直接复用引用，
+            # 不再转存/上传，否则每次重试都会在用户云盘里多出一份。
+            cloud_path = job.cloud_path or ""
+            refs = [
+                FileRef(
+                    file_id=job.cloud_file_id,
+                    # 书名优先取云盘路径的文件名部分；get_file_meta 成功时会覆盖。
+                    name=cloud_path.rstrip("/").rsplit("/", 1)[-1],
+                    path=cloud_path,
+                ),
+            ]
         else:
-            temp_path, filename = download_direct_link(
-                job.source_url,
+            refs = _write_to_cloud(
+                session,
+                job,
+                drive,
                 settings=settings,
-                client=download_client,
+                download_client=download_client,
                 resolver=resolver,
+                temp_holder=temp_holder,
             )
-            job.stage = "上传中"
-            job.progress = 60
-            session.commit()
-            refs = [drive.upload_file(temp_path, folder_id, filename)]
-
         if not refs:
             raise CloudDriveError("云盘未返回任何文件")
         reference: FileRef = refs[0]
+        # 文件一进云盘就记下引用，之后任何一步失败都能续上而不重复写入。
+        job.cloud_file_id = reference.file_id
+        job.cloud_path = reference.path or job.cloud_path
         job.stage = "写入资料库"
         job.progress = 85
         session.commit()
-
         meta = _safe_file_meta(drive, reference)
         memo = _create_ebook_memo(session, user_id, job, reference, meta)
 
@@ -435,18 +440,68 @@ def run_ebook_job(
         EbookLinkError,
         EbookDownloadTooLargeError,
         UnsafeResourceUrlError,
+        CloudCredentialRejectedError,
     ) as error:
-        job.status = JOB_FAILED
-        job.stage = "失败"
-        job.error = str(error)[:500]
-        job.finished_at = datetime.now(UTC)
-        session.commit()
-        session.refresh(job)
-        return job
+        return _mark_job_failed(session, job, str(error))
+    except Exception as error:  # noqa: BLE001 - 任何退出路径都必须写终态
+        # 已置为 running 的任务若异常穿出，会一直卡在执行中：用户不能重试，
+        # 只有重启时被退回排队再失败一次。未预期错误记录堆栈后同样置为失败。
+        logger.exception("电子书任务 %s 执行异常", job_id)
+        return _mark_job_failed(session, job, f"内部错误：{type(error).__name__}")
     finally:
-        if temp_path is not None:
+        for temp_path in temp_holder:
             # 电子书本体不留在服务端，任务结束即删除临时文件。
             temp_path.unlink(missing_ok=True)
+
+
+def _write_to_cloud(
+    session: Session,
+    job: EbookTransferJob,
+    drive: object,
+    *,
+    settings: Settings,
+    download_client: httpx.Client | None,
+    resolver: AddressResolver | None,
+    temp_holder: list[Path],
+) -> list[FileRef]:
+    """把电子书写进用户云盘：分享链接转存，直链先下载再上传。"""
+
+    folder_id = drive.ensure_folder(job.target_folder)
+    job.stage = "转存中" if job.mode == "transfer" else "下载中"
+    job.progress = 20
+    session.commit()
+    if job.mode == "transfer":
+        return drive.transfer_share(job.source_url, job.share_password, folder_id)
+    temp_path, filename = download_direct_link(
+        job.source_url,
+        settings=settings,
+        client=download_client,
+        resolver=resolver,
+    )
+    temp_holder.append(temp_path)
+    job.stage = "上传中"
+    job.progress = 60
+    session.commit()
+    return [drive.upload_file(temp_path, folder_id, filename)]
+
+
+def _mark_job_failed(
+    session: Session,
+    job: EbookTransferJob,
+    message: str,
+) -> EbookTransferJob:
+    """把任务写成失败终态；异常可能发生在事务中途，先回滚再写。"""
+
+    job_id = job.id
+    session.rollback()
+    job = session.get(EbookTransferJob, job_id) or job
+    job.status = JOB_FAILED
+    job.stage = "失败"
+    job.error = message[:500]
+    job.finished_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(job)
+    return job
 
 
 def _safe_file_meta(drive: object, reference: FileRef) -> FileMeta:

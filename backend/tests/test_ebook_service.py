@@ -507,3 +507,114 @@ def test_get_ebook_job_isolated_by_user(session_settings) -> None:
 
     with pytest.raises(EbookJobNotFoundError):
         get_ebook_job(session, "00000000-0000-0000-0000-0000000000ff", job.id)
+
+
+def test_undecryptable_credential_fails_job_instead_of_hanging(
+    session_settings,
+) -> None:
+    """凭据解密失败时任务必须进入失败终态并可重试，不能卡在执行中。"""
+
+    import dataclasses
+
+    session, settings = session_settings
+    job = create_ebook_job(
+        session,
+        settings.local_user_id,
+        url="https://www.alipan.com/s/abc123",
+        settings=settings,
+    )
+    # 密钥变更后，已落库的云盘凭据无法解密。
+    rotated = dataclasses.replace(
+        settings,
+        auth_token_secret="rotated-secret",
+        cloud_credential_secret="rotated-secret",
+    )
+
+    result = run_ebook_job(session, settings.local_user_id, job.id, settings=rotated)
+
+    assert result.status == "failed"
+    assert "重新绑定" in (result.error or "")
+    # 失败终态才能被用户重试。
+    retried = retry_ebook_job(session, settings.local_user_id, job.id)
+    assert retried.status == "pending"
+
+
+def test_unexpected_error_still_writes_failed_state(session_settings) -> None:
+    """白名单外的异常同样要写失败终态。"""
+
+    class ExplodingDrive(FakeDrive):
+        def ensure_folder(self, path: str) -> str:
+            raise RuntimeError("boom")
+
+    session, settings = session_settings
+    job = create_ebook_job(
+        session,
+        settings.local_user_id,
+        url="https://www.alipan.com/s/abc123",
+        settings=settings,
+    )
+
+    result = run_ebook_job(
+        session,
+        settings.local_user_id,
+        job.id,
+        settings=settings,
+        client=ExplodingDrive(),
+    )
+
+    assert result.status == "failed"
+    assert result.error == "内部错误：RuntimeError"
+
+
+def test_retry_after_cloud_write_does_not_upload_again(session_settings) -> None:
+    """文件已写进云盘、后续步骤失败时，重试复用引用而不再转存。"""
+
+    class FailingMetaDrive(FakeDrive):
+        fail_meta = True
+
+        def get_file_meta(self, file_id: str) -> FileMeta:
+            if self.fail_meta:
+                raise RuntimeError("元数据接口宕机")
+            return super().get_file_meta(file_id)
+
+    session, settings = session_settings
+    job = create_ebook_job(
+        session,
+        settings.local_user_id,
+        url="https://www.alipan.com/s/abc123",
+        settings=settings,
+    )
+    reference = FileRef(
+        file_id="file-1",
+        name="Rust.epub",
+        path="/MemoIsle/电子书/Rust.epub",
+    )
+    drive = FailingMetaDrive(refs=[reference])
+
+    first = run_ebook_job(
+        session,
+        settings.local_user_id,
+        job.id,
+        settings=settings,
+        client=drive,
+    )
+    assert first.status == "failed"
+    assert first.cloud_file_id == "file-1"
+    assert len(drive.transfers) == 1
+
+    retry_ebook_job(session, settings.local_user_id, job.id)
+    drive.fail_meta = False
+    second = run_ebook_job(
+        session,
+        settings.local_user_id,
+        job.id,
+        settings=settings,
+        client=drive,
+    )
+
+    assert second.status == "success"
+    # 第二次没有再转存。
+    assert len(drive.transfers) == 1
+    memo = session.get(Memo, second.memo_id)
+    assert memo.ebook_file_id == "file-1"
+    assert memo.title == "Rust.epub"
