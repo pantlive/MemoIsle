@@ -12,11 +12,16 @@ import org.json.JSONObject
 const val VAULT_KIND_LOGIN = "login"
 const val VAULT_KIND_SECRET = "secret"
 const val VAULT_KIND_RECOVERY = "recovery"
+const val VAULT_KIND_SERVER = "server"
+
+const val VAULT_AUTH_PASSWORD = "password"
+const val VAULT_AUTH_KEY = "key"
 
 val VAULT_KIND_LABELS = mapOf(
     VAULT_KIND_LOGIN to "账号密码",
     VAULT_KIND_SECRET to "密钥",
     VAULT_KIND_RECOVERY to "恢复码",
+    VAULT_KIND_SERVER to "云服务器",
 )
 
 val VAULT_ROTATE_OPTIONS = listOf(0, 30, 90, 180, 365)
@@ -42,11 +47,19 @@ data class VaultItemData(
     val changedAt: String = "",
     val rotateDays: Int = 0,
     val expiresOn: String = "",
+    // 云服务器：主机、端口、登录用户、认证方式与凭据。
+    val host: String = "",
+    val port: String = "22",
+    val authMethod: String = VAULT_AUTH_PASSWORD,
+    val privateKey: String = "",
+    val keyPassphrase: String = "",
 ) {
     val secretValue: String
         get() = when (kind) {
             VAULT_KIND_LOGIN -> password
             VAULT_KIND_SECRET -> secret
+            // 服务器按当前认证方式取对应凭据，提醒与「上次更换」都依赖它。
+            VAULT_KIND_SERVER -> if (authMethod == VAULT_AUTH_KEY) privateKey else password
             else -> ""
         }
 
@@ -62,6 +75,16 @@ data class VaultItemData(
                 .putReminderSettings(this)
             VAULT_KIND_SECRET -> json
                 .put("secret", secret)
+                .put("notes", notes)
+                .putReminderSettings(this)
+            VAULT_KIND_SERVER -> json
+                .put("host", host)
+                .put("port", port)
+                .put("username", username)
+                .put("authMethod", authMethod)
+                .put("password", password)
+                .put("privateKey", privateKey)
+                .put("keyPassphrase", keyPassphrase)
                 .put("notes", notes)
                 .putReminderSettings(this)
             else -> json
@@ -102,6 +125,35 @@ data class VaultItemData(
                     rotateDays = rotateDays,
                     expiresOn = expiresOn,
                 )
+                VAULT_KIND_SERVER -> {
+                    val port = raw.optString("port")
+                    VaultItemData(
+                        kind = VAULT_KIND_SERVER,
+                        title = title,
+                        host = raw.optString("host"),
+                        // 端口只接受 1-65535，越界或 0 回落到 22。
+                        port = if (Regex("""[0-9]{1,5}""").matches(port) &&
+                            port.toIntOrNull() in 1..65535
+                        ) {
+                            port
+                        } else {
+                            "22"
+                        },
+                        username = raw.optString("username"),
+                        authMethod = if (raw.optString("authMethod") == VAULT_AUTH_KEY) {
+                            VAULT_AUTH_KEY
+                        } else {
+                            VAULT_AUTH_PASSWORD
+                        },
+                        password = raw.optString("password"),
+                        privateKey = raw.optString("privateKey"),
+                        keyPassphrase = raw.optString("keyPassphrase"),
+                        notes = notes,
+                        changedAt = changedAt,
+                        rotateDays = rotateDays,
+                        expiresOn = expiresOn,
+                    )
+                }
                 VAULT_KIND_RECOVERY -> {
                     val array = raw.optJSONArray("codes") ?: JSONArray()
                     val codes = buildList {

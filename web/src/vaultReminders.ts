@@ -51,7 +51,8 @@ export function daysUntilDate(isoDate: string, now = new Date()): number {
 
 export function lastChangedAt(entry: Pick<VaultEntry, "createdAt" | "data">): string {
   const { data } = entry;
-  return (data.kind === "login" || data.kind === "secret") && data.changedAt
+  return (data.kind === "login" || data.kind === "secret" || data.kind === "server")
+    && data.changedAt
     ? data.changedAt
     : entry.createdAt;
 }
@@ -78,6 +79,10 @@ export function isWeakPassword(password: string): boolean {
 function hasSecretValue(data: VaultItemData): boolean {
   if (data.kind === "login") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
+  if (data.kind === "server") {
+    // 私钥和密码任一存在就算有凭据，用于到期与定期更换提醒。
+    return Boolean(data.privateKey || data.password);
+  }
   return false;
 }
 

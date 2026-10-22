@@ -9,6 +9,7 @@ import {
   type VaultItemData,
   type VaultLoginData,
   type VaultSecretData,
+  type VaultServerData,
 } from "./vault";
 import { daysSince, daysUntilDate, isWeakPassword, reminderLabels, type VaultReminder } from "./vaultReminders";
 
@@ -85,7 +86,7 @@ function describeAge(iso: string): string {
 
 // 账号密码和密钥共用的提醒设置。
 function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
-  draft: VaultLoginData | VaultSecretData;
+  draft: VaultLoginData | VaultSecretData | VaultServerData;
   changedLabel: string;
   secretChanged: boolean;
   onChange: (field: "rotateDays" | "expiresOn" | "skipChecks", value: number | string | boolean) => void;
@@ -95,7 +96,11 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
     <fieldset className="vault-reminder-fields">
       <legend>提醒</legend>
       <p className="vault-hint">
-        {draft.kind === "login" ? "密码" : "密钥"}上次更换：
+        {draft.kind === "login"
+          ? "密码"
+          : draft.kind === "server"
+            ? "登录凭据"
+            : "密钥"}上次更换：
         {secretChanged ? "保存后记为今天" : changedLabel}
       </p>
       <div className="vault-reminder-grid">
@@ -251,12 +256,18 @@ export default function VaultItemDialog({
   };
 
   const secretChanged = (draft.kind === "login" && initial.kind === "login" && draft.password !== initial.password && Boolean(draft.password))
-    || (draft.kind === "secret" && initial.kind === "secret" && draft.secret !== initial.secret && Boolean(draft.secret));
+    || (draft.kind === "secret" && initial.kind === "secret" && draft.secret !== initial.secret && Boolean(draft.secret))
+    || (draft.kind === "server" && initial.kind === "server" && (
+      draft.authMethod === "key"
+        ? draft.privateKey !== initial.privateKey && Boolean(draft.privateKey)
+        : draft.password !== initial.password && Boolean(draft.password)
+    ));
   const changedLabel = changedAt ? describeAge(changedAt) : "还没有填写";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft.title.trim()) return;
+    if (draft.kind === "server" && !draft.host.trim()) return;
     onSave({ ...draft, title: draft.title.trim() });
   };
 
@@ -300,7 +311,15 @@ export default function VaultItemDialog({
               ref={titleRef}
               value={draft.title}
               onChange={(event) => update("title", event.target.value)}
-              placeholder={draft.kind === "login" ? "例如：GitHub" : draft.kind === "secret" ? "例如：OpenAI API Key" : "例如：GitHub 两步验证"}
+              placeholder={
+                draft.kind === "login"
+                  ? "例如：GitHub"
+                  : draft.kind === "secret"
+                    ? "例如：OpenAI API Key"
+                    : draft.kind === "server"
+                      ? "例如：阿里云 ECS · 博客服务器"
+                      : "例如：GitHub 两步验证"
+              }
               maxLength={200}
               required
             />
@@ -355,7 +374,90 @@ export default function VaultItemDialog({
             />
           )}
 
-          {(draft.kind === "login" || draft.kind === "secret") && (
+          {draft.kind === "server" && (
+            <>
+              <div className="vault-server-address">
+                <label className="vault-field">
+                  <span className="vault-field-label"><span>主机</span></span>
+                  <input
+                    value={draft.host}
+                    onChange={(event) => update("host", event.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="203.0.113.10 或 vps.example.com"
+                    required
+                  />
+                </label>
+                <label className="vault-field vault-port-field">
+                  <span className="vault-field-label"><span>端口</span></span>
+                  <input
+                    value={draft.port}
+                    onChange={(event) => update("port", event.target.value.replace(/[^0-9]/g, "").slice(0, 5))}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="22"
+                  />
+                </label>
+              </div>
+              <label className="vault-field">
+                <span className="vault-field-label">
+                  <span>登录用户</span>
+                  <button type="button" onClick={() => onCopy(draft.username, "用户名")} disabled={!draft.username}>复制</button>
+                </span>
+                <input
+                  value={draft.username}
+                  onChange={(event) => update("username", event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="root"
+                />
+              </label>
+              <fieldset className="vault-auth-method">
+                <legend>登录方式</legend>
+                {([
+                  ["password", "密码"],
+                  ["key", "SSH 私钥"],
+                ] as const).map(([value, label]) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name="server-auth-method"
+                      checked={draft.authMethod === value}
+                      onChange={() => update("authMethod", value)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+              {draft.authMethod === "password" ? (
+                <SecretInput
+                  label="登录密码"
+                  value={draft.password}
+                  onChange={(value) => update("password", value)}
+                  onCopy={() => onCopy(draft.password, "密码")}
+                  onGenerate={() => update("password", generatePassword())}
+                />
+              ) : (
+                <>
+                  <SecretInput
+                    label="SSH 私钥"
+                    value={draft.privateKey}
+                    onChange={(value) => update("privateKey", value)}
+                    onCopy={() => onCopy(draft.privateKey, "私钥")}
+                    multiline
+                  />
+                  <SecretInput
+                    label="私钥口令（可选）"
+                    value={draft.keyPassphrase}
+                    onChange={(value) => update("keyPassphrase", value)}
+                    onCopy={() => onCopy(draft.keyPassphrase, "私钥口令")}
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          {(draft.kind === "login" || draft.kind === "secret" || draft.kind === "server") && (
             <ReminderFields
               draft={draft}
               changedLabel={changedLabel}

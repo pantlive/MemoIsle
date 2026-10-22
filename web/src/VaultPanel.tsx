@@ -53,7 +53,12 @@ import {
 const CLIPBOARD_CLEAR_MS = 30_000;
 const RESET_PHRASE = "清空密码库";
 // 用汉字做类型图标，任何字体都能正常显示。
-const kindIcons: Record<VaultKind, string> = { login: "账", secret: "钥", recovery: "码" };
+const kindIcons: Record<VaultKind, string> = {
+  login: "账",
+  secret: "钥",
+  recovery: "码",
+  server: "云",
+};
 
 type Phase = "loading" | "error" | "insecure" | "setup" | "locked" | "unlocked";
 
@@ -84,12 +89,26 @@ function describe(error: unknown): string {
 function entrySubtitle(data: VaultItemData): string {
   if (data.kind === "login") return data.username || data.url || "未填写用户名";
   if (data.kind === "secret") return data.secret ? `${data.secret.length} 个字符` : "未填写密钥";
+  if (data.kind === "server") {
+    // 服务器优先显示「用户@主机:端口」，扫一眼就知道是哪台机器。
+    if (!data.host) return "未填写主机";
+    const target = `${data.username ? `${data.username}@` : ""}${data.host}`;
+    const port = data.port && data.port !== "22" ? `:${data.port}` : "";
+    return `${target}${port} · ${data.authMethod === "key" ? "私钥" : "密码"}`;
+  }
   const remaining = data.codes.filter((item) => !item.used).length;
   return `${data.account ? `${data.account} · ` : ""}剩余 ${remaining} / ${data.codes.length} 个可用`;
 }
 
 function entryHasSecret(data: VaultItemData): boolean {
-  return (data.kind === "login" && Boolean(data.password)) || (data.kind === "secret" && Boolean(data.secret));
+  if (data.kind === "login") return Boolean(data.password);
+  if (data.kind === "secret") return Boolean(data.secret);
+  if (data.kind === "server") {
+    return data.authMethod === "key"
+      ? Boolean(data.privateKey)
+      : Boolean(data.password);
+  }
+  return false;
 }
 
 function matchesQuery(data: VaultItemData, query: string): boolean {
@@ -100,6 +119,10 @@ function matchesQuery(data: VaultItemData, query: string): boolean {
     data.notes,
     data.kind === "login" ? `${data.username} ${data.url}` : "",
     data.kind === "recovery" ? data.account : "",
+    // 服务器可以按主机名、IP、用户名、端口搜到。
+    data.kind === "server"
+      ? `${data.host} ${data.username} ${data.port}`
+      : "",
   ].join(" ").toLowerCase();
   return haystack.includes(query.toLowerCase());
 }
@@ -530,6 +553,7 @@ export default function VaultPanel() {
       login: 0,
       secret: 0,
       recovery: 0,
+      server: 0,
       reminders: remindersByEntry.size,
     };
     for (const entry of entries) result[entry.data.kind] += 1;
@@ -706,7 +730,7 @@ export default function VaultPanel() {
               />
             </div>
             <div className="vault-new-actions" aria-label="新建">
-              {(["login", "secret", "recovery"] as VaultKind[]).map((kind) => (
+              {(["login", "secret", "server", "recovery"] as VaultKind[]).map((kind) => (
                 <button key={kind} type="button" onClick={() => openNew(kind)}>
                   ＋ {vaultKindLabels[kind]}
                 </button>
@@ -714,7 +738,7 @@ export default function VaultPanel() {
             </div>
           </div>
           <div className="category-filter vault-kind-filter" role="group" aria-label="按类型筛选">
-            {(["all", "login", "secret", "recovery", "reminders"] as KindFilter[])
+            {(["all", "login", "secret", "server", "recovery", "reminders"] as KindFilter[])
               // 「需处理」没有提醒时不显示，正在看这一栏时保留，避免按钮突然消失。
               .filter((kind) => kind !== "reminders" || counts.reminders > 0 || kindFilter === "reminders")
               .map((kind) => (
@@ -816,6 +840,33 @@ export default function VaultPanel() {
                     )}
                     {data.kind === "secret" && (
                       <button type="button" disabled={!data.secret} onClick={() => void copyValue(data.secret, "密钥")}>复制密钥</button>
+                    )}
+                    {data.kind === "server" && (
+                      <>
+                        <button type="button" disabled={!data.host} onClick={() => void copyValue(data.host, "主机")}>复制主机</button>
+                        <button
+                          type="button"
+                          disabled={data.authMethod === "key" ? !data.privateKey : !data.password}
+                          onClick={() => void copyValue(
+                            data.authMethod === "key" ? data.privateKey : data.password,
+                            data.authMethod === "key" ? "私钥" : "密码",
+                          )}
+                        >
+                          {data.authMethod === "key" ? "复制私钥" : "复制密码"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!data.host}
+                          title="复制可直接粘贴到终端的 ssh 命令"
+                          onClick={() => void copyValue(
+                            `ssh${data.port && data.port !== "22" ? ` -p ${data.port}` : ""} ${
+                              data.username ? `${data.username}@` : ""}${data.host}`,
+                            "ssh 命令",
+                          )}
+                        >
+                          复制 ssh
+                        </button>
+                      </>
                     )}
                     {data.kind === "recovery" && (
                       <button

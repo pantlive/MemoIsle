@@ -12,7 +12,7 @@ const KEY_WRAP_AAD = "memoisle-vault-key:v1";
 const ITEM_AAD_PREFIX = "memoisle-vault-item:v1:";
 const MAX_RECOVERY_CODES = 100;
 
-export type VaultKind = "login" | "secret" | "recovery";
+export type VaultKind = "login" | "secret" | "recovery" | "server";
 
 export interface RecoveryCode {
   code: string;
@@ -57,7 +57,32 @@ export interface VaultRecoveryData {
   notes: string;
 }
 
-export type VaultItemData = VaultLoginData | VaultSecretData | VaultRecoveryData;
+// SSH 登录方式决定「密码」和「私钥」哪个字段生效。
+export type ServerAuthMethod = "password" | "key";
+
+export interface VaultServerData extends VaultReminderSettings {
+  kind: "server";
+  title: string;
+  /** 主机名或 IP，例如 203.0.113.10 或 vps.example.com。 */
+  host: string;
+  /** SSH 端口，通常 22。 */
+  port: string;
+  username: string;
+  authMethod: ServerAuthMethod;
+  /** authMethod === "password" 时使用。 */
+  password: string;
+  /** authMethod === "key" 时使用的私钥内容（PEM / OpenSSH）。 */
+  privateKey: string;
+  /** 私钥的口令，可为空。 */
+  keyPassphrase: string;
+  notes: string;
+}
+
+export type VaultItemData =
+  | VaultLoginData
+  | VaultSecretData
+  | VaultRecoveryData
+  | VaultServerData;
 
 export interface VaultEntry {
   id: string;
@@ -266,6 +291,28 @@ function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
   if (raw.kind === "secret") {
     return { kind: "secret", title, secret: text(raw.secret), notes, ...reminderSettings(raw) };
   }
+  if (raw.kind === "server") {
+    const port = text(raw.port);
+    return {
+      kind: "server",
+      title,
+      host: text(raw.host),
+      // 端口只接受 1-65535，越界或 0 回落到 22。
+      port:
+        /^[0-9]{1,5}$/.test(port)
+        && Number(port) >= 1
+        && Number(port) <= 65535
+          ? port
+          : "22",
+      username: text(raw.username),
+      authMethod: raw.authMethod === "key" ? "key" : "password",
+      password: text(raw.password),
+      privateKey: text(raw.privateKey),
+      keyPassphrase: text(raw.keyPassphrase),
+      notes,
+      ...reminderSettings(raw),
+    };
+  }
   if (raw.kind === "recovery") {
     const codes = Array.isArray(raw.codes)
       ? raw.codes
@@ -359,6 +406,21 @@ export function emptyVaultItem(kind: VaultKind): VaultItemData {
   const reminders: VaultReminderSettings = { changedAt: "", rotateDays: 0, expiresOn: "" };
   if (kind === "secret") return { kind, title: "", secret: "", notes: "", ...reminders };
   if (kind === "recovery") return { kind, title: "", account: "", codes: [], notes: "" };
+  if (kind === "server") {
+    return {
+      kind,
+      title: "",
+      host: "",
+      port: "22",
+      username: "root",
+      authMethod: "password",
+      password: "",
+      privateKey: "",
+      keyPassphrase: "",
+      notes: "",
+      ...reminders,
+    };
+  }
   return {
     kind,
     title: "",
@@ -385,6 +447,17 @@ export function stampSecretChange(
     const before = previous?.kind === "secret" ? previous.secret : "";
     if (next.secret && next.secret !== before) return { ...next, changedAt: now };
   }
+  if (next.kind === "server") {
+    // 密码或私钥任一变化都算「换过凭据」。
+    const before = previous?.kind === "server" ? previous : null;
+    const credential = next.authMethod === "key" ? next.privateKey : next.password;
+    const previousCredential = before
+      ? before.authMethod === "key" ? before.privateKey : before.password
+      : "";
+    if (credential && credential !== previousCredential) {
+      return { ...next, changedAt: now };
+    }
+  }
   return next;
 }
 
@@ -392,6 +465,7 @@ export const vaultKindLabels: Record<VaultKind, string> = {
   login: "账号密码",
   secret: "密钥",
   recovery: "恢复码",
+  server: "云服务器",
 };
 
 // 加密备份：直接保存服务器上的密文和导出时的包裹参数，文件里没有任何明文。

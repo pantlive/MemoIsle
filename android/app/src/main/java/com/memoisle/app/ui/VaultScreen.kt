@@ -83,6 +83,9 @@ import com.memoisle.app.data.VAULT_KIND_LABELS
 import com.memoisle.app.data.VAULT_KIND_LOGIN
 import com.memoisle.app.data.VAULT_KIND_RECOVERY
 import com.memoisle.app.data.VAULT_KIND_SECRET
+import com.memoisle.app.data.VAULT_KIND_SERVER
+import com.memoisle.app.data.VAULT_AUTH_KEY
+import com.memoisle.app.data.VAULT_AUTH_PASSWORD
 import com.memoisle.app.data.VAULT_ROTATE_OPTIONS
 import com.memoisle.app.data.VaultEntry
 import com.memoisle.app.data.VaultItemData
@@ -107,11 +110,27 @@ private val DangerSoft = Color(0xFFF8E9E9)
 private const val FILTER_ALL = "all"
 private const val FILTER_REMINDERS = "reminders"
 
-private val kindIcons = mapOf(VAULT_KIND_LOGIN to "账", VAULT_KIND_SECRET to "钥", VAULT_KIND_RECOVERY to "码")
+private val kindIcons = mapOf(
+    VAULT_KIND_LOGIN to "账",
+    VAULT_KIND_SECRET to "钥",
+    VAULT_KIND_RECOVERY to "码",
+    VAULT_KIND_SERVER to "云",
+)
 
 private fun subtitle(data: VaultItemData): String = when (data.kind) {
     VAULT_KIND_LOGIN -> data.username.ifBlank { data.url.ifBlank { "未填写用户名" } }
     VAULT_KIND_SECRET -> if (data.secret.isNotEmpty()) "${data.secret.length} 个字符" else "未填写密钥"
+    VAULT_KIND_SERVER -> {
+        if (data.host.isBlank()) {
+            "未填写主机"
+        } else {
+            val target = (if (data.username.isNotBlank()) "${data.username}@" else "") + data.host
+            val port = if (data.port.isNotBlank() && data.port != "22") ":${
+                data.port
+            }" else ""
+            "$target$port · ${if (data.authMethod == VAULT_AUTH_KEY) "私钥" else "密码"}"
+        }
+    }
     else -> {
         val remaining = data.codes.count { !it.used }
         (if (data.account.isNotBlank()) "${data.account} · " else "") + "剩余 $remaining / ${data.codes.size} 个可用"
@@ -121,7 +140,7 @@ private fun subtitle(data: VaultItemData): String = when (data.kind) {
 // 只按名称、用户名、网址、账号和备注搜索，不匹配密码和密钥本身。
 private fun VaultItemData.matches(query: String): Boolean {
     if (query.isBlank()) return true
-    val haystack = listOf(title, notes, username, url, account).joinToString(" ")
+    val haystack = listOf(title, notes, username, url, account, host, port).joinToString(" ")
     return haystack.contains(query.trim(), ignoreCase = true)
 }
 
@@ -364,7 +383,7 @@ fun VaultScreen(
             title = { Text("新建") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_RECOVERY).forEach { kind ->
+                    listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_SERVER, VAULT_KIND_RECOVERY).forEach { kind ->
                         OutlinedButton(
                             onClick = {
                                 choosingKind = false
@@ -493,7 +512,7 @@ private fun KindFilters(
 ) {
     val options = buildList {
         add(FILTER_ALL to "全部 ${entries.size}")
-        listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_RECOVERY).forEach { kind ->
+        listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_SERVER, VAULT_KIND_RECOVERY).forEach { kind ->
             add(kind to "${VAULT_KIND_LABELS.getValue(kind)} ${entries.count { it.data.kind == kind }}")
         }
         // 没有提醒时不显示；正在看这一栏时保留，避免按钮突然消失。
@@ -713,6 +732,90 @@ private fun VaultItemEditor(
                             OutlinedButton(onClick = { onCopy(draft.secret, "密钥") }, enabled = draft.secret.isNotEmpty()) { Text("复制") }
                         }
                     }
+                    VAULT_KIND_SERVER -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = draft.host,
+                                onValueChange = { update(draft.copy(host = it)) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                label = { Text("主机") },
+                                placeholder = { Text("203.0.113.10") },
+                            )
+                            OutlinedTextField(
+                                value = draft.port,
+                                onValueChange = { value ->
+                                    update(draft.copy(port = value.filter { it.isDigit() }.take(5)))
+                                },
+                                modifier = Modifier.width(110.dp),
+                                singleLine = true,
+                                label = { Text("端口") },
+                                placeholder = { Text("22") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            )
+                        }
+                        OutlinedTextField(
+                            value = draft.username,
+                            onValueChange = { update(draft.copy(username = it)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("登录用户") },
+                            placeholder = { Text("root") },
+                            trailingIcon = { TextButton(onClick = { onCopy(draft.username, "用户名") }) { Text("复制") } },
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = draft.authMethod == VAULT_AUTH_PASSWORD,
+                                onClick = { update(draft.copy(authMethod = VAULT_AUTH_PASSWORD)) },
+                                label = { Text("密码") },
+                            )
+                            FilterChip(
+                                selected = draft.authMethod == VAULT_AUTH_KEY,
+                                onClick = { update(draft.copy(authMethod = VAULT_AUTH_KEY)) },
+                                label = { Text("SSH 私钥") },
+                            )
+                        }
+                        if (draft.authMethod == VAULT_AUTH_KEY) {
+                            OutlinedTextField(
+                                value = draft.privateKey,
+                                onValueChange = { update(draft.copy(privateKey = it)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = if (secretVisible) 4 else 1,
+                                label = { Text("SSH 私钥") },
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { secretVisible = !secretVisible }) { Text(if (secretVisible) "隐藏" else "显示") }
+                                OutlinedButton(onClick = { onCopy(draft.privateKey, "私钥") }, enabled = draft.privateKey.isNotEmpty()) { Text("复制") }
+                            }
+                            OutlinedTextField(
+                                value = draft.keyPassphrase,
+                                onValueChange = { update(draft.copy(keyPassphrase = it)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("私钥口令（可选）") },
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                                visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            )
+                        } else {
+                            OutlinedTextField(
+                                value = draft.password,
+                                onValueChange = { update(draft.copy(password = it)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("登录密码") },
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                                visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { secretVisible = !secretVisible }) { Text(if (secretVisible) "隐藏" else "显示") }
+                                OutlinedButton(onClick = { update(draft.copy(password = generateVaultPassword())) }) { Text("生成") }
+                                OutlinedButton(onClick = { onCopy(draft.password, "密码") }, enabled = draft.password.isNotEmpty()) { Text("复制") }
+                            }
+                        }
+                    }
                     else -> {
                         OutlinedTextField(
                             value = draft.account,
@@ -753,7 +856,7 @@ private fun VaultItemEditor(
                         ) { Text("添加恢复码") }
                     }
                 }
-                if (draft.kind == VAULT_KIND_LOGIN || draft.kind == VAULT_KIND_SECRET) {
+                if (draft.kind == VAULT_KIND_LOGIN || draft.kind == VAULT_KIND_SECRET || draft.kind == VAULT_KIND_SERVER) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -763,7 +866,13 @@ private fun VaultItemEditor(
                     ) {
                         Text("提醒", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "${if (draft.kind == VAULT_KIND_LOGIN) "密码" else "密钥"}上次更换：$changedLabel",
+                            "${
+                                when (draft.kind) {
+                                    VAULT_KIND_LOGIN -> "密码"
+                                    VAULT_KIND_SERVER -> "登录凭据"
+                                    else -> "密钥"
+                                }
+                            }上次更换：$changedLabel",
                             color = TextMuted,
                             style = MaterialTheme.typography.bodySmall,
                         )
