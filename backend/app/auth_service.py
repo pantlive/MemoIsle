@@ -609,6 +609,33 @@ def consume_verification_code(
     session.commit()
 
 
+def email_token_recently_issued(
+    session: Session,
+    settings: Settings,
+    user: User,
+    purpose: str,
+) -> bool:
+    """同账号同用途的邮件令牌是否在重发间隔内刚签发过。
+
+    重置/验证请求是匿名接口：不节流时任何人都能对受害者邮箱无限发信，
+    而且每次签发会让上一封邮件里的链接失效，受害者永远拿不到可用链接。
+    """
+
+    cutoff = utc_now() - timedelta(
+        seconds=settings.auth_verification_code_resend_seconds,
+    )
+    latest = session.scalar(
+        select(AuthEmailToken.created_at)
+        .where(
+            AuthEmailToken.user_id == user.id,
+            AuthEmailToken.purpose == purpose,
+        )
+        .order_by(AuthEmailToken.created_at.desc())
+        .limit(1),
+    )
+    return latest is not None and _normalized_expires_at(latest) > cutoff
+
+
 def issue_email_token(
     session: Session,
     settings: Settings,
@@ -683,6 +710,10 @@ def request_email_verification_token(
     user = session.get(User, credential.user_id)
     if user is None or user.email_verified:
         return None
+    if email_token_recently_issued(session, settings, user, VERIFY_EMAIL_PURPOSE):
+        # 间隔内的重复请求不再发信，也不让上一封的链接失效；
+        # 接口照常返回成功，避免借响应差异探测邮箱是否注册。
+        return None
     token = issue_email_token(
         session,
         settings,
@@ -724,6 +755,10 @@ def request_password_reset_token(
     )
     user = session.get(User, credential.user_id) if credential else None
     if user is None or credential is None:
+        return None
+    if email_token_recently_issued(session, settings, user, PASSWORD_RESET_PURPOSE):
+        # 间隔内的重复请求不再发信，也不让上一封的链接失效；
+        # 接口照常返回成功，避免借响应差异探测邮箱是否注册。
         return None
     token = issue_email_token(
         session,

@@ -453,3 +453,82 @@ def test_login_is_rate_limited_after_repeated_failures(tmp_path: Path) -> None:
         )
         assert limited.status_code == 429
         assert limited.headers["Retry-After"] == "900"
+
+
+def _register(client: TestClient, tmp_path: Path, email: str) -> None:
+    client.post("/api/v1/auth/verification-code", json={"email": email})
+    code = read_outbox_verification_code(tmp_path / "email-outbox")
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "pw-12345678",
+            "confirm_password": "pw-12345678",
+            "verification_code": code,
+        },
+    )
+    assert response.status_code == 201
+
+
+def test_password_reset_requests_are_throttled_per_account(tmp_path: Path) -> None:
+    """匿名的重置请求不能对同一邮箱无限发信，也不能让已发链接失效。"""
+
+    with create_auth_client(tmp_path, auth_dev_mode=True) as client:
+        _register(client, tmp_path, "flood@example.com")
+        outbox = tmp_path / "email-outbox"
+        before = len(list(outbox.glob("*.eml")))
+
+        statuses = {
+            client.post(
+                "/api/v1/auth/password-reset/request",
+                json={"email": "flood@example.com"},
+            ).status_code
+            for _ in range(20)
+        }
+
+        # 接口始终返回成功，不暴露节流状态。
+        assert statuses == {202}
+        assert len(list(outbox.glob("*.eml"))) - before == 1
+        # 第一封邮件里的链接仍然有效。
+        token = read_outbox_token(outbox, "password_reset")
+        reset = client.post(
+            "/api/v1/auth/password-reset",
+            json={
+                "token": token,
+                "password": "new-password-1",
+                "confirm_password": "new-password-1",
+            },
+        )
+        assert reset.status_code == 200
+
+
+def test_reset_can_be_requested_again_after_cooldown(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """过了重发间隔可以再次请求。"""
+
+    from datetime import timedelta
+
+    import app.auth_service as auth_service
+
+    with create_auth_client(tmp_path, auth_dev_mode=True) as client:
+        _register(client, tmp_path, "later@example.com")
+        outbox = tmp_path / "email-outbox"
+        client.post(
+            "/api/v1/auth/password-reset/request",
+            json={"email": "later@example.com"},
+        )
+        sent = len(list(outbox.glob("*.eml")))
+
+        real_now = auth_service.utc_now
+        monkeypatch.setattr(
+            auth_service,
+            "utc_now",
+            lambda: real_now() + timedelta(minutes=5),
+        )
+        client.post(
+            "/api/v1/auth/password-reset/request",
+            json={"email": "later@example.com"},
+        )
+        assert len(list(outbox.glob("*.eml"))) == sent + 1
