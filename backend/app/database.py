@@ -664,14 +664,65 @@ def is_sqlite_lock_error(error: BaseException) -> bool:
     return "database is locked" in message or "database is busy" in message
 
 
+def _snapshot_pending_changes(
+    session: Session,
+) -> tuple[list[Any], list[tuple[Any, dict[str, Any]]], list[Any]]:
+    """记下尚未落库的变更：新增、改动过的字段、待删除。
+
+    ``rollback()`` 会把它们一并撤销，而重试时的 ``commit()`` 只提交
+    **当前**会话状态——于是「先回滚再重试提交」会静默丢掉这次写入，
+    接口还返回成功。所以重试前必须把变更原样放回会话。
+    """
+
+    created = list(session.new)
+    modified: list[tuple[Any, dict[str, Any]]] = []
+    for instance in session.dirty:
+        state = inspect(instance)
+        changes: dict[str, Any] = {}
+        for attribute in state.attrs:
+            history = attribute.history
+            if history.has_changes() and history.added:
+                changes[attribute.key] = history.added[0]
+        if changes:
+            modified.append((instance, changes))
+    return created, modified, list(session.deleted)
+
+
+def _restore_pending_changes(
+    session: Session,
+    created: list[Any],
+    modified: list[tuple[Any, dict[str, Any]]],
+    deleted: list[Any],
+) -> None:
+    """把回滚掉的变更重新放回会话，让下一次提交真的写下去。"""
+
+    for instance in created:
+        if instance not in session:
+            session.add(instance)
+    for instance, changes in modified:
+        for key, value in changes.items():
+            # 回滚后属性是过期状态，重新赋值才会被登记为待写入。
+            setattr(instance, key, value)
+    for instance in deleted:
+        if instance in session:
+            session.delete(instance)
+
+
 def commit_with_retry(
     session: Session,
     attempts: int = SQLITE_LOCK_COMMIT_ATTEMPTS,
 ) -> None:
-    """提交会话；遇到 SQLite 锁时回滚后短暂重试，避免前台保存直接 500。"""
+    """提交会话；遇到 SQLite 锁时重放变更后短暂重试。
+
+    必须在重试前恢复变更：单纯回滚再提交，第二次提交已经没有内容可写，
+    会「成功返回但数据没落库」。生产 ``busy_timeout`` 是 30 秒，只有写锁
+    被占用超过它（例如长批次任务）才会走到这里，所以更难被发现。
+    """
 
     delay = 0.05
     for attempt in range(attempts):
+        # 快照要在 commit 之前取：commit 失败时 flush 已经把变更推出去了。
+        created, modified, deleted = _snapshot_pending_changes(session)
         try:
             session.commit()
             return
@@ -679,5 +730,6 @@ def commit_with_retry(
             if not is_sqlite_lock_error(error) or attempt == attempts - 1:
                 raise
             session.rollback()
+            _restore_pending_changes(session, created, modified, deleted)
             time.sleep(delay)
             delay = min(delay * 2, 0.8)
