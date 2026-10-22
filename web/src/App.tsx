@@ -751,6 +751,11 @@ export default function App({ authUser, onLogout }: AppProps) {
   const voiceAutomaticTextRef = useRef("");
   const recognitionBaseTextRef = useRef("");
   const loadRequestRef = useRef(0);
+  // 编辑器保存时的乐观锁基准：在 selectMemo 时固定，
+  // 不随后台对 memos 的整表刷新而漂移（否则可能覆盖它处刚保存的版本）。
+  const editorBaseVersionRef = useRef(0);
+  // 与基准版本对应的服务端内容，用来判断编辑器里有没有未保存的修改。
+  const editorBaseContentRef = useRef({ title: "", body: "", phonetic: "", example: "" });
   const captureTokenHandledRef = useRef<string | null>(null);
 
   const stopMeetingCapture = () => {
@@ -866,6 +871,47 @@ export default function App({ authUser, onLogout }: AppProps) {
   );
 
   useEffect(() => {
+    if (
+      !selectedMemo ||
+      selectedMemo.type === "resource" ||
+      editorBaseVersionRef.current === 0 ||
+      selectedMemo.version === editorBaseVersionRef.current
+    ) {
+      return;
+    }
+    const base = editorBaseContentRef.current;
+    const hasLocalEdits =
+      editorTitle !== base.title ||
+      editorBody !== base.body ||
+      editorPhonetic !== base.phonetic ||
+      editorExample !== base.example;
+    if (hasLocalEdits) {
+      // 有未保存的修改：保留旧基准，保存时由服务端返回 409，进入冲突处理，
+      // 不能静默覆盖其他设备或后台刚写入的版本。
+      return;
+    }
+    // 没有本地修改：服务端版本变化（其他设备、后台刷新、本页的复习/OCR 等）
+    // 直接同步到编辑器并推进基准，避免下一次保存误报冲突。
+    const nextBody = selectedMemo.type === "word"
+      ? selectedMemo.word_meaning ?? selectedMemo.body
+      : selectedMemo.body;
+    const next = {
+      title: selectedMemo.title,
+      body: nextBody,
+      phonetic: selectedMemo.word_phonetic ?? "",
+      example: selectedMemo.word_example ?? "",
+    };
+    editorBaseVersionRef.current = selectedMemo.version;
+    editorBaseContentRef.current = next;
+    setEditorTitle(next.title);
+    setEditorBody(next.body);
+    setEditorPhonetic(next.phonetic);
+    setEditorExample(next.example);
+    // 只在 version 变化时检查；编辑器输入变化不应触发同步。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMemo?.id, selectedMemo?.version]);
+
+  useEffect(() => {
     if (!selectedMemo || selectedMemo.type === "resource") {
       return;
     }
@@ -887,7 +933,7 @@ export default function App({ authUser, onLogout }: AppProps) {
         body: editorBody,
         phonetic: editorPhonetic,
         example: editorExample,
-        baseVersion: selectedMemo.version,
+        baseVersion: editorBaseVersionRef.current || selectedMemo.version,
         updatedAt: new Date().toISOString(),
       });
     }, 150);
@@ -2062,6 +2108,14 @@ export default function App({ authUser, onLogout }: AppProps) {
     setConflictMemo(null);
     setShowWordAnswer(false);
     setSaveState("idle");
+    // 固定编辑基准，避免后台刷新 memos 导致 version 漂移。
+    editorBaseVersionRef.current = memo.version;
+    editorBaseContentRef.current = {
+      title: memo.title,
+      body: serverBody,
+      phonetic: memo.word_phonetic ?? "",
+      example: memo.word_example ?? "",
+    };
     setMessage(
       savedDraft
         ? savedDraft.baseVersion !== memo.version
@@ -2642,7 +2696,7 @@ export default function App({ authUser, onLogout }: AppProps) {
     setMessage("");
     try {
       const updated = await updateMemo(selectedMemo.id, {
-        expected_version: selectedMemo.version,
+        expected_version: editorBaseVersionRef.current || selectedMemo.version,
         title: editorTitle.trim(),
         body:
           selectedMemo.type === "image"
@@ -2659,6 +2713,14 @@ export default function App({ authUser, onLogout }: AppProps) {
         current.map((memo) => (memo.id === updated.id ? updated : memo)),
       );
       clearEditorDraft(authUser.id, updated.id);
+      // 保存成功后基准跟上新版本，否则下一次保存必然 409。
+      editorBaseVersionRef.current = updated.version;
+      editorBaseContentRef.current = {
+        title: updated.title,
+        body: updated.type === "word" ? updated.word_meaning ?? updated.body : updated.body,
+        phonetic: updated.word_phonetic ?? "",
+        example: updated.word_example ?? "",
+      };
       setSaveState("saved");
       if (undoMemo?.id === updated.id) {
         setUndoMemo(updated);
@@ -2683,6 +2745,10 @@ export default function App({ authUser, onLogout }: AppProps) {
   };
 
   const keepLocalConflict = () => {
+    // 用户选择以本地内容覆盖：基准改成服务端当前版本，否则再次保存仍会 409。
+    if (conflictMemo) {
+      editorBaseVersionRef.current = conflictMemo.version;
+    }
     setConflictMemo(null);
     setSaveState("idle");
     setMessage("已保留本地修改，请确认内容后再次保存。");
@@ -2693,6 +2759,15 @@ export default function App({ authUser, onLogout }: AppProps) {
       return;
     }
     const serverMemo = conflictMemo;
+    editorBaseVersionRef.current = serverMemo.version;
+    editorBaseContentRef.current = {
+      title: serverMemo.title,
+      body: serverMemo.type === "word"
+        ? serverMemo.word_meaning ?? serverMemo.body
+        : serverMemo.body,
+      phonetic: serverMemo.word_phonetic ?? "",
+      example: serverMemo.word_example ?? "",
+    };
     setEditorTitle(serverMemo.title);
     setEditorBody(
       serverMemo.type === "word"
