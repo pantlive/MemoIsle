@@ -5022,10 +5022,32 @@ button.resource-user-tag:hover {
   }
 }
 
+/* 安装包下载在登录页和设置中始终可见，方便手机直接安装。 */
+.auth-android-download,
+.android-download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.auth-android-download {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .side-navigation,
   .sync-status,
   .extension-download-button,
+  .android-download-button,
   .data-export-controls,
   .compact-new {
     display: none;

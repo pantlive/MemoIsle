@@ -10,6 +10,7 @@ import App from "./App";
 import BrandLogo from "./BrandLogo";
 import {
   ApiError,
+  androidDownloadUrl,
   authAuthorizationUrl,
   clearAccessToken,
   devLogin,
@@ -333,7 +334,18 @@ export default function AuthGate(): ReactNode {
   }
 
   if (status === "authenticated" && user) {
-    return <App authUser={user} onLogout={handleLogout} />;
+    return (
+      <App
+        authUser={user}
+        onLogout={handleLogout}
+        onPasswordChanged={() => {
+          setNotice("密码已修改，请使用新密码重新登录。");
+          setEmailAuthMode("login");
+          setPassword("");
+          void handleLogout();
+        }}
+      />
+    );
   }
 
   const enabledProviders =
@@ -692,6 +704,11 @@ export default function AuthGate(): ReactNode {
             注册即表示你同意我们只为同步服务保存必要信息
           </p>
         )}
+        <a
+          className="auth-android-download"
+          href={androidDownloadUrl()}
+          download="MemoIsle-android.apk"
+        >↓ 下载安卓端（APK）</a>
         {isEmailMode && (
           <div className="auth-trust-note">
             <span className="auth-trust-icon" aria-hidden="true">↔</span>

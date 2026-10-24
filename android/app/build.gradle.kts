@@ -8,7 +8,7 @@ plugins {
 }
 
 val releaseApiBaseUrl = providers.gradleProperty("MEMOISLE_API_BASE_URL")
-    .orElse("https://api.example.invalid/api/v1/")
+    .orElse("https://memo.17115859.xyz:9443/api/v1/")
 val senseVoiceModelArchiveUrl = providers.gradleProperty("MEMOISLE_SENSEVOICE_MODEL_URL")
     .orElse(
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
@@ -70,8 +70,8 @@ android {
         applicationId = "com.memoisle.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 5
+        versionName = "0.1.4"
         buildConfigField(
             "String",
             "SENSEVOICE_MODEL_ARCHIVE_URL",
@@ -92,7 +92,12 @@ android {
             )
         }
         release {
-            isMinifyEnabled = false
+            // 发布包覆盖 ARM 手机，模拟器架构保留在 Debug 中。
+            ndk {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
+            isMinifyEnabled = true
+            isShrinkResources = true
             buildConfigField(
                 "String",
                 "API_BASE_URL",
@@ -117,6 +122,8 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // 压缩原生库降低下载体积，由 Android 安装时按设备架构解压。
+        jniLibs.useLegacyPackaging = true
     }
 }
 
@@ -133,6 +140,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")

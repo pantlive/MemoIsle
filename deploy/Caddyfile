@@ -1,0 +1,26 @@
+# 把 memo.example.com 换成你的域名。Caddy 会自动申请并续期 HTTPS 证书。
+memo.example.com {
+	encode zstd gzip
+
+	# 接口交给后端；录音、图片、导入文件最大约 20 MB，留出余量。
+	handle /api/* {
+		request_body {
+			max_size 30MB
+		}
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# 其余请求是 Web 前端：静态文件，找不到的路径回到 index.html（前端路由）。
+	handle {
+		root * /opt/memoisle/web/dist
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

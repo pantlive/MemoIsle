@@ -2,6 +2,7 @@ package com.memoisle.app.ui
 
 import android.util.Patterns
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -47,6 +49,7 @@ import com.memoisle.app.AuthMessageTone
 import com.memoisle.app.AuthStatus
 import com.memoisle.app.AuthUiState
 import com.memoisle.app.AuthViewModel
+import com.memoisle.app.R
 import com.memoisle.app.network.AuthProviderInfo
 
 @Composable
@@ -220,11 +223,10 @@ private fun AuthBrand(): Unit {
                 .border(1.dp, DeepTeal.copy(alpha = 0.18f), RoundedCornerShape(15.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = "M",
-                color = DeepTeal,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleLarge,
+            Image(
+                painter = painterResource(R.drawable.ic_memoisle),
+                contentDescription = null,
+                modifier = Modifier.size(50.dp),
             )
         }
         Spacer(modifier = Modifier.height(6.dp))

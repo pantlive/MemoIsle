@@ -1,0 +1,9 @@
+# 小内存服务器只安装 API 运行依赖，OCR 和服务端 TTS 在环境配置中关闭。
+name: memoisle-vps
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - -r ../backend/requirements.txt

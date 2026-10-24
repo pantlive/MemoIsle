@@ -224,6 +224,7 @@ __marimo__/
 /web/node_modules/
 /web/dist/
 /android/.gradle/
+/android/.kotlin/
 /android/local.properties
 /android/**/build/
 /android/app/src/main/assets/models/sensevoice/model.int8.onnx

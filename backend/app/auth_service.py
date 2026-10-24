@@ -71,6 +71,10 @@ class EmailNotVerifiedError(Exception):
     """邮箱账号在登录前需要完成所有权验证。"""
 
 
+class PasswordChangeUnavailableError(Exception):
+    """当前账号没有可修改的邮箱密码登录凭据。"""
+
+
 class LoginRateLimitedError(Exception):
     """邮箱登录因连续失败被临时限制。"""
 
@@ -865,13 +869,12 @@ def register_with_password(
     return user
 
 
-def login_with_password(
+def _check_password_attempt_limit(
     session: Session,
     settings: Settings,
     email: str,
-    password: str,
-) -> CreatedAuthSession:
-    """校验邮箱密码并签发登录会话。"""
+) -> None:
+    """登录与修改密码共用失败次数限制，避免猜测当前密码。"""
 
     cutoff = utc_now() - timedelta(
         seconds=settings.auth_login_rate_limit_window_seconds,
@@ -888,6 +891,83 @@ def login_with_password(
     if failed_count and failed_count >= settings.auth_login_rate_limit_attempts:
         raise LoginRateLimitedError(settings.auth_login_rate_limit_window_seconds)
 
+
+def change_password(
+    session: Session,
+    settings: Settings,
+    user_id: str,
+    current_password: str,
+    password: str,
+) -> None:
+    """校验当前密码后更换摘要，并撤销该账号全部会话和重置令牌。"""
+
+    credential = session.scalar(
+        select(AuthCredential).where(AuthCredential.user_id == user_id),
+    )
+    if credential is None:
+        raise PasswordChangeUnavailableError
+    _check_password_attempt_limit(session, settings, credential.email)
+    candidate_hash = _password_digest(
+        current_password,
+        credential.password_salt,
+        credential.password_iterations,
+    )
+    if not hmac.compare_digest(candidate_hash, credential.password_hash):
+        _record_login_failure(session, credential.email)
+        raise InvalidEmailCredentialsError
+
+    # 条件更新防止并发请求在其他设备刚改密后，用旧密码再次覆盖新密码。
+    password_salt = secrets.token_bytes(16).hex()
+    changed = session.execute(
+        update(AuthCredential)
+        .where(
+            AuthCredential.id == credential.id,
+            AuthCredential.password_hash == credential.password_hash,
+        )
+        .values(
+            password_hash=_password_digest(
+                password, password_salt, PASSWORD_ITERATIONS,
+            ),
+            password_salt=password_salt,
+            password_iterations=PASSWORD_ITERATIONS,
+        ),
+    )
+    if changed.rowcount != 1:
+        session.rollback()
+        raise InvalidEmailCredentialsError
+    now = utc_now()
+    # 当前设备也重新登录，且旧邮件重置链接不能覆盖刚设置的新密码。
+    session.execute(
+        update(AuthSession)
+        .where(AuthSession.user_id == user_id)
+        .values(revoked_at=now),
+    )
+    session.execute(
+        update(AuthEmailToken)
+        .where(
+            AuthEmailToken.user_id == user_id,
+            AuthEmailToken.purpose == PASSWORD_RESET_PURPOSE,
+            AuthEmailToken.used_at.is_(None),
+        )
+        .values(used_at=now),
+    )
+    session.execute(
+        delete(AuthLoginAttempt).where(
+            AuthLoginAttempt.email == credential.email,
+        ),
+    )
+    session.commit()
+
+
+def login_with_password(
+    session: Session,
+    settings: Settings,
+    email: str,
+    password: str,
+) -> CreatedAuthSession:
+    """校验邮箱密码并签发登录会话。"""
+
+    _check_password_attempt_limit(session, settings, email)
     credential = session.scalar(
         select(AuthCredential).where(AuthCredential.email == email),
     )

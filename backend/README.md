@@ -42,6 +42,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_EMAIL_OUTBOX_DIRECTORY`：开发模式下未配置 SMTP 时保存 `.eml` 的目录。
 - `MEMOISLE_AUDIO_DIRECTORY`：原始录音的本地开发存储目录。
 - `MEMOISLE_IMAGE_DIRECTORY`：图片收藏原图与缩略图的本地开发存储目录，默认 `data/images`。
+- `MEMOISLE_ANDROID_APK_PATH`：公开下载的已签名 Android APK 路径，默认仓库根目录下 `downloads/memoisle-android.apk`；`GET/HEAD /api/v1/android/download` 无需登录，支持 Range 断点续传，未发布时返回 404。
 - `MEMOISLE_LLM_BASE_URL`：OpenAI 兼容接口地址（例如 DeepSeek 的 `https://api.deepseek.com/v1`）；用于会议总结。
 - `MEMOISLE_LLM_API_KEY`：OpenAI 兼容接口密钥；本地无需鉴权的模型服务可留空。
 - `MEMOISLE_LLM_MODEL`：会议总结使用的模型名称，例如 `deepseek-chat`。
@@ -187,6 +188,12 @@ Android 自定义地址。令牌只在数据库保存 SHA-256 哈希，退出登
 一次性重置链接，`POST /auth/password-reset` 设置新密码、验证邮箱并撤销既有会话。
 生产环境必须配置 AgentlyMail CLI 或 SMTP；开发模式可设置
 `MEMOISLE_EMAIL_PROVIDER=outbox`，把邮件写入本地 `.eml` 收件箱。
+
+登录后可通过 `POST /api/v1/auth/password-change` 修改登录密码，请求包含
+`current_password`、`password` 和 `confirm_password`；新密码需为 8–128 个字符，
+两次输入一致且不同于当前密码。当前密码错误返回 400，失败次数与登录共用限流。
+成功后撤销该账号全部会话及未使用的密码重置链接，所有设备需使用新密码重新登录。
+该操作仅修改账号登录密码，密码库使用独立的主密码。
 
 ## 数据导出
 

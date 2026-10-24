@@ -6,7 +6,9 @@
     <application
         android:name=".MemoIsleApplication"
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="MemoIsle"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.MemoIsle">
         <activity

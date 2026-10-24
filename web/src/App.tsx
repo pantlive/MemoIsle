@@ -68,6 +68,7 @@ import {
   browserExtensionDownloadUrl,
   createImageMemo,
   createMemo,
+  androidDownloadUrl,
   downloadUserData,
   emptyTrash,
   exchangeBrowserCapture,
@@ -161,6 +162,7 @@ const IMAGE_OCR_STATUS_LABELS: Record<ImageOcrStatus, string> = {
 interface AppProps {
   authUser: AuthUser;
   onLogout: () => void;
+  onPasswordChanged: () => void;
 }
 
 interface NavigationItem {
@@ -550,7 +552,7 @@ function resourceRowElements(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(".memo-list .memo-row[data-memo-id]"));
 }
 
-export default function App({ authUser, onLogout }: AppProps) {
+export default function App({ authUser, onLogout, onPasswordChanged }: AppProps) {
   const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
   const [currentResultCount, setCurrentResultCount] = useState(0);
@@ -4021,6 +4023,11 @@ export default function App({ authUser, onLogout }: AppProps) {
             download={browserExtensionArchiveFilename()}
             title="下载后解压，并在 Chrome 或 Edge 中加载已解压的扩展"
           >↓ 下载扩展</a>
+          <a
+            className="top-bar-button android-download-button"
+            href={androidDownloadUrl()}
+            download="MemoIsle-android.apk"
+          >↓ 下载安卓端</a>
           <div className="data-export-controls">
             <input
               ref={wordImportInputRef}
@@ -5919,7 +5926,15 @@ export default function App({ authUser, onLogout }: AppProps) {
       )}
 
       {modelSettingsOpen && (
-        <ModelSettingsDialog onClose={() => setModelSettingsOpen(false)} />
+        <ModelSettingsDialog
+          onClose={() => setModelSettingsOpen(false)}
+          accountEmail={authUser.email}
+          onPasswordChanged={() => {
+            lockVaultSession();
+            saveVaultReminderCount(0);
+            onPasswordChanged();
+          }}
+        />
       )}
 
       {ebookCollectOpen && (

@@ -2,4 +2,5 @@
 <resources>
     <color name="memoisle_background">#F6F7F2</color>
     <color name="memoisle_primary">#177A72</color>
+    <color name="memoisle_icon_background">#E2F2EE</color>
 </resources>

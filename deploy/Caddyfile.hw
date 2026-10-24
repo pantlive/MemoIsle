@@ -1,0 +1,51 @@
+# hw 的 443 端口由 DERP 使用，8443 留给 home，MemoIsle 使用 9443。
+https://memo.17115859.xyz:9443 {
+	tls {
+		issuer acme {
+			dir https://acme-v02.api.letsencrypt.org/directory
+			disable_tlsalpn_challenge
+		}
+	}
+	encode zstd gzip
+
+	handle /api/* {
+		request_body {
+			max_size 30MB
+		}
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		root * /opt/memoisle/web/dist
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# 域名解析生效前保留 IP 入口，便于检查部署状态。
+http://113.45.59.172 {
+	encode zstd gzip
+	handle /api/* {
+		request_body {
+			max_size 30MB
+		}
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		root * /opt/memoisle/web/dist
+		try_files {path} /index.html
+		file_server
+	}
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

@@ -258,6 +258,10 @@ export function authAuthorizationUrl(
   return `${API_BASE_URL}/auth/${provider}/authorize?${searchParams}`;
 }
 
+export function androidDownloadUrl(): string {
+  return `${API_BASE_URL}/android/download`;
+}
+
 export async function getAuthProviders(): Promise<AuthProvidersResponse> {
   return request<AuthProvidersResponse>("/auth/providers");
 }
@@ -335,6 +339,21 @@ export async function loginWithEmail(
   return request<AuthSession>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function changePassword(
+  currentPassword: string,
+  password: string,
+  confirmPassword: string,
+): Promise<void> {
+  await request<{ status: string }>("/auth/password-change", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      password,
+      confirm_password: confirmPassword,
+    }),
   });
 }
 

@@ -20,6 +20,7 @@
 | [Web 标签与页面 Logo](design/memoisle-brand-logo.md) | Stitch 品牌图标、统一 SVG 与小尺寸预览 |
 | [Stitch 设计交付](stitch-delivery.md) | Stitch 项目、设计系统、页面标识和交付状态 |
 | [实现状态](implementation-status.md) | 已完成代码、运行方式、验证结果和当前边界 |
+| [VPS 部署](deployment-vps.md) | conda 精简环境、systemd/Caddy、hw 端口、邮件与运维 |
 
 ## 当前范围
 

@@ -1,0 +1,32 @@
+[Unit]
+Description=MemoIsle backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=memoisle
+Group=memoisle
+WorkingDirectory=/opt/memoisle
+EnvironmentFile=/etc/memoisle/memoisle.env
+# 只开 1 个 worker：SQLite 同一时刻只有一个写入者，多开吞吐上不去；
+# 每个 worker 还会各自启动一套后台任务。只监听本机，由 Caddy 对外提供 HTTPS。
+ExecStart=/opt/memoisle/.conda/bin/uvicorn app.main:app --app-dir backend \
+    --host 127.0.0.1 --port 8000 --workers 1 \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+# 进程内存超过 1.5G 先被限流回收，超过 1.8G 直接重启，避免拖垮整台 2G 机器。
+MemoryHigh=1500M
+MemoryMax=1800M
+
+# 只允许写数据目录，其他位置只读。
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/memoisle
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

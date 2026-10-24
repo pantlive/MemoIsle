@@ -19,6 +19,7 @@ DEFAULT_AUDIO_DIRECTORY = PROJECT_ROOT.parent / "data" / "audio"
 DEFAULT_IMAGE_DIRECTORY = PROJECT_ROOT.parent / "data" / "images"
 DEFAULT_SANOTTS_CACHE_DIRECTORY = PROJECT_ROOT.parent / "data" / "sanotts"
 DEFAULT_EMAIL_OUTBOX_DIRECTORY = PROJECT_ROOT.parent / "data" / "email_outbox"
+DEFAULT_ANDROID_APK_PATH = PROJECT_ROOT / "downloads" / "memoisle-android.apk"
 DEFAULT_WORD_DICTIONARY_BASE_URL = (
     "https://freedictionaryapi.com/api/v1/entries/en"
 )
@@ -194,6 +195,7 @@ class Settings:
     word_bilingual_enabled: bool = True
     word_bilingual_dictionary_url: str = DEFAULT_WORD_BILINGUAL_DICTIONARY_URL
     word_bilingual_suggest_url: str = DEFAULT_WORD_BILINGUAL_SUGGEST_URL
+    android_apk_path: Path = DEFAULT_ANDROID_APK_PATH
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -287,6 +289,9 @@ class Settings:
             True,
         )
         return cls(
+            android_apk_path=Path(
+                os.environ.get("MEMOISLE_ANDROID_APK_PATH", DEFAULT_ANDROID_APK_PATH),
+            ),
             database_url=database_url,
             cors_origins=cors_origins,
             local_user_id=local_user_id,

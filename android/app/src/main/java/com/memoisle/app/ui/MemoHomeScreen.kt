@@ -6,9 +6,11 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +19,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -32,38 +35,87 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.filled.CollectionsBookmark
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloseFullscreen
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.HealthAndSafety
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.OpenInFull
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,13 +128,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,38 +147,38 @@ import androidx.core.content.ContextCompat
 import com.memoisle.app.MemoIsleApplication
 import com.memoisle.app.MemoViewModel
 import com.memoisle.app.VaultViewModel
+import com.memoisle.app.audio.SherpaOnnxSpeechToText
 import com.memoisle.app.audio.VoiceRecorder
 import com.memoisle.app.audio.VoiceRecording
 import com.memoisle.app.audio.WordPronouncer
-import com.memoisle.app.audio.SherpaOnnxSpeechToText
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_IDEA
 import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
+import com.memoisle.app.data.assignedCategoryCodes
 import com.memoisle.app.data.formatFileSize
 import com.memoisle.app.data.hasUploadedImage
-import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.data.imageDimensionsLabel
 import com.memoisle.app.data.imageOcrSourceLabel
 import com.memoisle.app.data.imageOcrStatusLabel
 import com.memoisle.app.data.isDueWord
+import com.memoisle.app.data.isInTrash
 import com.memoisle.app.data.isInboxIdea
 import com.memoisle.app.data.isUnreadResource
-import com.memoisle.app.data.isInTrash
 import com.memoisle.app.data.isVisibleInLibrary
 import com.memoisle.app.data.linkHealthLabel
-import com.memoisle.app.data.trashDaysRemaining
 import com.memoisle.app.data.matchesQuery
 import com.memoisle.app.data.newLocalWord
 import com.memoisle.app.data.normalizeResourceUrl
 import com.memoisle.app.data.parseClipboardWord
-import com.memoisle.app.data.assignedCategoryCodes
 import com.memoisle.app.data.resourceCategoryLabel
 import com.memoisle.app.data.resourceHost
 import com.memoisle.app.data.todayReviewCounts
 import com.memoisle.app.data.todayReviewItems
+import com.memoisle.app.data.trashDaysRemaining
+import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.network.ReviewSettings
 import com.memoisle.app.network.WordLookupResponse
 import com.memoisle.app.network.WordLookupSense
@@ -598,23 +655,86 @@ fun MemoHomeScreen(
         return
     }
 
+    val isHome = !showAllMemos && !showReview && !showTrash && !showInbox
+    val inboxCount = remember(memos) { memos.count { it.status == "inbox" } }
+    fun showHome() {
+        showAllMemos = false
+        showReview = false
+        showTrash = false
+        showInbox = false
+        searchQuery = ""
+    }
+    // 收件箱、回收站、资料库和回顾里按返回先回首页，不再直接退出应用。
+    BackHandler(enabled = !isHome) { showHome() }
+    // 各页面共用同一个列表，切换页面或首页类型时回到顶部，不停在上一页的滚动位置。
+    val listState = rememberLazyListState()
+    LaunchedEffect(showAllMemos, showReview, showTrash, showInbox, activeType, libraryTypeFilter) {
+        listState.scrollToItem(0)
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = WarmMist,
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            MemoTopBar(
+                title = when {
+                    showInbox -> "收件箱"
+                    showTrash -> "回收站"
+                    showReview -> "今日回顾"
+                    showAllMemos -> "资料库"
+                    else -> "MemoIsle"
+                },
+                subtitle = when {
+                    showInbox -> "${inboxMemos.size} 条待整理"
+                    showTrash -> "${trashMemos.size} 条 · 保留 30 天后永久删除"
+                    else -> null
+                },
+                brand = isHome,
+                navigationIcon = if (showInbox || showTrash) {
+                    {
+                        IconButton(onClick = ::showHome) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回首页")
+                        }
+                    }
+                } else {
+                    null
+                },
+            ) {
+                TopBarActions(
+                    inboxCount = inboxCount,
+                    showInboxAction = !showInbox,
+                    showTrashAction = !showTrash,
+                    isRefreshing = uiState.isRefreshing,
+                    isSaving = uiState.isSaving,
+                    isExporting = uiState.isExporting,
+                    onShowInbox = {
+                        showInbox = true
+                        showTrash = false
+                        showReview = false
+                        showAllMemos = false
+                        selectedMemo = null
+                    },
+                    onShowTrash = {
+                        showTrash = true
+                        showInbox = false
+                        showReview = false
+                        showAllMemos = false
+                        selectedMemo = null
+                    },
+                    onRefresh = viewModel::refresh,
+                    onExport = { exportLauncher.launch("memoisle-export.json") },
+                    onLogout = ::requestLogout,
+                )
+            }
+        },
         bottomBar = {
             MemoBottomNavigation(
                 showAllMemos = showAllMemos,
                 showReview = showReview,
                 showTrash = showTrash,
                 showInbox = showInbox,
-                onShowHome = {
-                    showAllMemos = false
-                    showReview = false
-                    showTrash = false
-                    showInbox = false
-                    searchQuery = ""
-                },
+                onShowHome = ::showHome,
                 onShowLibrary = {
                     showAllMemos = true
                     showReview = false
@@ -657,50 +777,25 @@ fun MemoHomeScreen(
                 contentColor = Color.White,
                 shape = RoundedCornerShape(18.dp),
             ) {
-                Text("＋", fontSize = 24.sp)
+                Icon(Icons.Outlined.Add, contentDescription = "新建", modifier = Modifier.size(26.dp))
             }
         },
     ) { innerPadding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .imePadding(),
             contentPadding = PaddingValues(
                 start = 16.dp,
-                top = 18.dp,
+                top = 4.dp,
                 end = 16.dp,
                 bottom = 104.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item {
-                MemoHeader(
-                    isRefreshing = uiState.isRefreshing,
-                    isSaving = uiState.isSaving,
-                    isExporting = uiState.isExporting,
-                    onRefresh = viewModel::refresh,
-                    onExport = { exportLauncher.launch("memoisle-export.json") },
-                    onLogout = ::requestLogout,
-                    showTrash = showTrash,
-                    showInbox = showInbox,
-                    onShowTrash = {
-                        showTrash = true
-                        showInbox = false
-                        showReview = false
-                        showAllMemos = false
-                        selectedMemo = null
-                    },
-                    onShowInbox = {
-                        showInbox = true
-                        showTrash = false
-                        showReview = false
-                        showAllMemos = false
-                        selectedMemo = null
-                    },
-                )
-            }
-            item {
+            if (!showReview) item {
                 MemoSearchField(
                     value = searchQuery,
                     onValueChange = { value ->
@@ -713,34 +808,12 @@ fun MemoHomeScreen(
                 )
             }
             if (showInbox) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "收件箱",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = "${inboxMemos.size} 条待整理",
-                            color = TextMuted,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
                 if (inboxMemos.isEmpty()) {
                     item {
-                        Text(
-                            text = if (normalizedSearchQuery.isNotEmpty()) {
-                                "收件箱里没有匹配内容"
-                            } else {
-                                "收件箱是空的。快速记下的灵感会先到这里。"
-                            },
-                            color = TextMuted,
-                            style = MaterialTheme.typography.bodyMedium,
+                        EmptyState(
+                            icon = Icons.Outlined.Inbox,
+                            title = if (normalizedSearchQuery.isNotEmpty()) "收件箱里没有匹配内容" else "收件箱是空的",
+                            message = "快速记下的灵感会先放在这里，整理完成或归档后移出。",
                         )
                     }
                 } else {
@@ -757,34 +830,12 @@ fun MemoHomeScreen(
                     }
                 }
             } else if (showTrash) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "回收站",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = "${trashMemos.size} 条 · 保留 30 天",
-                            color = TextMuted,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
                 if (trashMemos.isEmpty()) {
                     item {
-                        Text(
-                            text = if (normalizedSearchQuery.isNotEmpty()) {
-                                "回收站里没有匹配内容"
-                            } else {
-                                "回收站是空的。删除的内容会在这里保留 30 天。"
-                            },
-                            color = TextMuted,
-                            style = MaterialTheme.typography.bodyMedium,
+                        EmptyState(
+                            icon = Icons.Outlined.DeleteOutline,
+                            title = if (normalizedSearchQuery.isNotEmpty()) "回收站里没有匹配内容" else "回收站是空的",
+                            message = "删除的内容会在这里保留 30 天，期间可以恢复。",
                         )
                     }
                 } else {
@@ -1005,23 +1056,17 @@ fun MemoHomeScreen(
                     )
                 }
             }
-            if (!showReview) item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = when {
-                            normalizedSearchQuery.isNotEmpty() -> "搜索结果"
-                            showAllMemos -> "全部内容"
-                            else -> "最近内容"
-                        },
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        text = when {
+            if (!showReview && !showTrash && !showInbox) item {
+                SectionHeader(
+                    title = when {
+                        normalizedSearchQuery.isNotEmpty() -> "搜索结果"
+                        showAllMemos -> "全部内容"
+                        activeType == TYPE_RESOURCE -> "网页资料"
+                        activeType == TYPE_WORD -> "单词"
+                        activeType == TYPE_IMAGE -> "图片"
+                        else -> "最近灵感"
+                    },
+                    trailing = when {
                             normalizedSearchQuery.isNotEmpty() -> "${visibleMemos.size} 条内容"
                             showAllMemos && libraryTypeFilter == TYPE_IMAGE ->
                                 "${visibleMemos.size} 张图片"
@@ -1029,12 +1074,9 @@ fun MemoHomeScreen(
                             activeType == TYPE_IDEA -> "${visibleMemos.size} 条灵感"
                             activeType == TYPE_RESOURCE -> "${visibleMemos.size} 条资料"
                             activeType == TYPE_IMAGE -> "${visibleMemos.size} 张图片"
-                            else -> "${visibleMemos.size} 个单词"
-                        },
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
+                        else -> "${visibleMemos.size} 个单词"
+                    },
+                )
             }
             if (!showReview && !showTrash && !showInbox) {
             if (visibleMemos.isEmpty()) {
@@ -1562,86 +1604,84 @@ fun MemoHomeScreen(
     }
 }
 
+/** 顶栏右侧：收件箱（带待整理数）、同步，以及收纳回收站、导出和退出的菜单。 */
 @Composable
-private fun MemoHeader(
+private fun TopBarActions(
+    inboxCount: Int,
+    showInboxAction: Boolean,
+    showTrashAction: Boolean,
     isRefreshing: Boolean,
     isSaving: Boolean,
     isExporting: Boolean,
+    onShowInbox: () -> Unit,
+    onShowTrash: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
     onLogout: () -> Unit,
-    showTrash: Boolean,
-    showInbox: Boolean,
-    onShowTrash: () -> Unit,
-    onShowInbox: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column {
-            Text(
-                text = "MemoIsle",
-                color = DeepTealHover,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "保存值得再次遇见的内容",
-                color = TextMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Spacer(Modifier.weight(1f))
-        TextButton(onClick = onShowInbox) {
-            Text(if (showInbox) "收件箱中" else "收件箱")
-        }
-        TextButton(onClick = onShowTrash) {
-            Text(if (showTrash) "回收站中" else "回收站")
-        }
-        TextButton(onClick = onRefresh, enabled = !isRefreshing) {
-            if (isRefreshing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(if (isRefreshing) "同步中" else "同步")
-        }
-        // 导出和退出不常用，收进菜单；五个按钮并排时窄屏会把「退出」挤出屏幕。
-        var menuOpen by remember { mutableStateOf(false) }
-        Box {
-            TextButton(
-                onClick = { menuOpen = true },
-                modifier = Modifier.semantics { contentDescription = "更多操作" },
+    if (showInboxAction) {
+        IconButton(onClick = onShowInbox) {
+            BadgedBox(
+                badge = {
+                    if (inboxCount > 0) {
+                        Badge(containerColor = WarmAmberText) { Text(if (inboxCount > 99) "99+" else "$inboxCount") }
+                    }
+                },
             ) {
-                if (isExporting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text("⋯", fontWeight = FontWeight.Bold)
-                }
+                Icon(Icons.Outlined.Inbox, contentDescription = "收件箱，$inboxCount 条待整理")
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        }
+    }
+    IconButton(onClick = onRefresh, enabled = !isRefreshing) {
+        if (isRefreshing) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = DeepTeal)
+        } else {
+            Icon(Icons.Outlined.Sync, contentDescription = "同步")
+        }
+    }
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menuOpen = true }) {
+            if (isExporting) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = DeepTeal)
+            } else {
+                Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+            }
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            containerColor = SurfaceWhite,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            if (showTrashAction) {
                 DropdownMenuItem(
-                    text = { Text(if (isExporting) "导出中" else "导出数据") },
-                    enabled = !isRefreshing && !isSaving && !isExporting,
+                    text = { Text("回收站") },
+                    leadingIcon = { Icon(Icons.Outlined.DeleteOutline, contentDescription = null) },
                     onClick = {
                         menuOpen = false
-                        onExport()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("退出登录") },
-                    onClick = {
-                        menuOpen = false
-                        onLogout()
+                        onShowTrash()
                     },
                 )
             }
+            DropdownMenuItem(
+                text = { Text(if (isExporting) "导出中…" else "导出数据") },
+                leadingIcon = { Icon(Icons.Outlined.FileDownload, contentDescription = null) },
+                enabled = !isRefreshing && !isSaving && !isExporting,
+                onClick = {
+                    menuOpen = false
+                    onExport()
+                },
+            )
+            HorizontalDivider(color = Border)
+            DropdownMenuItem(
+                text = { Text("退出登录") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    onLogout()
+                },
+            )
         }
     }
 }
@@ -1657,20 +1697,60 @@ private fun MemoSearchField(
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
-        label = { Text("搜索全部内容") },
-        placeholder = { Text("标题、正文、网址、释义或标签") },
-        leadingIcon = { Text("⌕", color = TextMuted, fontSize = 18.sp) },
+        placeholder = { Text("搜索标题、正文、网址、释义或标签") },
+        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = TextMuted) },
         trailingIcon = if (value.isNotEmpty()) {
             {
-                TextButton(onClick = onClear) {
-                    Text("清除")
+                IconButton(onClick = onClear) {
+                    Icon(Icons.Outlined.Close, contentDescription = "清除搜索")
                 }
             }
         } else {
             null
         },
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedContainerColor = SurfaceWhite,
+            focusedContainerColor = SurfaceWhite,
+            unfocusedBorderColor = Border,
+            focusedBorderColor = DeepTeal,
+        ),
     )
+}
+
+/** 空列表时的居中提示。 */
+@Composable
+private fun EmptyState(
+    icon: ImageVector,
+    title: String,
+    message: String,
+    accent: Color = DeepTeal,
+    soft: Color = TealSoft,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .background(soft, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(
+            message,
+            color = TextMuted,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable
@@ -1683,46 +1763,71 @@ private fun ReviewCard(
     val totalCount = wordCount + resourceCount + ideaCount
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("今日回顾", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(TealSoft, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Autorenew, contentDescription = null, tint = DeepTeal)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("今日回顾", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (totalCount == 0) {
-                            "今天没有需要回顾的内容"
-                        } else {
-                            "$wordCount 个单词、$resourceCount 篇待读、$ideaCount 条待整理"
-                        },
+                        if (totalCount == 0) "今天没有需要回顾的内容" else "共 $totalCount 项，按计划混合排列",
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(TealSoft, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("◷", color = DeepTeal)
-                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ReviewStat(wordCount, "个单词", memoKindStyle(TYPE_WORD), Modifier.weight(1f))
+                ReviewStat(resourceCount, "篇待读", memoKindStyle(TYPE_RESOURCE), Modifier.weight(1f))
+                ReviewStat(ideaCount, "条待整理", memoKindStyle(TYPE_IDEA), Modifier.weight(1f))
             }
             Button(
                 onClick = onStart,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
                 enabled = totalCount > 0,
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text(if (totalCount == 0) "今天已完成" else "开始回顾")
+                Text(if (totalCount == 0) "今天已完成" else "开始回顾", style = MaterialTheme.typography.titleSmall)
             }
         }
+    }
+}
+
+@Composable
+private fun ReviewStat(
+    count: Int,
+    label: String,
+    kind: MemoKindStyle,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .background(kind.soft, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(
+            "$count",
+            color = kind.accent,
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(label, color = kind.accent.copy(alpha = 0.85f), style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -1827,79 +1932,72 @@ private fun ReviewSession(
     onOrganizeIdea: () -> Unit,
     onArchiveIdea: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("今日回顾", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onOpenSettings) {
-                Text("复习计划")
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                "all" to "混合",
-                TYPE_WORD to "单词",
-                TYPE_RESOURCE to "待读",
-                TYPE_IDEA to "待整理",
+                "all" to "混合 ${wordCount + resourceCount + ideaCount}",
+                TYPE_WORD to "单词 $wordCount",
+                TYPE_RESOURCE to "待读 $resourceCount",
+                TYPE_IDEA to "待整理 $ideaCount",
             ).forEach { (value, label) ->
-                val selected = filter == value
-                OutlinedButton(
-                    onClick = { onFilterChange(value) },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (selected) TealSoft else SurfaceWhite,
-                    ),
-                ) {
-                    Text(label, color = if (selected) DeepTeal else TextMuted)
-                }
+                MemoFilterChip(label = label, selected = filter == value, onClick = { onFilterChange(value) })
             }
         }
-        Text(
-            "$remainingCount / $dailyLimit 条今日计划 · " +
-                "$wordCount 个单词 · $resourceCount 篇待读 · $ideaCount 条待整理",
-            color = TextMuted,
-            style = MaterialTheme.typography.bodySmall,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "今日计划 $dailyLimit 条，还剩 $remainingCount 条",
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onOpenSettings) { Text("调整计划") }
+        }
         if (current == null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-                border = CardDefaults.outlinedCardBorder(),
+                border = BorderStroke(1.dp, Border),
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("◷", color = DeepTeal, fontSize = 28.sp)
-                    Text("今天的回顾已经完成", fontWeight = FontWeight.SemiBold)
-                    Text("到期单词、待读资料和待整理灵感会显示在这里。", color = TextMuted)
-                }
+                EmptyState(
+                    icon = Icons.Outlined.TaskAlt,
+                    title = "今天的回顾已经完成",
+                    message = "到期单词、待读资料和待整理灵感会显示在这里。",
+                )
             }
-        } else {
+            return@Column
+        }
+        val kind = memoKindStyle(current.type, current.audioMimeType != null)
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-            border = CardDefaults.outlinedCardBorder(),
+            border = BorderStroke(1.dp, Border),
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(
-                    when (current.type) {
-                        TYPE_WORD -> "单词复习 · 还剩 $remainingCount 条"
-                        TYPE_RESOURCE -> "待阅读 · 还剩 $remainingCount 条"
-                        else -> "待整理灵感 · 还剩 $remainingCount 条"
-                    },
-                    color = TextMuted,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Text(current.title, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    InfoPill(
+                        text = when (current.type) {
+                            TYPE_WORD -> "单词复习"
+                            TYPE_RESOURCE -> "待阅读"
+                            else -> "待整理灵感"
+                        },
+                        color = kind.accent,
+                        background = kind.soft,
+                        icon = kind.icon,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text("还剩 $remainingCount 条", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+                }
+                Text(current.title, style = MaterialTheme.typography.headlineSmall)
                 when (current.type) {
                     TYPE_WORD -> {
                         ClickablePhonetic(
@@ -1907,7 +2005,11 @@ private fun ReviewSession(
                             phonetic = current.wordPhonetic,
                         )
                         current.wordExample?.takeIf { it.isNotBlank() }?.let {
-                            Text("“$it”", color = TextMuted)
+                            Text(
+                                "“$it”",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                         }
                         Text(
                             "上次 ${current.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · 下次 ${current.nextReviewAt?.let(::formatTime) ?: "待安排"}",
@@ -1917,78 +2019,130 @@ private fun ReviewSession(
                         if (!showAnswer) {
                             OutlinedButton(
                                 onClick = onShowAnswer,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(14.dp),
                             ) {
+                                Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Text("显示答案")
                             }
                         } else {
-                            Text(current.wordMeaning ?: current.body)
+                            Text(
+                                current.wordMeaning ?: current.body,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(WordSoft, RoundedCornerShape(12.dp))
+                                    .padding(14.dp),
+                            )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(
                                     onClick = { onReviewWord("forgot") },
                                     modifier = Modifier.weight(1f),
                                     enabled = !isSaving,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
                                 ) { Text("忘记") }
                                 OutlinedButton(
                                     onClick = { onReviewWord("fuzzy") },
                                     modifier = Modifier.weight(1f),
                                     enabled = !isSaving,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmberText),
                                 ) { Text("模糊") }
                                 Button(
                                     onClick = { onReviewWord("remembered") },
                                     modifier = Modifier.weight(1f),
                                     enabled = !isSaving,
+                                    shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
                                 ) { Text("记得") }
                             }
                         }
                     }
                     TYPE_RESOURCE -> {
-                        Text(
-                            listOfNotNull(
-                                current.sourceUrl?.let(::resourceHost),
-                                resourceCategoryLabel(
-                                    current.resourceCategory,
-                                    current.resourceCategoryLabel,
-                                ),
-                            ).joinToString(" · "),
-                            color = TextMuted,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val host = current.sourceUrl?.let(::resourceHost).orEmpty()
+                            SiteAvatar(host.ifBlank { current.title }, size = 28.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                listOf(
+                                    host,
+                                    resourceCategoryLabel(current.resourceCategory, current.resourceCategoryLabel),
+                                ).filter { it.isNotBlank() }.joinToString(" · "),
+                                color = TextMuted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                         current.resourceDescription?.takeIf { it.isNotBlank() }?.let {
-                            Text(it)
+                            Text(it, style = MaterialTheme.typography.bodyMedium)
                         }
                         Button(
                             onClick = onOpenResource,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
                             enabled = !isSaving && !current.sourceUrl.isNullOrBlank(),
+                            shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-                        ) { Text("打开原网页") }
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("打开原网页")
+                        }
                         OutlinedButton(
                             onClick = onStarResource,
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isSaving,
-                        ) { Text(if (current.starred) "取消星标" else "星标") }
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Icon(
+                                if (current.starred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                contentDescription = null,
+                                tint = if (current.starred) WarmAmberText else LocalContentColor.current,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (current.starred) "取消星标" else "星标")
+                        }
                     }
                     else -> {
-                        Text(current.body)
+                        Text(current.body, style = MaterialTheme.typography.bodyLarge)
                         Button(
                             onClick = onOrganizeIdea,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
                             enabled = !isSaving,
+                            shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-                        ) { Text("整理完成") }
+                        ) {
+                            Icon(Icons.Outlined.TaskAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("整理完成")
+                        }
                         OutlinedButton(
                             onClick = onArchiveIdea,
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isSaving,
-                        ) { Text("归档") }
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Icon(Icons.Outlined.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("归档")
+                        }
                     }
                 }
-                TextButton(onClick = onSkip, enabled = !isSaving) {
-                    Text("跳过")
+                TextButton(
+                    onClick = onSkip,
+                    enabled = !isSaving,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text("跳过这一条", color = TextMuted)
                 }
             }
-        }
         }
     }
 }
@@ -2003,58 +2157,62 @@ private fun QuickActions(
     onSelectVoice: () -> Unit,
     onSelectImage: () -> Unit,
 ) {
+    data class Action(val kind: MemoKindStyle, val label: String, val selected: Boolean, val onClick: () -> Unit)
     val actions = listOf(
-        "Aa" to "记单词",
-        "↗" to "看资料",
-        "✦" to "写灵感",
-        "●" to "语音记录",
-        "▣" to "图片",
+        Action(memoKindStyle(TYPE_IDEA), "写灵感", activeType == TYPE_IDEA, onSelectIdea),
+        Action(memoKindStyle(TYPE_IDEA, isVoice = true), "语音记录", false, onSelectVoice),
+        Action(memoKindStyle(TYPE_WORD), "记单词", activeType == TYPE_WORD, onSelectWord),
+        Action(memoKindStyle(TYPE_RESOURCE), "看资料", activeType == TYPE_RESOURCE, onBrowseResource),
+        Action(memoKindStyle(TYPE_IMAGE), if (isUploadingImage) "上传中" else "图片", activeType == TYPE_IMAGE, onSelectImage),
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        actions.forEach { (icon, label) ->
-            val uploading = label == "图片" && isUploadingImage
-            val selected = (label == "写灵感" && activeType == TYPE_IDEA) ||
-                (label == "看资料" && activeType == TYPE_RESOURCE) ||
-                (label == "记单词" && activeType == TYPE_WORD) ||
-                (label == "图片" && activeType == TYPE_IMAGE)
+        actions.forEach { action ->
             Column(
-                modifier = Modifier.clickable {
-                    when (label) {
-                        "记单词" -> onSelectWord()
-                        "写灵感" -> onSelectIdea()
-                        "看资料" -> onBrowseResource()
-                        "图片" -> onSelectImage()
-                        else -> onSelectVoice()
-                    }
-                },
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = action.onClick)
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                    .width(60.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // 当前首页列表展示的类型用描边标出，比整块填色轻。
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .background(
-                            color = if (selected) TealSoft else SurfaceSubtle,
-                            shape = CircleShape,
+                        .size(52.dp)
+                        .background(action.kind.soft, RoundedCornerShape(16.dp))
+                        .then(
+                            if (action.selected) {
+                                Modifier.border(2.dp, action.kind.accent, RoundedCornerShape(16.dp))
+                            } else {
+                                Modifier
+                            },
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (uploading) {
+                    if (action.label == "上传中") {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                             strokeWidth = 2.dp,
+                            color = action.kind.accent,
                         )
                     } else {
-                        Text(icon, color = if (selected) DeepTeal else TextMuted)
+                        Icon(
+                            action.kind.icon,
+                            contentDescription = null,
+                            tint = action.kind.accent,
+                            modifier = Modifier.size(26.dp),
+                        )
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (uploading) "上传中" else label,
-                    color = TextMuted,
-                    fontSize = 11.sp,
+                    text = action.label,
+                    color = if (action.selected) TextStrong else TextMuted,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
                 )
             }
         }
@@ -2080,17 +2238,12 @@ private fun LibraryTypeFilter(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         filters.forEach { (value, label) ->
-            if (selected == value) {
-                Button(
-                    onClick = { onSelect(value) },
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
-                ) { Text(label, fontSize = 12.sp) }
-            } else {
-                OutlinedButton(
-                    onClick = { onSelect(value) },
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
-                ) { Text(label, fontSize = 12.sp) }
-            }
+            MemoFilterChip(
+                label = label,
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                leadingIcon = if (value.isEmpty()) null else memoKindStyle(value).icon,
+            )
         }
     }
 }
@@ -2100,30 +2253,36 @@ private fun ImageComposerCard(
     isUploading: Boolean,
     onPickImage: () -> Unit,
 ) {
+    val kind = memoKindStyle(TYPE_IMAGE)
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("收藏图片", fontWeight = FontWeight.SemiBold)
-            Text(
-                "从相册选择一张图片，会自动创建图片收藏并上传原图；" +
-                    "标题取自文件名，稍后可在 Web 端补充备注。",
-                color = TextMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            KindAvatar(kind, size = 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("收藏图片", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "上传原图，标题取自文件名，可在 Web 端补充备注。",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
             Button(
                 onClick = onPickImage,
-                modifier = Modifier.fillMaxWidth(),
                 enabled = !isUploading,
-                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = kind.accent),
+                contentPadding = PaddingValues(horizontal = 14.dp),
             ) {
-                Text(if (isUploading) "上传中…" else "从相册选择图片")
+                Text(if (isUploading) "上传中…" else "选择")
             }
         }
     }
@@ -2140,14 +2299,19 @@ private fun WordLookupControls(
     onApplyLookup: (List<WordLookupSense>) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
+        // 还没输入单词时不显示查词按钮，避免一个灰色按钮悬在表单中间。
+        if (lemma.isNotBlank() || lookup != null) Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             OutlinedButton(
                 onClick = onLookup,
                 enabled = lemma.isNotBlank() && !isSaving && !isLookingUp,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = WordAccent),
             ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(if (isLookingUp) "正在查词…" else "重新查词")
             }
             if (lookup != null) {
@@ -2190,12 +2354,11 @@ private fun WordLookupPreview(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceSubtle),
-        border = CardDefaults.outlinedCardBorder(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = WordSoft),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -2204,7 +2367,7 @@ private fun WordLookupPreview(
                 verticalAlignment = Alignment.Top,
             ) {
                 Column {
-                    Text("词典预览", fontWeight = FontWeight.SemiBold)
+                    Text("词典预览", style = MaterialTheme.typography.titleSmall, color = WordAccent)
                     Text(
                         if (preview.word != preview.lemma) {
                             "按词元 ${preview.lemma} 查询"
@@ -2247,7 +2410,7 @@ private fun WordLookupPreview(
                             sense.partOfSpeech?.let {
                                 Text(
                                     it,
-                                    color = DeepTeal,
+                                    color = WordAccent,
                                     style = MaterialTheme.typography.labelSmall,
                                 )
                             }
@@ -2265,7 +2428,8 @@ private fun WordLookupPreview(
                         onApply(preview.senses.filter { it.index in selectedIndices })
                     },
                     enabled = !busy && selectedIndices.isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = WordAccent),
                 ) {
                     Text("使用所选释义")
                 }
@@ -2297,37 +2461,45 @@ private fun WordComposer(
     onApplyLookup: (List<WordLookupSense>) -> Unit,
     onSave: () -> Unit,
 ) {
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        unfocusedBorderColor = Border,
+        focusedBorderColor = WordAccent,
+        focusedLabelColor = WordAccent,
+    )
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("收藏英语单词", fontWeight = FontWeight.SemiBold)
-            Text(
-                if (isLookingUp) {
-                    "正在填入中文释义、音标和例句…"
-                } else {
-                    "输入单词后自动填入中文释义、音标和例句"
-                },
-                color = TextMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            TextButton(onClick = onFillClipboard, enabled = !isSaving) {
-                Text("从剪贴板填入")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("收藏英语单词", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (isLookingUp) "正在填入中文释义、音标和例句…" else "输入后自动填入释义、音标和例句",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                TextButton(onClick = onFillClipboard, enabled = !isSaving) {
+                    Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("剪贴板")
+                }
             }
             OutlinedTextField(
                 value = lemma,
                 onValueChange = onLemmaChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("单词或短语") },
-                placeholder = { Text("输入后自动填入中文释义") },
+                placeholder = { Text("例如 serendipity") },
                 singleLine = true,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
             )
             PhoneticPlayField(
                 lemma = lemma,
@@ -2354,7 +2526,8 @@ private fun WordComposer(
                 label = { Text("中文释义（自动填入）") },
                 minLines = 2,
                 maxLines = 5,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
             )
             OutlinedTextField(
                 value = example,
@@ -2363,12 +2536,16 @@ private fun WordComposer(
                 label = { Text("例句（自动填入）") },
                 minLines = 2,
                 maxLines = 5,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
             )
             Button(
                 onClick = onSave,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
                 enabled = lemma.isNotBlank() && !isSaving,
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
                 Text(if (isSaving) "保存中…" else "收藏单词")
@@ -2379,24 +2556,20 @@ private fun WordComposer(
 
 @Composable
 private fun ResourceReadOnlyCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceSubtle, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("网页资料只读浏览", fontWeight = FontWeight.SemiBold)
-            Text(
-                "在 Web 端收藏、导入和整理网页；Android 用于搜索、查看摘要并打开原链接。" +
-                    "如需从手机收藏，请在浏览器中使用系统分享。",
-                color = TextMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
+        Icon(Icons.Outlined.Info, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "手机上只读浏览；收藏网页可在浏览器里分享到 MemoIsle，整理请到 Web 端。",
+            color = TextMuted,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -2422,17 +2595,7 @@ private fun ResourceCategoryFilter(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         categories.forEach { (value, label) ->
-            if (selected == value) {
-                Button(
-                    onClick = { onSelect(value) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                ) { Text(label, fontSize = 11.sp) }
-            } else {
-                OutlinedButton(
-                    onClick = { onSelect(value) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                ) { Text(label, fontSize = 11.sp) }
-            }
+            MemoFilterChip(label = label, selected = selected == value, onClick = { onSelect(value) })
         }
     }
 }
@@ -2446,34 +2609,62 @@ private fun IdeaComposer(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 12.dp),
         ) {
-            Text("快速记录灵感", fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
+            TextField(
                 value = value,
                 onValueChange = onValueChange,
                 modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
+                minLines = 2,
                 maxLines = 7,
-                placeholder = { Text("写下此刻的想法，稍后再整理……") },
-                shape = RoundedCornerShape(10.dp),
+                placeholder = { Text("记下此刻的想法，稍后再整理……", color = TextMuted) },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
             )
-            Button(
-                onClick = onSave,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = value.isNotBlank() && !isSaving,
-                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-            ) {
-                Text(if (isSaving) "保存中…" else "保存灵感")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Lightbulb,
+                    contentDescription = null,
+                    tint = IdeaAccent,
+                    modifier = Modifier
+                        .padding(start = 0.dp)
+                        .size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("保存后先进入收件箱", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onSave,
+                    enabled = value.isNotBlank() && !isSaving,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                ) {
+                    Text(if (isSaving) "保存中…" else "保存灵感")
+                }
             }
         }
     }
+}
+
+/** 标题取自正文第一行时，摘要只显示后面的内容，避免同一句话出现两次。 */
+private fun bodySnippet(memo: Memo): String {
+    val body = memo.body.trim()
+    val firstLine = body.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    val title = memo.title.trim()
+    val titleFromBody = title == firstLine ||
+        (title.endsWith("...") && firstLine.startsWith(title.removeSuffix("...")))
+    val rest = if (titleFromBody) body.substringAfter(firstLine, "").trim() else body
+    // 列表里只看摘要，空行和换行合并成空格，避免出现单独一行省略号。
+    return rest.replace(Regex("\\s*\n\\s*"), " ")
 }
 
 @Composable
@@ -2487,7 +2678,7 @@ private fun MemoRow(
     val isResource = memo.type == TYPE_RESOURCE
     val isWord = memo.type == TYPE_WORD
     val isImage = memo.type == TYPE_IMAGE
-    val isVoice = memo.audioMimeType != null
+    val kind = memoKindStyle(memo.type, memo.audioMimeType != null)
     if (isImage) {
         LaunchedEffect(memo.clientId, memo.version, imageThumbnail == null) {
             if (imageThumbnail == null) {
@@ -2495,114 +2686,105 @@ private fun MemoRow(
             }
         }
     }
+    val host = if (isResource) memo.sourceUrl?.let(::resourceHost).orEmpty() else ""
+    val subtitle = when {
+        isImage -> imageRowSubtitle(memo)
+        isResource -> memo.resourceDescription?.takeIf { it.isNotBlank() }
+            ?: memo.body.takeIf { it.isNotBlank() && it != memo.sourceUrl }
+            ?: host
+        isWord -> listOfNotNull(
+            memo.wordPhonetic?.takeIf { it.isNotBlank() },
+            memo.wordMeaning?.takeIf { it.isNotBlank() }?.lineSequence()?.firstOrNull(),
+        ).joinToString("  ").ifBlank { "等待补充释义" }
+        else -> bodySnippet(memo)
+    }
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            if (isImage) {
-                MemoImage(
+            when {
+                isImage -> MemoImage(
                     bytes = imageThumbnail,
                     loading = imageLoading && imageThumbnail == null,
-                    modifier = Modifier.size(56.dp),
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp)),
                     maxDimension = 320,
                     contentScale = ContentScale.Crop,
                     contentDescription = memo.title,
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(
-                            when {
-                                isResource -> TealSoft
-                                isWord -> Color(0xFFEDEFF8)
-                                else -> WarmAmberSoft
-                            },
-                            RoundedCornerShape(10.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        when {
-                            isResource -> "↗"
-                            isWord -> "Aa"
-                            isVoice -> "●"
-                            else -> "✦"
-                        },
-                        color = if (isResource || isWord) DeepTeal else WarmAmberText,
-                    )
-                }
+                isResource -> SiteAvatar(host.ifBlank { memo.title })
+                else -> KindAvatar(kind)
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isResource && memo.starred) "★ ${memo.title}" else memo.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = when {
-                        isImage -> imageRowSubtitle(memo)
-                        isResource -> memo.resourceDescription ?: if (
-                            memo.body == memo.sourceUrl
-                        ) {
-                            resourceHost(memo.sourceUrl.orEmpty())
-                        } else {
-                            memo.body
-                        }
-                        isWord -> memo.wordPhonetic ?: memo.wordMeaning ?: "等待补充释义"
-                        else -> memo.body
-                    },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = TextMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = memo.title,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = if (subtitle.isBlank()) 2 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    if (memo.starred) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = "星标",
+                            tint = Color(0xFFE6A23C),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                if (subtitle.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    when {
+                        isResource -> InfoPill(
+                            resourceCategoryLabel(memo.resourceCategory, memo.resourceCategoryLabel),
+                            color = ResourceAccent,
+                            background = ResourceSoft,
+                        )
+                        isWord -> InfoPill(
+                            "熟悉度 ${memo.familiarity}/5",
+                            color = WordAccent,
+                            background = WordSoft,
+                        )
+                        isImage -> imageMimeLabel(memo.imageMimeType)?.let {
+                            InfoPill(it, color = ImageAccent, background = ImageSoft)
+                        }
+                        memo.audioMimeType != null -> InfoPill(
+                            memo.audioDurationMs?.takeIf { it > 0 }?.let { "语音 ${it / 1_000} 秒" } ?: "语音",
+                            color = IdeaAccent,
+                            background = IdeaSoft,
+                        )
+                    }
                     Text(
                         text = formatTime(memo.updatedAt),
                         color = TextMuted,
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
                     )
-                    Spacer(Modifier.width(8.dp))
-                    if (isWord) {
-                        Text(
-                            "熟悉度 ${memo.familiarity}/5 · 下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    if (isResource) {
-                        Text(
-                            resourceCategoryLabel(
-                                memo.resourceCategory,
-                                memo.resourceCategoryLabel,
-                            ),
-                            color = DeepTeal,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    if (isImage) {
-                        Text(
-                            imageMimeLabel(memo.imageMimeType) ?: "图片收藏",
-                            color = DeepTeal,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                    }
+                    Spacer(Modifier.weight(1f))
                     SyncBadge(memo.syncState)
                 }
             }
@@ -2659,7 +2841,7 @@ private fun MemoImage(
                 modifier = Modifier.size(20.dp),
                 strokeWidth = 2.dp,
             )
-            else -> Text("▣", color = TextMuted)
+            else -> Icon(Icons.Outlined.Image, contentDescription = null, tint = TextMuted)
         }
     }
 }
@@ -2691,47 +2873,57 @@ private fun InboxMemoRow(
     onOrganize: () -> Unit,
     onArchive: () -> Unit,
 ) {
+    val kind = memoKindStyle(memo.type, memo.audioMimeType != null)
+    val snippet = bodySnippet(memo)
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen),
-        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onOpen,
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(memo.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            if (memo.body.isNotBlank() && memo.body != memo.title) {
-                Text(
-                    text = memo.body,
-                    color = TextMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 3,
-                )
-            }
-            Text(
-                text = if (memo.audioMimeType != null) "语音灵感 · 待整理" else "灵感 · 待整理",
-                color = TextMuted,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onOrganize,
-                    enabled = !isSaving,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-                ) {
-                    Text("整理完成")
+        Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                KindAvatar(kind, size = 36.dp, iconSize = 20.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        memo.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (snippet.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            snippet,
+                            color = TextMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "${kind.label} · ${formatTime(memo.updatedAt)}",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
-                OutlinedButton(
-                    onClick = onArchive,
-                    enabled = !isSaving,
-                    modifier = Modifier.weight(1f),
-                ) {
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onArchive, enabled = !isSaving) {
+                    Icon(Icons.Outlined.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("归档")
+                }
+                TextButton(onClick = onOrganize, enabled = !isSaving) {
+                    Icon(Icons.Outlined.TaskAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("整理完成")
                 }
             }
         }
@@ -2745,62 +2937,68 @@ private fun TrashMemoRow(
     onRestore: () -> Unit,
     onPermanentDelete: () -> Unit,
 ) {
+    val kind = memoKindStyle(memo.type, memo.audioMimeType != null)
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        border = CardDefaults.outlinedCardBorder(),
+        border = BorderStroke(1.dp, Border),
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(memo.title, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            Text(
-                text = when (memo.type) {
-                    TYPE_WORD -> "单词 · 还剩 ${memo.trashDaysRemaining()} 天"
-                    TYPE_RESOURCE -> "网页资料 · 还剩 ${memo.trashDaysRemaining()} 天"
-                    TYPE_IMAGE -> "图片收藏 · 还剩 ${memo.trashDaysRemaining()} 天"
-                    else -> "灵感 · 还剩 ${memo.trashDaysRemaining()} 天"
-                },
-                color = TextMuted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = onRestore,
-                    enabled = !isSaving && memo.id != null,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("恢复")
+        Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                KindAvatar(kind, size = 36.dp, iconSize = 20.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        memo.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${kind.label} · ${memo.trashDaysRemaining()} 天后永久删除",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
-                Button(
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
                     onClick = onPermanentDelete,
                     enabled = !isSaving && memo.id != null,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
+                    colors = ButtonDefaults.textButtonColors(contentColor = DangerRed),
                 ) {
+                    Icon(Icons.Outlined.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("永久删除")
+                }
+                TextButton(onClick = onRestore, enabled = !isSaving && memo.id != null) {
+                    Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("恢复")
                 }
             }
         }
     }
 }
 
+/** 已同步是常态，不再每张卡片都标；只在等待、失败或冲突时提示。 */
 @Composable
 private fun SyncBadge(syncState: SyncState) {
-    val (label, color) = when (syncState) {
-        SyncState.SYNCED -> "已同步" to DeepTeal
-        SyncState.PENDING -> "等待同步" to TextMuted
-        SyncState.FAILED -> "同步失败" to MaterialTheme.colorScheme.error
-        SyncState.CONFLICT -> "待处理冲突" to WarmAmberText
+    val (label, color, icon) = when (syncState) {
+        SyncState.SYNCED -> return
+        SyncState.PENDING -> Triple("待同步", TextMuted, Icons.Outlined.CloudUpload)
+        SyncState.FAILED -> Triple("同步失败", DangerRed, Icons.Outlined.ErrorOutline)
+        SyncState.CONFLICT -> Triple("有冲突", WarmAmberText, Icons.Outlined.ErrorOutline)
     }
-    Text(
-        text = label,
-        color = color,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
-    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(3.dp))
+        Text(label, color = color, style = MaterialTheme.typography.labelSmall)
+    }
 }
 
 @Composable
@@ -2847,55 +3045,69 @@ private fun EmptyMemos(
     isLibrary: Boolean,
     hasQuery: Boolean,
 ) {
-    val isResource = activeType == TYPE_RESOURCE
-    val isWord = activeType == TYPE_WORD
-    val isImage = activeType == TYPE_IMAGE
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceWhite, RoundedCornerShape(14.dp))
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            when {
-                hasQuery -> "⌕"
-                isLibrary -> "□"
-                isResource -> "↗"
-                isWord -> "Aa"
-                isImage -> "▣"
-                else -> "✦"
-            },
-            color = DeepTeal,
-            fontSize = 24.sp,
-        )
-        Text(
-            when {
-                hasQuery -> "没有找到匹配内容"
-                isLibrary -> "资料库还是空的"
-                isResource -> "还没有收藏网页资料"
-                isWord -> "从第一个英语单词开始"
-                isImage -> "还没有收藏图片"
-                else -> "第一条灵感正在等你"
-            },
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            when {
-                hasQuery -> "换个关键词，或清除搜索后浏览全部收藏。"
-                isLibrary -> "从灵感、英语单词、图片或网页资料开始收藏第一条内容。"
-                isResource -> "可在 Web 端收藏，或从手机浏览器分享链接到 MemoIsle。"
-                isWord -> "保存词形、释义和例句，稍后按计划复习。"
-                isImage -> "点击「从相册选择图片」，原图与缩略图会同步到 Web。"
-                else -> "保存后会进入本地资料库，并在联网时同步到 Web。"
-            },
-            color = TextMuted,
-            style = MaterialTheme.typography.bodySmall,
-        )
+    val kind = memoKindStyle(activeType)
+    EmptyState(
+        icon = when {
+            hasQuery -> Icons.Outlined.SearchOff
+            isLibrary -> Icons.Outlined.CollectionsBookmark
+            else -> kind.icon
+        },
+        accent = if (hasQuery || isLibrary) DeepTeal else kind.accent,
+        soft = if (hasQuery || isLibrary) TealSoft else kind.soft,
+        title = when {
+            hasQuery -> "没有找到匹配内容"
+            isLibrary -> "资料库还是空的"
+            activeType == TYPE_RESOURCE -> "还没有收藏网页资料"
+            activeType == TYPE_WORD -> "从第一个英语单词开始"
+            activeType == TYPE_IMAGE -> "还没有收藏图片"
+            else -> "第一条灵感正在等你"
+        },
+        message = when {
+            hasQuery -> "换个关键词，或清除搜索后浏览全部收藏。"
+            isLibrary -> "从灵感、英语单词、图片或网页资料开始收藏第一条内容。"
+            activeType == TYPE_RESOURCE -> "可在 Web 端收藏，或从手机浏览器分享链接到 MemoIsle。"
+            activeType == TYPE_WORD -> "保存词形、释义和例句，稍后按计划复习。"
+            activeType == TYPE_IMAGE -> "从相册选择图片，原图与缩略图会同步到 Web。"
+            else -> "保存后会进入本地资料库，并在联网时同步到 Web。"
+        },
+    )
+}
+
+/** 详情页右上角的「更多」菜单。 */
+@Composable
+private fun DetailMenu(
+    enabled: Boolean = true,
+    content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = enabled) {
+            Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            containerColor = SurfaceWhite,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            content { open = false }
+        }
     }
 }
 
+@Composable
+private fun MoveToTrashMenuItem(close: () -> Unit, onMoveToTrash: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text("移入回收站", color = DangerRed) },
+        leadingIcon = { Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = DangerRed) },
+        onClick = {
+            close()
+            onMoveToTrash()
+        },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ResourceDetailDialog(
     memo: Memo,
@@ -2907,119 +3119,112 @@ private fun ResourceDetailDialog(
     onCopy: () -> Unit,
     onShare: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("网页资料", color = DeepTeal, fontSize = 12.sp)
-                Text(
-                    if (memo.starred) "★ ${memo.title}" else memo.title,
-                    fontWeight = FontWeight.SemiBold,
+    val hasUrl = memo.sourceUrl != null
+    val host = memo.sourceUrl?.let(::resourceHost).orEmpty()
+    DetailScreen(
+        kind = memoKindStyle(TYPE_RESOURCE),
+        onClose = onDismiss,
+        closeEnabled = !isSaving,
+        actions = {
+            IconButton(onClick = onCopy, enabled = hasUrl && !isSaving) {
+                Icon(Icons.Outlined.ContentCopy, contentDescription = "复制链接")
+            }
+            IconButton(onClick = onShare, enabled = hasUrl && !isSaving) {
+                Icon(Icons.Outlined.Share, contentDescription = "分享")
+            }
+            DetailMenu(enabled = !isSaving) { close ->
+                DropdownMenuItem(
+                    text = { Text("归档") },
+                    leadingIcon = { Icon(Icons.Outlined.Archive, contentDescription = null) },
+                    onClick = {
+                        close()
+                        onArchive()
+                    },
                 )
+                MoveToTrashMenuItem(close, onMoveToTrash)
             }
         },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        resourceCategoryLabel(
-                            memo.resourceCategory,
-                            memo.resourceCategoryLabel,
-                        ),
-                        modifier = Modifier
-                            .background(TealSoft, RoundedCornerShape(20.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = DeepTeal,
-                        fontSize = 11.sp,
-                    )
-                    if (memo.starred) {
-                        Text(
-                            "★ 星标",
-                            modifier = Modifier
-                                .background(SurfaceSubtle, RoundedCornerShape(20.dp))
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                        )
-                    }
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        "巡检：${linkHealthLabel(memo.linkHealthStatus)}",
-                        modifier = Modifier
-                            .background(SurfaceSubtle, RoundedCornerShape(20.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                    )
-                    memo.linkLastCheckedAt?.let { checkedAt ->
-                        Text(
-                            "最近检查 ${formatTime(checkedAt)}",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                        )
-                    }
-                }
-                memo.resourceDescription?.let { description ->
-                    Text(description, style = MaterialTheme.typography.bodyMedium)
-                }
-                if (memo.body != memo.sourceUrl && memo.body.isNotBlank()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("个人备注", color = TextMuted, fontSize = 11.sp)
-                        Text(memo.body, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        memo.resourceSiteName ?: resourceHost(memo.sourceUrl.orEmpty()),
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                    )
-                    Text(
-                        memo.sourceUrl.orEmpty(),
-                        color = DeepTeal,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Text(
-                    "Android 端只读展示；标题、网址、备注、分类和星标请在 Web 端整理。",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-        },
-        confirmButton = {
+        bottomBar = {
             Button(
                 onClick = onOpen,
-                enabled = memo.sourceUrl != null && !isSaving,
+                enabled = hasUrl && !isSaving,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-            ) { Text("打开原网页") }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onCopy, enabled = memo.sourceUrl != null && !isSaving) {
-                    Text("复制")
-                }
-                TextButton(onClick = onShare, enabled = memo.sourceUrl != null && !isSaving) {
-                    Text("分享")
-                }
-                TextButton(onClick = onArchive, enabled = !isSaving) {
-                    Text("归档")
-                }
-                TextButton(onClick = onMoveToTrash, enabled = !isSaving) {
-                    Text("回收站", color = Color(0xFFB84A4A))
-                }
-                OutlinedButton(onClick = onDismiss, enabled = !isSaving) { Text("关闭") }
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("打开原网页", style = MaterialTheme.typography.titleSmall)
             }
         },
-        containerColor = SurfaceWhite,
-        shape = RoundedCornerShape(14.dp),
-    )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SiteAvatar(host.ifBlank { memo.title }, size = 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    memo.resourceSiteName?.takeIf { it.isNotBlank() } ?: host,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    memo.sourceUrl.orEmpty(),
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(memo.title, style = MaterialTheme.typography.headlineSmall)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            InfoPill(
+                resourceCategoryLabel(memo.resourceCategory, memo.resourceCategoryLabel),
+                color = ResourceAccent,
+                background = ResourceSoft,
+            )
+            if (memo.starred) {
+                InfoPill("星标", color = WarmAmberText, background = WarmAmberSoft, icon = Icons.Filled.Star)
+            }
+            InfoPill(
+                "巡检：${linkHealthLabel(memo.linkHealthStatus)}",
+                icon = Icons.Outlined.HealthAndSafety,
+            )
+        }
+        memo.resourceDescription?.takeIf { it.isNotBlank() }?.let { description ->
+            Text(description, style = MaterialTheme.typography.bodyLarge)
+        }
+        if (memo.body != memo.sourceUrl && memo.body.isNotBlank()) {
+            DetailField("个人备注") {
+                Text(
+                    memo.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceSubtle, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                )
+            }
+        }
+        Text(
+            listOfNotNull(
+                "收藏于 ${formatTime(memo.createdAt)}",
+                memo.linkLastCheckedAt?.let { "最近检查 ${formatTime(it)}" },
+            ).joinToString(" · "),
+            color = TextMuted,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        ResourceReadOnlyCard()
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ImageDetailDialog(
     memo: Memo,
@@ -3044,110 +3249,86 @@ private fun ImageDetailDialog(
         }
     }
     val displayBytes = if (expanded) fullImage ?: thumbnail else thumbnail
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("图片收藏", color = DeepTeal, fontSize = 12.sp)
-                Text(
-                    memo.title,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    DetailScreen(
+        kind = memoKindStyle(TYPE_IMAGE),
+        onClose = onDismiss,
+        closeEnabled = !isSaving,
+        actions = {
+            IconButton(onClick = onShare, enabled = !isSaving) {
+                Icon(Icons.Outlined.Share, contentDescription = "分享")
+            }
+            DetailMenu(enabled = !isSaving) { close ->
+                MoveToTrashMenuItem(close, onMoveToTrash)
             }
         },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                MemoImage(
-                    bytes = displayBytes,
-                    loading = displayBytes == null && (isLoadingThumbnail || isLoadingFull),
+    ) {
+        Text(memo.title, style = MaterialTheme.typography.headlineSmall)
+        Box {
+            MemoImage(
+                bytes = displayBytes,
+                loading = displayBytes == null && (isLoadingThumbnail || isLoadingFull),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (expanded) 420.dp else 240.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { expanded = !expanded },
+                maxDimension = if (expanded) 2_048 else 1_280,
+                contentScale = if (expanded) ContentScale.Fit else ContentScale.Crop,
+                contentDescription = memo.title,
+            )
+            if (memo.id != null) {
+                Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(if (expanded) 320.dp else 200.dp)
-                        .clickable { expanded = !expanded },
-                    maxDimension = if (expanded) 2_048 else 1_280,
-                    contentScale = if (expanded) ContentScale.Fit else ContentScale.Crop,
-                    contentDescription = memo.title,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+                        .align(Alignment.BottomEnd)
+                        .padding(10.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                        .clickable { expanded = !expanded }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(
-                        if (expanded) "点击图片可收起" else "点击图片查看原图",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelSmall,
+                    Icon(
+                        if (expanded) Icons.Outlined.CloseFullscreen else Icons.Outlined.OpenInFull,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
                     )
-                    if (memo.id != null) {
-                        TextButton(
-                            onClick = { expanded = !expanded },
-                            enabled = !isSaving,
-                        ) {
-                            Text(if (expanded) "收起原图" else "查看原图")
-                        }
-                    }
-                }
-                memo.body.takeIf { it.isNotBlank() }?.let { note ->
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("备注", color = TextMuted, fontSize = 11.sp)
-                        Text(note, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    imageDimensionsLabel(memo.imageWidth, memo.imageHeight)?.let { dimensions ->
-                        ImageMetaChip(dimensions)
-                    }
-                    formatFileSize(memo.imageSizeBytes)?.let { size -> ImageMetaChip(size) }
-                    imageMimeLabel(memo.imageMimeType)?.let { label -> ImageMetaChip(label) }
-                }
-                ImageOcrSection(memo)
-                if (memo.id == null || !memo.hasUploadedImage()) {
+                    Spacer(Modifier.width(6.dp))
                     Text(
-                        "图片尚未上传完成；联网后会自动重试。",
-                        color = WarmAmberText,
-                        style = MaterialTheme.typography.labelSmall,
+                        if (expanded) "收起原图" else "查看原图",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
                     )
                 }
-                Text(
-                    "服务端版本 ${memo.version}",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = onMoveToTrash,
-                enabled = !isSaving,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
-            ) { Text("移入回收站") }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onShare, enabled = !isSaving) { Text("分享") }
-                OutlinedButton(onClick = onDismiss, enabled = !isSaving) { Text("关闭") }
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            imageDimensionsLabel(memo.imageWidth, memo.imageHeight)?.let { ImageMetaChip(it) }
+            formatFileSize(memo.imageSizeBytes)?.let { ImageMetaChip(it) }
+            imageMimeLabel(memo.imageMimeType)?.let { ImageMetaChip(it) }
+        }
+        memo.body.takeIf { it.isNotBlank() }?.let { note ->
+            DetailField("备注") {
+                Text(note, style = MaterialTheme.typography.bodyMedium)
             }
-        },
-        containerColor = SurfaceWhite,
-        shape = RoundedCornerShape(14.dp),
-    )
+        }
+        ImageOcrSection(memo)
+        if (memo.id == null || !memo.hasUploadedImage()) {
+            InfoPill(
+                "图片尚未上传完成，联网后会自动重试",
+                color = WarmAmberText,
+                background = WarmAmberSoft,
+                icon = Icons.Outlined.CloudUpload,
+            )
+        }
+    }
 }
 
 @Composable
 private fun ImageMetaChip(label: String) {
-    Text(
-        label,
-        modifier = Modifier
-            .background(TealSoft, RoundedCornerShape(20.dp))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-        color = DeepTeal,
-        fontSize = 11.sp,
-    )
+    InfoPill(label, color = ImageAccent, background = ImageSoft)
 }
 
 /**
@@ -3271,6 +3452,7 @@ private fun EditMemoDialog(
         mutableStateOf(false)
     }
     val isWord = memo.type == TYPE_WORD
+    val kind = memoKindStyle(memo.type, memo.audioMimeType != null)
 
     LaunchedEffect(resetToServerMemo?.clientId, resetToServerMemo?.version) {
         resetToServerMemo?.let { serverMemo ->
@@ -3282,142 +3464,39 @@ private fun EditMemoDialog(
             showWordAnswer = false
         }
     }
+    // 冲突时编辑器保留的是本地修改，此时也允许保存；否则没有改动就不必保存。
+    val dirty = memo.syncState == SyncState.CONFLICT ||
+        title != memo.title ||
+        (if (isWord) {
+            wordPhonetic != memo.wordPhonetic.orEmpty() ||
+                wordMeaning != memo.wordMeaning.orEmpty() ||
+                wordExample != memo.wordExample.orEmpty()
+        } else {
+            body != memo.body
+        })
+    val canSave = dirty && title.isNotBlank() && (isWord || body.isNotBlank()) && !isSaving
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        unfocusedBorderColor = Border,
+        focusedBorderColor = kind.accent,
+        focusedLabelColor = kind.accent,
+    )
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                when {
-                    isWord -> "学习单词"
-                    else -> "继续整理"
-                },
-                fontWeight = FontWeight.SemiBold,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (memo.audioMimeType != null) {
-                    Button(
-                        onClick = onPlayAudio,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = memo.id != null,
-                        colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-                    ) {
-                        val seconds = (memo.audioDurationMs ?: 0) / 1_000
-                        Text(if (seconds > 0) "播放原始录音 · ${seconds}秒" else "播放原始录音")
-                    }
-                }
-                if (!memo.transcript.isNullOrBlank()) {
-                    OutlinedTextField(
-                        value = memo.transcript,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("会议转写（我 / 对方）") },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        maxLines = 8,
-                        shape = RoundedCornerShape(10.dp),
-                    )
-                }
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text(if (isWord) "单词或短语" else "标题") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                )
-                if (isWord) {
-                    Text(
-                        "上次 ${memo.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · 下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    PhoneticPlayField(
-                        lemma = title,
-                        phonetic = wordPhonetic,
-                        onPhoneticChange = { wordPhonetic = it },
-                    )
-                    if (!showWordAnswer) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(SurfaceSubtle, RoundedCornerShape(12.dp))
-                                .padding(18.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text("先回想释义和例句", color = TextMuted)
-                            OutlinedButton(onClick = { showWordAnswer = true }) {
-                                Text("显示答案")
-                            }
-                        }
-                    } else {
-                        OutlinedTextField(
-                            value = wordMeaning,
-                            onValueChange = { wordMeaning = it },
-                            label = { Text("释义") },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 3,
-                            maxLines = 7,
-                            shape = RoundedCornerShape(10.dp),
-                        )
-                        OutlinedTextField(
-                            value = wordExample,
-                            onValueChange = { wordExample = it },
-                            label = { Text("例句或上下文") },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 2,
-                            maxLines = 5,
-                            shape = RoundedCornerShape(10.dp),
-                        )
-                        SentencePronunciationButton(text = wordExample)
-                        Text(
-                            "熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.reviewCount} 次",
-                            color = TextMuted,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            OutlinedButton(
-                                onClick = { onReview("forgot") },
-                                modifier = Modifier.weight(1f),
-                                enabled = !isSaving,
-                            ) { Text("忘记") }
-                            OutlinedButton(
-                                onClick = { onReview("fuzzy") },
-                                modifier = Modifier.weight(1f),
-                                enabled = !isSaving,
-                            ) { Text("模糊") }
-                            Button(
-                                onClick = { onReview("remembered") },
-                                modifier = Modifier.weight(1f),
-                                enabled = !isSaving,
-                            ) { Text("记得") }
-                        }
-                    }
-                } else {
-                    OutlinedTextField(
-                        value = body,
-                        onValueChange = { body = it },
-                        label = { Text("内容") },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 5,
-                        maxLines = 12,
-                        shape = RoundedCornerShape(10.dp),
-                    )
-                    SentencePronunciationButton(text = body)
-                }
-                HorizontalDivider(color = Border)
-                Text(
-                    "服务端版本 ${memo.version}",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
+    DetailScreen(
+        kind = kind,
+        onClose = onDismiss,
+        closeEnabled = !isSaving,
+        actions = {
+            DetailMenu(enabled = !isSaving) { close ->
+                MoveToTrashMenuItem(close, onMoveToTrash)
             }
         },
-        confirmButton = {
+        bottomBar = {
+            Text(
+                "更新于 ${formatTime(memo.updatedAt)}",
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.weight(1f),
+            )
             Button(
                 onClick = {
                     onSave(
@@ -3431,29 +3510,153 @@ private fun EditMemoDialog(
                         if (isWord) wordExample.ifBlank { null } else null,
                     )
                 },
-                enabled = title.isNotBlank() &&
-                    when {
-                        isWord -> true
-                        else -> body.isNotBlank()
-                    } &&
-                    !isSaving,
+                enabled = canSave,
+                modifier = Modifier.height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text(if (isSaving) "保存中…" else "保存修改")
+                Text(if (isSaving) "保存中…" else "保存修改", style = MaterialTheme.typography.titleSmall)
             }
         },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onMoveToTrash, enabled = !isSaving) {
-                    Text("移入回收站", color = Color(0xFFB84A4A))
+    ) {
+        if (memo.audioMimeType != null) {
+            val seconds = (memo.audioDurationMs ?: 0) / 1_000
+            OutlinedButton(
+                onClick = onPlayAudio,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                enabled = memo.id != null,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = IdeaAccent),
+            ) {
+                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (seconds > 0) "播放原始录音 · ${seconds} 秒" else "播放原始录音")
+            }
+        }
+        if (!memo.transcript.isNullOrBlank()) {
+            DetailField("会议转写（我 / 对方）") {
+                Text(
+                    memo.transcript,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 260.dp)
+                        .background(SurfaceSubtle, RoundedCornerShape(12.dp))
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
+                )
+            }
+        }
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            label = { Text(if (isWord) "单词或短语" else "标题") },
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = if (isWord) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyLarge,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+        )
+        if (isWord) {
+            PhoneticPlayField(
+                lemma = title,
+                phonetic = wordPhonetic,
+                onPhoneticChange = { wordPhonetic = it },
+            )
+            if (!showWordAnswer) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(WordSoft, RoundedCornerShape(16.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.Outlined.Psychology, contentDescription = null, tint = WordAccent, modifier = Modifier.size(28.dp))
+                    Text("先回想释义和例句", color = WordAccent, style = MaterialTheme.typography.titleSmall)
+                    OutlinedButton(
+                        onClick = { showWordAnswer = true },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = WordAccent),
+                    ) {
+                        Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("显示答案")
+                    }
                 }
-                OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
-                    Text("取消")
+            } else {
+                OutlinedTextField(
+                    value = wordMeaning,
+                    onValueChange = { wordMeaning = it },
+                    label = { Text("释义") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 7,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = fieldColors,
+                )
+                OutlinedTextField(
+                    value = wordExample,
+                    onValueChange = { wordExample = it },
+                    label = { Text("例句或上下文") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 5,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = fieldColors,
+                )
+                SentencePronunciationButton(text = wordExample)
+                DetailField("这次记得怎么样？") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = { onReview("forgot") },
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSaving,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
+                        ) { Text("忘记") }
+                        OutlinedButton(
+                            onClick = { onReview("fuzzy") },
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSaving,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmberText),
+                        ) { Text("模糊") }
+                        Button(
+                            onClick = { onReview("remembered") },
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSaving,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = WordAccent),
+                        ) { Text("记得") }
+                    }
                 }
             }
-        },
-        containerColor = SurfaceWhite,
-        shape = RoundedCornerShape(14.dp),
-    )
+            Text(
+                "熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.reviewCount} 次 · " +
+                    "上次 ${memo.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · " +
+                    "下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
+                color = TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        } else {
+            OutlinedTextField(
+                value = body,
+                onValueChange = { body = it },
+                label = { Text("内容") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 6,
+                maxLines = 16,
+                shape = RoundedCornerShape(12.dp),
+                colors = fieldColors,
+            )
+            SentencePronunciationButton(text = body)
+        }
+    }
 }
 
 @Composable
@@ -3508,60 +3711,64 @@ private fun CreateResourceDialog(
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("保存分享的网页", fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "确认浏览器分享的链接；保存后资料在 Android 端只读，完整整理请使用 Web。",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = onUrlChange,
-                    label = { Text("网页链接") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("https://example.com/article") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                )
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = onTitleChange,
-                    label = { Text("标题（可选）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = onNoteChange,
-                    label = { Text("个人备注（可选）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3,
-                    maxLines = 7,
-                    shape = RoundedCornerShape(10.dp),
-                )
-            }
-        },
-        confirmButton = {
+    val kind = memoKindStyle(TYPE_RESOURCE)
+    val fieldColors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Border, focusedBorderColor = kind.accent)
+    DetailScreen(
+        kind = kind,
+        onClose = onDismiss,
+        closeEnabled = !isSaving,
+        bottomBar = {
+            OutlinedButton(
+                onClick = onDismiss,
+                enabled = !isSaving,
+                modifier = Modifier.height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消") }
             Button(
                 onClick = onSave,
                 enabled = normalizeResourceUrl(url) != null && !isSaving,
-            ) {
-                Text(if (isSaving) "保存中…" else "保存资料")
-            }
+                modifier = Modifier.height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+            ) { Text(if (isSaving) "保存中…" else "保存资料") }
         },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("取消")
-            }
-        },
-        containerColor = SurfaceWhite,
-        shape = RoundedCornerShape(14.dp),
-    )
+    ) {
+        Text("保存分享的网页", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "确认浏览器分享的链接；保存后资料在手机上只读，完整整理请使用 Web。",
+            color = TextMuted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            value = url,
+            onValueChange = onUrlChange,
+            label = { Text("网页链接") },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("https://example.com/article") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+        )
+        OutlinedTextField(
+            value = title,
+            onValueChange = onTitleChange,
+            label = { Text("标题（可选）") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+        )
+        OutlinedTextField(
+            value = note,
+            onValueChange = onNoteChange,
+            label = { Text("个人备注（可选）") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 7,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+        )
+    }
 }
 
 @Composable
@@ -3584,84 +3791,100 @@ private fun CreateWordDialog(
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("收藏英语单词", fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    if (isLookingUp) {
-                        "正在填入中文释义、音标和例句…"
-                    } else {
-                        "输入单词后自动填入中文释义、音标和例句"
-                    },
-                    color = TextMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                TextButton(onClick = onFillClipboard, enabled = !isSaving) {
-                    Text("从剪贴板填入")
-                }
-                OutlinedTextField(
-                    value = lemma,
-                    onValueChange = onLemmaChange,
-                    label = { Text("单词或短语") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("输入后自动填入中文释义") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                )
-                PhoneticPlayField(
-                    lemma = lemma,
-                    phonetic = phonetic,
-                    onPhoneticChange = onPhoneticChange,
-                    usAudioUrl = lookup?.usAudioUrl,
-                    ukAudioUrl = lookup?.ukAudioUrl,
-                )
-                WordLookupControls(
-                    lemma = lemma,
-                    isSaving = isSaving,
-                    isLookingUp = isLookingUp,
-                    lookup = lookup,
-                    onLookup = onLookup,
-                    onClearLookup = onClearLookup,
-                    onApplyLookup = onApplyLookup,
-                )
-                OutlinedTextField(
-                    value = meaning,
-                    onValueChange = onMeaningChange,
-                    label = { Text("中文释义（自动填入）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3,
-                    maxLines = 6,
-                    shape = RoundedCornerShape(10.dp),
-                )
-                OutlinedTextField(
-                    value = example,
-                    onValueChange = onExampleChange,
-                    label = { Text("例句（自动填入）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2,
-                    maxLines = 5,
-                    shape = RoundedCornerShape(10.dp),
-                )
+    val kind = memoKindStyle(TYPE_WORD)
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        unfocusedBorderColor = Border,
+        focusedBorderColor = kind.accent,
+        focusedLabelColor = kind.accent,
+    )
+    DetailScreen(
+        kind = kind,
+        onClose = onDismiss,
+        closeEnabled = !isSaving,
+        actions = {
+            TextButton(onClick = onFillClipboard, enabled = !isSaving) {
+                Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("从剪贴板填入")
             }
         },
-        confirmButton = {
+        bottomBar = {
+            OutlinedButton(
+                onClick = onDismiss,
+                enabled = !isSaving,
+                modifier = Modifier.height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消") }
             Button(
                 onClick = onSave,
                 enabled = lemma.isNotBlank() && !isSaving,
-            ) {
-                Text(if (isSaving) "保存中…" else "收藏单词")
-            }
+                modifier = Modifier.height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+            ) { Text(if (isSaving) "保存中…" else "收藏单词") }
         },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("取消")
-            }
-        },
-        containerColor = SurfaceWhite,
-        shape = RoundedCornerShape(14.dp),
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("收藏英语单词", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                if (isLookingUp) "正在填入中文释义、音标和例句…" else "输入单词后自动填入中文释义、音标和例句",
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        OutlinedTextField(
+            value = lemma,
+            onValueChange = onLemmaChange,
+            label = { Text("单词或短语") },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("例如 serendipity") },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.titleLarge,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+            trailingIcon = if (isLookingUp) {
+                { CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = kind.accent) }
+            } else {
+                null
+            },
+        )
+        PhoneticPlayField(
+            lemma = lemma,
+            phonetic = phonetic,
+            onPhoneticChange = onPhoneticChange,
+            usAudioUrl = lookup?.usAudioUrl,
+            ukAudioUrl = lookup?.ukAudioUrl,
+        )
+        WordLookupControls(
+            lemma = lemma,
+            isSaving = isSaving,
+            isLookingUp = isLookingUp,
+            lookup = lookup,
+            onLookup = onLookup,
+            onClearLookup = onClearLookup,
+            onApplyLookup = onApplyLookup,
+        )
+        OutlinedTextField(
+            value = meaning,
+            onValueChange = onMeaningChange,
+            label = { Text("中文释义（自动填入）") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 6,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+        )
+        OutlinedTextField(
+            value = example,
+            onValueChange = onExampleChange,
+            label = { Text("例句（自动填入）") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            maxLines = 5,
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors,
+        )
+    }
 }
 
 @Composable
@@ -3704,14 +3927,19 @@ private fun VoiceCaptureDialog(
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "●",
-                            color = if (isRecording) WarmAmberText else DeepTeal,
-                            fontSize = 24.sp,
+                        Icon(
+                            when {
+                                isPaused -> Icons.Outlined.Pause
+                                recording != null && !isRecording -> Icons.Outlined.TaskAlt
+                                else -> Icons.Outlined.Mic
+                            },
+                            contentDescription = null,
+                            tint = if (isRecording) WarmAmberText else DeepTeal,
+                            modifier = Modifier.size(30.dp),
                         )
                         Text(
                             "${seconds}秒",
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
                             when {
@@ -3841,26 +4069,33 @@ private fun MemoBottomNavigation(
     vaultReminderCount: Int,
     onShowVault: () -> Unit,
 ) {
-    NavigationBar(containerColor = SurfaceWhite) {
+    val homeSelected = !showAllMemos && !showReview && !showTrash && !showInbox
+    val librarySelected = showAllMemos && !showReview && !showTrash && !showInbox
+    NavigationBar(containerColor = SurfaceWhite, tonalElevation = 0.dp) {
         NavigationBarItem(
-            selected = !showAllMemos && !showReview && !showTrash && !showInbox,
+            selected = homeSelected,
             onClick = onShowHome,
-            icon = { Text("⌂", fontSize = 17.sp) },
-            label = { Text("首页", fontSize = 11.sp) },
+            icon = { Icon(if (homeSelected) Icons.Filled.Home else Icons.Outlined.Home, contentDescription = null) },
+            label = { Text("首页") },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
-            selected = showAllMemos && !showReview && !showTrash && !showInbox,
+            selected = librarySelected,
             onClick = onShowLibrary,
-            icon = { Text("□", fontSize = 17.sp) },
-            label = { Text("资料库", fontSize = 11.sp) },
+            icon = {
+                Icon(
+                    if (librarySelected) Icons.Filled.CollectionsBookmark else Icons.Outlined.CollectionsBookmark,
+                    contentDescription = null,
+                )
+            },
+            label = { Text("资料库") },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
             selected = showReview,
             onClick = onShowReview,
-            icon = { Text("◷", fontSize = 17.sp) },
-            label = { Text("回顾", fontSize = 11.sp) },
+            icon = { Icon(Icons.Outlined.Autorenew, contentDescription = null) },
+            label = { Text("回顾") },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
@@ -3869,10 +4104,10 @@ private fun MemoBottomNavigation(
             icon = {
                 // 角标是上次解锁时需要处理的提醒数，锁定后仍然显示。
                 BadgedBox(badge = { if (vaultReminderCount > 0) Badge { Text("$vaultReminderCount") } }) {
-                    Text("◈", fontSize = 17.sp)
+                    Icon(Icons.Outlined.Lock, contentDescription = null)
                 }
             },
-            label = { Text("密码库", fontSize = 11.sp) },
+            label = { Text("密码库") },
             colors = memoNavigationColors(),
         )
     }
@@ -3880,8 +4115,10 @@ private fun MemoBottomNavigation(
 
 @Composable
 private fun memoNavigationColors() = NavigationBarItemDefaults.colors(
-    selectedIconColor = DeepTeal,
-    selectedTextColor = DeepTeal,
+    selectedIconColor = DeepTealHover,
+    selectedTextColor = DeepTealHover,
+    unselectedIconColor = TextMuted,
+    unselectedTextColor = TextMuted,
     indicatorColor = TealSoft,
     disabledIconColor = TextMuted.copy(alpha = 0.42f),
     disabledTextColor = TextMuted.copy(alpha = 0.42f),
@@ -3929,8 +4166,11 @@ private fun SentencePronunciationButton(text: String) {
         },
         enabled = text.isNotBlank() && !playing,
         modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
     ) {
-        Text(if (playing) "句子播放中…" else "▶ 播放例句/内容")
+        Icon(Icons.AutoMirrored.Outlined.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(if (playing) "播放中…" else "朗读例句 / 内容")
     }
 }
 
@@ -3948,40 +4188,54 @@ private fun PhoneticPlayField(
         value = phonetic,
         onValueChange = onPhoneticChange,
         modifier = Modifier.fillMaxWidth(),
-        label = { Text("音标（点右侧播放）") },
+        label = { Text("音标") },
         placeholder = { Text("输入单词后自动填入") },
         supportingText = {
-            Text(if (canPlay) "点击音标旁的 ▶美 / ▶英 播放读音" else "先输入单词再播放读音")
+            Text(if (canPlay) "点右侧的美式 / 英式按钮播放读音" else "先输入单词再播放读音")
         },
         singleLine = true,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         trailingIcon = {
-            Row {
-                TextButton(
-                    onClick = { play("us") },
-                    enabled = canPlay,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        if (playingTag == "us") "播放中" else "▶美",
-                        color = if (canPlay) DeepTeal else TextMuted,
-                        fontSize = 13.sp,
-                    )
-                }
-                TextButton(
-                    onClick = { play("uk") },
-                    enabled = canPlay,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        if (playingTag == "uk") "播放中" else "▶英",
-                        color = if (canPlay) DeepTeal else TextMuted,
-                        fontSize = 13.sp,
-                    )
-                }
+            Row(
+                modifier = Modifier.padding(end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PronounceChip("美", playingTag == "us", canPlay) { play("us") }
+                PronounceChip("英", playingTag == "uk", canPlay) { play("uk") }
             }
         },
     )
+}
+
+/** 发音小按钮：喇叭图标加口音，播放时变成实心底。 */
+@Composable
+private fun PronounceChip(
+    accent: String,
+    playing: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (playing) WordAccent else WordSoft)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.AutoMirrored.Outlined.VolumeUp,
+            contentDescription = "播放${accent}式读音",
+            tint = if (playing) Color.White else if (enabled) WordAccent else TextMuted,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            accent,
+            color = if (playing) Color.White else if (enabled) WordAccent else TextMuted,
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
 }
 
 @Composable
@@ -3997,38 +4251,20 @@ private fun ClickablePhonetic(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TextButton(
-            onClick = { play("us") },
-            enabled = canPlay,
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        ) {
-            Text(
-                if (playingTag == "us") "播放中… $display" else display,
-                color = if (canPlay) DeepTeal else TextMuted,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-        TextButton(
-            onClick = { play("us") },
-            enabled = canPlay,
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-        ) {
-            Text("▶美", color = if (canPlay) DeepTeal else TextMuted, fontSize = 13.sp)
-        }
-        TextButton(
-            onClick = { play("uk") },
-            enabled = canPlay,
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-        ) {
-            Text(
-                if (playingTag == "uk") "播放中" else "▶英",
-                color = if (canPlay) DeepTeal else TextMuted,
-                fontSize = 13.sp,
-            )
-        }
+        Text(
+            display,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = canPlay) { play("us") }
+                .padding(vertical = 2.dp),
+            color = if (canPlay) WordAccent else TextMuted,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        PronounceChip("美", playingTag == "us", canPlay) { play("us") }
+        PronounceChip("英", playingTag == "uk", canPlay) { play("uk") }
     }
 }
 
@@ -4058,26 +4294,14 @@ private fun quickAccessHost(url: String?): String {
     return url?.let { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }.orEmpty()
 }
 
-// 由站点名算出固定色相，同一站点每次显示同一种颜色；不加载站点图标，避免向第三方暴露访问记录。
-private fun quickAccessAvatarColor(text: String): Color {
-    var hash = 0
-    for (char in text) hash = (hash * 31 + char.code) % 360
-    return Color.hsl(hash.toFloat(), 0.45f, 0.42f)
-}
-
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuickAccessSection(
     entries: List<QuickAccessEntry>,
     onOpen: (Memo) -> Unit,
     onRemove: (Memo) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("快速访问", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.width(8.dp))
-            Text("按打开次数排列", color = TextMuted, style = MaterialTheme.typography.labelMedium)
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionHeader("快速访问", trailing = "按打开次数排列")
         if (entries.isEmpty()) {
             Text(
                 "还没有打开记录。点开网页资料的「打开原网页」后，常用的网页会按打开次数出现在这里。",
@@ -4086,58 +4310,54 @@ private fun QuickAccessSection(
             )
             return@Column
         }
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        // 横向滑动、宽度一致的卡片，不再像换行排列那样长短不齐。
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(end = 4.dp),
         ) {
-            entries.forEach { entry ->
+            items(entries, key = { it.memo.clientId }) { entry ->
                 val memo = entry.memo
                 val host = quickAccessHost(memo.sourceUrl)
-                val name = host.ifBlank { memo.title }
-                Row(
-                    modifier = Modifier
-                        .widthIn(max = 220.dp)
-                        .background(SurfaceWhite, RoundedCornerShape(12.dp))
-                        .border(1.dp, Border, RoundedCornerShape(12.dp))
-                        .clickable { onOpen(memo) }
-                        .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Card(
+                    onClick = { onOpen(memo) },
+                    modifier = Modifier.width(156.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                    border = BorderStroke(1.dp, Border),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .background(quickAccessAvatarColor(name), RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            name.trim().firstOrNull()?.uppercase() ?: "?",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f, fill = false)) {
+                    Column(Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            SiteAvatar(host.ifBlank { memo.title }, size = 34.dp)
+                            Spacer(Modifier.weight(1f))
+                            IconButton(
+                                onClick = { onRemove(memo) },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Close,
+                                    contentDescription = "从快速访问移除「${memo.title}」",
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
                         Text(
                             memo.title,
+                            style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(end = 8.dp),
                         )
                         Text(
                             "${entry.openCount} 次 · $host",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                             color = TextMuted,
                             style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(end = 8.dp),
                         )
                     }
-                    TextButton(
-                        onClick = { onRemove(memo) },
-                        modifier = Modifier.size(36.dp),
-                        contentPadding = PaddingValues(0.dp),
-                    ) { Text("×", color = TextMuted) }
                 }
             }
         }

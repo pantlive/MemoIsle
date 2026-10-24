@@ -1,0 +1,10 @@
+# VPS 精简部署用的运行时依赖。
+# 版本与 environment.yml 保持一致；不含 torch、easyocr、sanotts 等可选的重依赖，
+# 本地 OCR 与服务端 TTS 在 VPS 上默认关闭，见 docs/deployment-vps.md。
+fastapi==0.136.3
+uvicorn[standard]==0.48.0
+httpx==0.28.1
+pydantic==2.13.2
+sqlalchemy==2.0.51
+pillow==12.3.0
+cryptography==45.0.7

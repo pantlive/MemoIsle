@@ -32,9 +32,11 @@ from app.auth_service import (
     EmailTokenInvalidError,
     InvalidEmailCredentialsError,
     LoginRateLimitedError,
+    PasswordChangeUnavailableError,
     VerificationCodeInvalidError,
     VerificationCodeRateLimitedError,
     build_authorization_url,
+    change_password,
     consume_verification_code,
     create_dev_session,
     ensure_email_available,
@@ -240,6 +242,7 @@ from app.schemas import (
     MemoStatus,
     MemoType,
     MemoUpdate,
+    PasswordChangeRequest,
     PasswordResetConfirmRequest,
     ResourceCategoryCreate,
     ResourceCategoryGenerateRequest,
@@ -660,6 +663,39 @@ def reset_password_route(
     return AuthActionResponse(status="ok")
 
 
+@router.post(
+    "/auth/password-change",
+    response_model=AuthActionResponse,
+    tags=["auth"],
+)
+def change_password_route(
+    payload: PasswordChangeRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    user_id: UserDependency,
+) -> AuthActionResponse:
+    """登录后使用当前密码修改登录密码，完成后要求重新登录。"""
+
+    try:
+        change_password(
+            session, settings, user_id, payload.current_password, payload.password,
+        )
+    except InvalidEmailCredentialsError as error:
+        # 当前 Bearer 会话仍有效，密码校验失败使用 400，避免客户端误退出登录。
+        raise HTTPException(status_code=400, detail="当前密码不正确") from error
+    except PasswordChangeUnavailableError as error:
+        raise HTTPException(
+            status_code=400, detail="当前账号未设置邮箱登录密码",
+        ) from error
+    except LoginRateLimitedError as error:
+        raise HTTPException(
+            status_code=429,
+            detail="密码尝试次数过多，请稍后重试",
+            headers={"Retry-After": str(error.retry_after_seconds)},
+        ) from error
+    return AuthActionResponse(status="ok")
+
+
 @router.get("/auth/{provider}/authorize", tags=["auth"])
 def authorize_third_party_login(
     provider: AuthProvider,
@@ -917,6 +953,25 @@ def logout(
     if not separator or scheme.lower() != "bearer":
         return AuthLogoutResponse(revoked=False)
     return AuthLogoutResponse(revoked=revoke_session(session, token.strip()))
+
+
+@router.api_route(
+    "/android/download",
+    methods=["GET", "HEAD"],
+    response_class=FileResponse,
+    tags=["android"],
+)
+def download_android_route(settings: SettingsDependency) -> FileResponse:
+    """公开下载已发布的签名 APK，支持手机浏览器及断点续传。"""
+
+    if not settings.android_apk_path.is_file():
+        raise HTTPException(status_code=404, detail="安卓安装包暂未发布")
+    return FileResponse(
+        settings.android_apk_path,
+        media_type="application/vnd.android.package-archive",
+        filename="MemoIsle-android.apk",
+        headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get(

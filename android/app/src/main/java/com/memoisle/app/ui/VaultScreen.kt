@@ -12,9 +12,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,9 +32,29 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Password
+import androidx.compose.material.icons.outlined.Pin
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,11 +62,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -60,13 +87,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,13 +109,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.memoisle.app.VaultPhase
 import com.memoisle.app.VaultViewModel
 import com.memoisle.app.data.RecoveryCode
+import com.memoisle.app.data.VAULT_AUTH_KEY
+import com.memoisle.app.data.VAULT_AUTH_PASSWORD
 import com.memoisle.app.data.VAULT_KIND_LABELS
 import com.memoisle.app.data.VAULT_KIND_LOGIN
 import com.memoisle.app.data.VAULT_KIND_RECOVERY
 import com.memoisle.app.data.VAULT_KIND_SECRET
 import com.memoisle.app.data.VAULT_KIND_SERVER
-import com.memoisle.app.data.VAULT_AUTH_KEY
-import com.memoisle.app.data.VAULT_AUTH_PASSWORD
 import com.memoisle.app.data.VAULT_ROTATE_OPTIONS
 import com.memoisle.app.data.VaultEntry
 import com.memoisle.app.data.VaultItemData
@@ -105,17 +135,8 @@ import kotlinx.coroutines.launch
 
 private const val CLIPBOARD_CLEAR_MS = 30_000L
 private const val REMINDER_PREVIEW_LIMIT = 4
-private val DangerRed = Color(0xFFB84A4A)
-private val DangerSoft = Color(0xFFF8E9E9)
 private const val FILTER_ALL = "all"
 private const val FILTER_REMINDERS = "reminders"
-
-private val kindIcons = mapOf(
-    VAULT_KIND_LOGIN to "账",
-    VAULT_KIND_SECRET to "钥",
-    VAULT_KIND_RECOVERY to "码",
-    VAULT_KIND_SERVER to "云",
-)
 
 private fun subtitle(data: VaultItemData): String = when (data.kind) {
     VAULT_KIND_LOGIN -> data.username.ifBlank { data.url.ifBlank { "未填写用户名" } }
@@ -222,6 +243,25 @@ fun VaultScreen(
         modifier = Modifier.fillMaxSize(),
         containerColor = WarmMist,
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            MemoTopBar(
+                title = "密码库",
+                subtitle = "端到端加密 · 服务器只保存密文",
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            ) {
+                if (state.phase == VaultPhase.UNLOCKED) {
+                    TextButton(onClick = viewModel::lock) {
+                        Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("锁定")
+                    }
+                }
+            }
+        },
         floatingActionButton = {
             if (state.phase == VaultPhase.UNLOCKED) {
                 FloatingActionButton(
@@ -229,7 +269,7 @@ fun VaultScreen(
                     containerColor = DeepTeal,
                     contentColor = Color.White,
                     shape = RoundedCornerShape(18.dp),
-                ) { Text("＋", fontSize = 24.sp) }
+                ) { Icon(Icons.Outlined.Add, contentDescription = "新建条目", modifier = Modifier.size(26.dp)) }
             }
         },
     ) { innerPadding ->
@@ -238,45 +278,45 @@ fun VaultScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .imePadding(),
-            contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 104.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onClose) { Text("‹ 返回") }
-                    Column(Modifier.weight(1f)) {
-                        Text("密码库", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = DeepTealHover)
-                        Text("端到端加密 · 服务器只保存密文", color = TextMuted, style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (state.phase == VaultPhase.UNLOCKED) {
-                        TextButton(onClick = viewModel::lock) { Text("锁定") }
+            when (state.phase) {
+                VaultPhase.LOADING -> item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = DeepTeal)
+                        Spacer(Modifier.width(10.dp))
+                        Text("正在读取密码库……", color = TextMuted)
                     }
                 }
-            }
-            when (state.phase) {
-                VaultPhase.LOADING -> item { Text("正在读取密码库……", color = TextMuted) }
                 VaultPhase.ERROR -> item {
-                    VaultCard {
-                        Text(state.error ?: "暂时无法读取密码库。")
-                        OutlinedButton(onClick = viewModel::load) { Text("重试") }
+                    VaultGate(icon = Icons.Outlined.CloudOff, title = "暂时无法读取密码库") {
+                        Text(state.error ?: "请检查网络后重试。", color = TextMuted, textAlign = TextAlign.Center)
+                        OutlinedButton(onClick = viewModel::load, shape = RoundedCornerShape(12.dp)) { Text("重试") }
                     }
                 }
                 VaultPhase.NOT_CONFIGURED -> item {
-                    VaultCard {
-                        Text("还没有密码库", fontWeight = FontWeight.SemiBold)
+                    VaultGate(icon = Icons.Outlined.Shield, title = "还没有密码库") {
                         Text(
                             "请先在 MemoIsle 网页端设置主密码。之后在手机上输入同一个主密码即可解锁使用。",
                             color = TextMuted,
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
                 VaultPhase.LOCKED -> item {
-                    VaultCard {
-                        Text("密码库已锁定", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    var showPassword by remember { mutableStateOf(false) }
+                    VaultGate(icon = Icons.Outlined.Lock, title = "密码库已锁定") {
                         Text(
                             "输入主密码解锁" + (if (state.itemCount > 0) "，共 ${state.itemCount} 条" else "") +
                                 "。解锁在手机上完成，主密码不会发送到服务器。",
                             color = TextMuted,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
                         )
                         OutlinedTextField(
                             value = password,
@@ -284,8 +324,17 @@ fun VaultScreen(
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             label = { Text("主密码") },
-                            visualTransformation = PasswordVisualTransformation(),
+                            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            shape = RoundedCornerShape(12.dp),
+                            trailingIcon = {
+                                IconButton(onClick = { showPassword = !showPassword }) {
+                                    Icon(
+                                        if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                        contentDescription = if (showPassword) "隐藏主密码" else "显示主密码",
+                                    )
+                                }
+                            },
                         )
                         Button(
                             onClick = {
@@ -293,6 +342,8 @@ fun VaultScreen(
                                 password = ""
                             },
                             enabled = !state.busy && password.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
                         ) {
                             if (state.busy) {
@@ -300,13 +351,14 @@ fun VaultScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("解锁中…")
                             } else {
-                                Text("解锁")
+                                Text("解锁", style = MaterialTheme.typography.titleSmall)
                             }
                         }
                         Text(
                             "忘记主密码、更改主密码和加密备份请在网页端操作。",
                             color = TextMuted,
                             style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
@@ -331,7 +383,24 @@ fun VaultScreen(
                             onValueChange = { query = it },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            label = { Text("按名称、用户名、网址或备注搜索") },
+                            placeholder = { Text("按名称、用户名、网址或备注搜索") },
+                            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = TextMuted) },
+                            trailingIcon = if (query.isNotEmpty()) {
+                                {
+                                    IconButton(onClick = { query = "" }) {
+                                        Icon(Icons.Outlined.Close, contentDescription = "清除搜索")
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = SurfaceWhite,
+                                focusedContainerColor = SurfaceWhite,
+                                unfocusedBorderColor = Border,
+                                focusedBorderColor = DeepTeal,
+                            ),
                         )
                     }
                     item {
@@ -343,13 +412,23 @@ fun VaultScreen(
                         )
                     }
                     if (state.brokenCount > 0) {
-                        item { Text("有 ${state.brokenCount} 条无法解密，可能已损坏或被篡改，已跳过显示。", color = DangerRed) }
+                        item {
+                            InfoPill(
+                                "有 ${state.brokenCount} 条无法解密，可能已损坏或被篡改，已跳过显示。",
+                                color = DangerRed,
+                                background = DangerSoft,
+                                icon = Icons.Outlined.ErrorOutline,
+                            )
+                        }
                     }
                     if (state.entries.isEmpty()) {
                         item {
-                            VaultCard {
-                                Text("密码库还是空的", fontWeight = FontWeight.SemiBold)
-                                Text("点右下角 ＋ 保存网站账号密码、API Key 或两步验证的恢复码。", color = TextMuted)
+                            VaultGate(icon = Icons.Outlined.Key, title = "密码库还是空的") {
+                                Text(
+                                    "点右下角的 + 保存网站账号密码、API Key、服务器或两步验证的恢复码。",
+                                    color = TextMuted,
+                                    textAlign = TextAlign.Center,
+                                )
                             }
                         }
                     } else if (visible.isEmpty()) {
@@ -357,6 +436,8 @@ fun VaultScreen(
                             Text(
                                 if (filter == FILTER_REMINDERS && query.isBlank()) "提醒都处理完了。" else "没有匹配的条目。",
                                 color = TextMuted,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                textAlign = TextAlign.Center,
                             )
                         }
                     }
@@ -380,22 +461,36 @@ fun VaultScreen(
     if (choosingKind) {
         AlertDialog(
             onDismissRequest = { choosingKind = false },
-            title = { Text("新建") },
+            title = { Text("新建条目") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_SERVER, VAULT_KIND_RECOVERY).forEach { kind ->
-                        OutlinedButton(
-                            onClick = {
-                                choosingKind = false
-                                editor = null to VaultItemData.empty(kind)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(VAULT_KIND_LABELS.getValue(kind)) }
+                        val style = vaultKindStyle(kind)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    choosingKind = false
+                                    editor = null to VaultItemData.empty(kind)
+                                }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            KindAvatar(style, size = 40.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(style.label, style = MaterialTheme.typography.titleSmall)
+                                Text(vaultKindHint(kind), color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                     }
                 }
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { choosingKind = false }) { Text("取消") } },
+            containerColor = SurfaceWhite,
+            shape = RoundedCornerShape(18.dp),
         )
     }
 
@@ -428,15 +523,48 @@ private fun clearClipboardIfUnchanged(context: Context, value: String) {
     }
 }
 
+/** 密码库四种条目的图标和配色，列表、新建选择和编辑页共用。 */
+internal fun vaultKindStyle(kind: String): MemoKindStyle = when (kind) {
+    VAULT_KIND_SECRET -> MemoKindStyle(Icons.Outlined.Key, VAULT_KIND_LABELS.getValue(kind), WordAccent, WordSoft)
+    VAULT_KIND_SERVER -> MemoKindStyle(Icons.Outlined.Dns, VAULT_KIND_LABELS.getValue(kind), IdeaAccent, IdeaSoft)
+    VAULT_KIND_RECOVERY -> MemoKindStyle(Icons.Outlined.Pin, VAULT_KIND_LABELS.getValue(kind), ImageAccent, ImageSoft)
+    else -> MemoKindStyle(Icons.Outlined.Password, VAULT_KIND_LABELS.getValue(VAULT_KIND_LOGIN), DeepTeal, TealSoft)
+}
+
+private fun vaultKindHint(kind: String): String = when (kind) {
+    VAULT_KIND_SECRET -> "API Key、SSH 私钥、令牌"
+    VAULT_KIND_SERVER -> "主机、端口和登录方式"
+    VAULT_KIND_RECOVERY -> "两步验证的备用恢复码"
+    else -> "网站或应用的用户名和密码"
+}
+
+/** 锁定、未设置、出错等状态的居中卡片。 */
 @Composable
-private fun VaultCard(content: @Composable () -> Unit) {
+private fun VaultGate(
+    icon: ImageVector,
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         border = BorderStroke(1.dp, Border),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(20.dp),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier.size(56.dp).background(TealSoft, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = DeepTeal, modifier = Modifier.size(28.dp))
+            }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            content()
+        }
     }
 }
 
@@ -465,11 +593,13 @@ private fun ReminderCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFCF6F6)),
         border = BorderStroke(1.dp, Color(0xFFEBCFCF)),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("密码提醒", fontWeight = FontWeight.SemiBold)
+                Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = DangerRed, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("密码提醒", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.width(8.dp))
                 Text("$entryCount 条需要处理", color = TextMuted, style = MaterialTheme.typography.bodySmall)
             }
@@ -478,6 +608,7 @@ private fun ReminderCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
                         .clickable { onOpen(reminder) }
                         .padding(vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -486,7 +617,7 @@ private fun ReminderCard(
                         Text(
                             reminder.title,
                             modifier = Modifier.weight(1f, fill = false),
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -496,13 +627,12 @@ private fun ReminderCard(
                 }
             }
             if (reminders.size > REMINDER_PREVIEW_LIMIT) {
-                OutlinedButton(onClick = onShowAll) { Text("查看全部 ${reminders.size} 项提醒") }
+                TextButton(onClick = onShowAll) { Text("查看全部 ${reminders.size} 项提醒") }
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun KindFilters(
     selected: String,
@@ -518,10 +648,38 @@ private fun KindFilters(
         // 没有提醒时不显示；正在看这一栏时保留，避免按钮突然消失。
         if (reminderCount > 0 || selected == FILTER_REMINDERS) add(FILTER_REMINDERS to "需处理 $reminderCount")
     }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         options.forEach { (value, label) ->
-            FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(label) })
+            MemoFilterChip(
+                label = label,
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                leadingIcon = when (value) {
+                    FILTER_ALL -> null
+                    FILTER_REMINDERS -> Icons.Outlined.NotificationsActive
+                    else -> vaultKindStyle(value).icon
+                },
+            )
         }
+    }
+}
+
+/** 条目卡片上的复制按钮：小号描边按钮，带复制图标。 */
+@Composable
+private fun CopyButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.height(36.dp),
+    ) {
+        Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -536,51 +694,68 @@ private fun VaultRow(
 ) {
     val data = entry.data
     val nextCode = data.codes.firstOrNull { !it.used }
+    val style = vaultKindStyle(data.kind)
     Card(
         modifier = Modifier.fillMaxWidth(),
+        onClick = onOpen,
         colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         border = BorderStroke(1.dp, Border),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(
-                    modifier = Modifier.size(34.dp).background(TealSoft, RoundedCornerShape(9.dp)),
-                    contentAlignment = Alignment.Center,
-                ) { Text(kindIcons.getValue(data.kind), color = DeepTeal, fontWeight = FontWeight.Bold) }
+                KindAvatar(style)
                 Column(Modifier.weight(1f)) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Text(data.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(data.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         reminders.forEach { ReminderBadge(it) }
                     }
                     Text(
                         text = if (showReminderText && reminders.isNotEmpty()) {
                             reminders.joinToString(" ") { it.message }
                         } else {
-                            "${VAULT_KIND_LABELS.getValue(data.kind)} · ${subtitle(data)}"
+                            "${style.label} · ${subtitle(data)}"
                         },
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 when (data.kind) {
                     VAULT_KIND_LOGIN -> {
-                        OutlinedButton(onClick = { onCopy(data.username, "用户名") }, enabled = data.username.isNotEmpty()) { Text("复制用户名") }
-                        OutlinedButton(onClick = { onCopy(data.password, "密码") }, enabled = data.password.isNotEmpty()) { Text("复制密码") }
+                        CopyButton("用户名", data.username.isNotEmpty()) { onCopy(data.username, "用户名") }
+                        CopyButton("密码", data.password.isNotEmpty()) { onCopy(data.password, "密码") }
                     }
-                    VAULT_KIND_SECRET -> OutlinedButton(onClick = { onCopy(data.secret, "密钥") }, enabled = data.secret.isNotEmpty()) { Text("复制密钥") }
-                    else -> OutlinedButton(onClick = { nextCode?.let { onCopy(it.code, "恢复码") } }, enabled = nextCode != null) {
-                        Text(if (nextCode != null) "复制未用的恢复码" else "恢复码已用完")
+                    VAULT_KIND_SECRET -> CopyButton("密钥", data.secret.isNotEmpty()) { onCopy(data.secret, "密钥") }
+                    // 与 Web 端一致：主机、密码或私钥，以及可直接粘贴到终端的 ssh 命令。
+                    VAULT_KIND_SERVER -> {
+                        val useKey = data.authMethod == VAULT_AUTH_KEY
+                        val credential = if (useKey) data.privateKey else data.password
+                        CopyButton("主机", data.host.isNotEmpty()) { onCopy(data.host, "主机") }
+                        CopyButton(if (useKey) "私钥" else "密码", credential.isNotEmpty()) {
+                            onCopy(credential, if (useKey) "私钥" else "密码")
+                        }
+                        CopyButton("ssh", data.host.isNotEmpty()) {
+                            val port = if (data.port.isNotBlank() && data.port != "22") " -p ${data.port}" else ""
+                            val user = if (data.username.isNotBlank()) "${data.username}@" else ""
+                            onCopy("ssh$port $user${data.host}", "ssh 命令")
+                        }
                     }
+                    else -> CopyButton(
+                        if (nextCode != null) "未用的恢复码" else "恢复码已用完",
+                        nextCode != null,
+                    ) { nextCode?.let { onCopy(it.code, "恢复码") } }
                 }
             }
         }
@@ -640,37 +815,51 @@ private fun VaultItemEditor(
         }
     }
 
-    Dialog(onDismissRequest = ::requestDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(modifier = Modifier.fillMaxSize(), color = SurfaceWhite) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .imePadding()
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(VAULT_KIND_LABELS.getValue(draft.kind), color = DeepTeal, style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            if (isNew) "新建${VAULT_KIND_LABELS.getValue(draft.kind)}" else draft.title.ifBlank { "未命名" },
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                    TextButton(onClick = ::requestDismiss, enabled = !busy) { Text("关闭") }
+    DetailScreen(
+        kind = vaultKindStyle(draft.kind),
+        onClose = ::requestDismiss,
+        closeEnabled = !busy,
+        bottomBar = {
+            if (!isNew) {
+                TextButton(
+                    onClick = { confirmDelete = true },
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(contentColor = DangerRed),
+                ) {
+                    Icon(Icons.Outlined.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("删除")
                 }
+            }
+            Spacer(Modifier.weight(1f))
+            Button(
+                onClick = { onSave(draft.copy(title = draft.title.trim())) },
+                enabled = !busy && draft.title.isNotBlank() && !expiryInvalid && (dirty || isNew),
+                modifier = Modifier.height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+            ) { Text(if (busy) "加密保存中…" else "保存", style = MaterialTheme.typography.titleSmall) }
+        },
+    ) {
+                Text(
+                    if (isNew) "新建${VAULT_KIND_LABELS.getValue(draft.kind)}" else draft.title.ifBlank { "未命名" },
+                    style = MaterialTheme.typography.headlineSmall,
+                )
                 reminders.forEach { reminder ->
+                    val tone = if (reminder.danger) DangerRed else WarmAmberText
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(if (reminder.danger) DangerSoft else WarmAmberSoft, RoundedCornerShape(9.dp))
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            .background(if (reminder.danger) DangerSoft else WarmAmberSoft, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        Text(reminder.type.label, fontWeight = FontWeight.Bold, color = if (reminder.danger) DangerRed else WarmAmberText)
-                        Text(reminder.message, color = if (reminder.danger) DangerRed else WarmAmberText)
+                        Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = tone, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(reminder.type.label, style = MaterialTheme.typography.titleSmall, color = tone)
+                            Text(reminder.message, color = tone, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
                 OutlinedTextField(
@@ -688,7 +877,11 @@ private fun VaultItemEditor(
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             label = { Text("用户名或邮箱") },
-                            trailingIcon = { TextButton(onClick = { onCopy(draft.username, "用户名") }) { Text("复制") } },
+                            trailingIcon = {
+                                IconButton(onClick = { onCopy(draft.username, "用户名") }, enabled = draft.username.isNotEmpty()) {
+                                    Icon(Icons.Outlined.ContentCopy, contentDescription = "复制用户名", modifier = Modifier.size(18.dp))
+                                }
+                            },
                         )
                         OutlinedTextField(
                             value = draft.password,
@@ -701,9 +894,9 @@ private fun VaultItemEditor(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { secretVisible = !secretVisible }) { Text(if (secretVisible) "隐藏" else "显示") }
-                            OutlinedButton(onClick = { update(draft.copy(password = generateVaultPassword())) }) { Text("生成") }
-                            OutlinedButton(onClick = { onCopy(draft.password, "密码") }, enabled = draft.password.isNotEmpty()) { Text("复制") }
+                            FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
+                            FieldAction(Icons.Outlined.AutoAwesome, "生成") { update(draft.copy(password = generateVaultPassword())) }
+                            FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.password.isNotEmpty()) { onCopy(draft.password, "密码") }
                         }
                         if (!draft.skipChecks && isWeakVaultPassword(draft.password)) {
                             Text("密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。", color = DangerRed, style = MaterialTheme.typography.bodySmall)
@@ -728,8 +921,8 @@ private fun VaultItemEditor(
                             visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { secretVisible = !secretVisible }) { Text(if (secretVisible) "隐藏" else "显示") }
-                            OutlinedButton(onClick = { onCopy(draft.secret, "密钥") }, enabled = draft.secret.isNotEmpty()) { Text("复制") }
+                            FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
+                            FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.secret.isNotEmpty()) { onCopy(draft.secret, "密钥") }
                         }
                     }
                     VAULT_KIND_SERVER -> {
@@ -761,18 +954,22 @@ private fun VaultItemEditor(
                             singleLine = true,
                             label = { Text("登录用户") },
                             placeholder = { Text("root") },
-                            trailingIcon = { TextButton(onClick = { onCopy(draft.username, "用户名") }) { Text("复制") } },
+                            trailingIcon = {
+                                IconButton(onClick = { onCopy(draft.username, "用户名") }, enabled = draft.username.isNotEmpty()) {
+                                    Icon(Icons.Outlined.ContentCopy, contentDescription = "复制用户名", modifier = Modifier.size(18.dp))
+                                }
+                            },
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
+                            MemoFilterChip(
+                                label = "密码",
                                 selected = draft.authMethod == VAULT_AUTH_PASSWORD,
                                 onClick = { update(draft.copy(authMethod = VAULT_AUTH_PASSWORD)) },
-                                label = { Text("密码") },
                             )
-                            FilterChip(
+                            MemoFilterChip(
+                                label = "SSH 私钥",
                                 selected = draft.authMethod == VAULT_AUTH_KEY,
                                 onClick = { update(draft.copy(authMethod = VAULT_AUTH_KEY)) },
-                                label = { Text("SSH 私钥") },
                             )
                         }
                         if (draft.authMethod == VAULT_AUTH_KEY) {
@@ -786,8 +983,8 @@ private fun VaultItemEditor(
                                 visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             )
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { secretVisible = !secretVisible }) { Text(if (secretVisible) "隐藏" else "显示") }
-                                OutlinedButton(onClick = { onCopy(draft.privateKey, "私钥") }, enabled = draft.privateKey.isNotEmpty()) { Text("复制") }
+                                FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
+                                FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.privateKey.isNotEmpty()) { onCopy(draft.privateKey, "私钥") }
                             }
                             OutlinedTextField(
                                 value = draft.keyPassphrase,
@@ -810,9 +1007,9 @@ private fun VaultItemEditor(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             )
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { secretVisible = !secretVisible }) { Text(if (secretVisible) "隐藏" else "显示") }
-                                OutlinedButton(onClick = { update(draft.copy(password = generateVaultPassword())) }) { Text("生成") }
-                                OutlinedButton(onClick = { onCopy(draft.password, "密码") }, enabled = draft.password.isNotEmpty()) { Text("复制") }
+                                FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
+                                FieldAction(Icons.Outlined.AutoAwesome, "生成") { update(draft.copy(password = generateVaultPassword())) }
+                                FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.password.isNotEmpty()) { onCopy(draft.password, "密码") }
                             }
                         }
                     }
@@ -847,13 +1044,10 @@ private fun VaultItemEditor(
                             label = { Text("添加恢复码") },
                             placeholder = { Text("把网站给的恢复码整段粘贴进来，按空格、换行或逗号自动拆分") },
                         )
-                        OutlinedButton(
-                            onClick = {
-                                update(draft.copy(codes = parseRecoveryCodes(pastedCodes, draft.codes)))
-                                pastedCodes = ""
-                            },
-                            enabled = pastedCodes.isNotBlank(),
-                        ) { Text("添加恢复码") }
+                        FieldAction(Icons.Outlined.Add, "添加恢复码", enabled = pastedCodes.isNotBlank()) {
+                            update(draft.copy(codes = parseRecoveryCodes(pastedCodes, draft.codes)))
+                            pastedCodes = ""
+                        }
                     }
                 }
                 if (draft.kind == VAULT_KIND_LOGIN || draft.kind == VAULT_KIND_SECRET || draft.kind == VAULT_KIND_SERVER) {
@@ -864,7 +1058,7 @@ private fun VaultItemEditor(
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("提醒", fontWeight = FontWeight.SemiBold)
+                        Text("提醒", style = MaterialTheme.typography.titleSmall)
                         Text(
                             "${
                                 when (draft.kind) {
@@ -879,10 +1073,10 @@ private fun VaultItemEditor(
                         Text("定期更换", style = MaterialTheme.typography.labelMedium)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             VAULT_ROTATE_OPTIONS.forEach { days ->
-                                FilterChip(
+                                MemoFilterChip(
+                                    label = rotateLabel(days),
                                     selected = draft.rotateDays == days,
                                     onClick = { update(draft.copy(rotateDays = days)) },
-                                    label = { Text(rotateLabel(days)) },
                                 )
                             }
                         }
@@ -921,19 +1115,6 @@ private fun VaultItemEditor(
                     minLines = 3,
                     label = { Text("备注") },
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!isNew) {
-                        OutlinedButton(onClick = { confirmDelete = true }, enabled = !busy) { Text("删除", color = DangerRed) }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Button(
-                        onClick = { onSave(draft.copy(title = draft.title.trim())) },
-                        enabled = !busy && draft.title.isNotBlank() && !expiryInvalid && (dirty || isNew),
-                        colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-                    ) { Text(if (busy) "加密保存中…" else "保存") }
-                }
-            }
-        }
     }
 
     if (confirmDiscard) {
@@ -974,7 +1155,7 @@ private fun RecoveryCodeRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceSubtle, RoundedCornerShape(8.dp))
+            .background(SurfaceSubtle, RoundedCornerShape(12.dp))
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -993,7 +1174,32 @@ private fun RecoveryCodeRow(
             color = if (code.used) TextMuted else TextStrong,
             textDecoration = if (code.used) TextDecoration.LineThrough else null,
         )
-        TextButton(onClick = onCopy, enabled = !code.used) { Text("复制") }
-        TextButton(onClick = onRemove) { Text("×", color = DangerRed) }
+        IconButton(onClick = onCopy, enabled = !code.used) {
+            Icon(Icons.Outlined.ContentCopy, contentDescription = "复制恢复码", modifier = Modifier.size(18.dp))
+        }
+        IconButton(onClick = onRemove) {
+            Icon(Icons.Outlined.Close, contentDescription = "删除这个恢复码", tint = DangerRed, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** 字段下方的小操作：显示、生成、复制等，带图标的浅色按钮。 */
+@Composable
+private fun FieldAction(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(containerColor = SurfaceSubtle, contentColor = TextStrong),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }

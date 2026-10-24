@@ -303,6 +303,24 @@ class PasswordResetConfirmRequest(BaseModel):
         return self
 
 
+class PasswordChangeRequest(BaseModel):
+    """登录后校验当前密码并设置新密码。"""
+
+    current_password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_password_confirmation(self) -> PasswordChangeRequest:
+        """确保新密码两次输入一致，并且不同于当前密码。"""
+
+        if self.password != self.confirm_password:
+            raise ValueError("两次输入的新密码不一致")
+        if self.password == self.current_password:
+            raise ValueError("新密码不能与当前密码相同")
+        return self
+
+
 class AuthActionResponse(BaseModel):
     """认证辅助操作的通用结果。"""
 

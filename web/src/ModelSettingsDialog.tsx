@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import {
+  androidDownloadUrl,
+  changePassword,
   getBrowserHistorySettings,
   listModelSettings,
   resetModelSetting,
@@ -12,6 +14,8 @@ import type { ModelProvider, ModelSetting } from "./types";
 
 interface ModelSettingsDialogProps {
   onClose: () => void;
+  accountEmail: string | null;
+  onPasswordChanged: () => void;
 }
 
 interface ModelSettingForm {
@@ -54,7 +58,11 @@ function createForm(saved: ModelSetting): ModelSettingForm {
   };
 }
 
-export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProps) {
+export default function ModelSettingsDialog({
+  onClose,
+  accountEmail,
+  onPasswordChanged,
+}: ModelSettingsDialogProps) {
   const [forms, setForms] = useState<ModelSettingForm[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -63,6 +71,37 @@ export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProp
   const [historyExtended, setHistoryExtended] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyMessage, setHistoryMessage] = useState("");
+  // 登录密码只保存在当前表单内存里，提交成功后清空并退出登录。
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+
+  async function handlePasswordChange(): Promise<void> {
+    if (passwordBusy) return;
+    setPasswordError("");
+    if (newPassword !== confirmPassword) {
+      setPasswordError("两次输入的新密码不一致");
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setPasswordError("新密码不能与当前密码相同");
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await changePassword(currentPassword, newPassword, confirmPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      onPasswordChanged();
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : "修改密码失败");
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -118,11 +157,11 @@ export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProp
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && busy === null) onClose();
+      if (event.key === "Escape" && busy === null && !passwordBusy) onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onClose]);
+  }, [busy, onClose, passwordBusy]);
 
   function updateForm(provider: ModelProvider, patch: Partial<ModelSettingForm>): void {
     setForms((current) => current.map((form) =>
@@ -198,9 +237,87 @@ export default function ModelSettingsDialog({ onClose }: ModelSettingsDialogProp
             className="icon-button"
             aria-label="关闭设置"
             onClick={onClose}
-            disabled={busy !== null}
+            disabled={busy !== null || passwordBusy}
           >×</button>
         </div>
+        <section className="settings-section" aria-labelledby="settings-password-title">
+          <div className="settings-section-heading">
+            <div>
+              <h3 id="settings-password-title">修改登录密码</h3>
+              {accountEmail && <p>{accountEmail}</p>}
+              <p>修改后所有设备需要重新登录。密码库使用独立的主密码。</p>
+            </div>
+          </div>
+          <form
+            className="cloud-bind-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handlePasswordChange();
+            }}
+          >
+            <label>
+              <span>当前密码</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                name="current_password"
+                value={currentPassword}
+                maxLength={128}
+                required
+                disabled={passwordBusy}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>新密码</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                name="new_password"
+                minLength={8}
+                maxLength={128}
+                placeholder="设置 8 位以上的新密码"
+                required
+                disabled={passwordBusy}
+                onChange={(event) => setNewPassword(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>确认新密码</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                name="confirm_password"
+                minLength={8}
+                maxLength={128}
+                required
+                disabled={passwordBusy}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+            </label>
+            {passwordError && <p className="auth-field-error" role="alert">{passwordError}</p>}
+            <div className="model-settings-actions">
+              <button type="submit" className="primary-button" disabled={passwordBusy}>
+                {passwordBusy ? "正在修改…" : "修改密码并重新登录"}
+              </button>
+            </div>
+          </form>
+        </section>
+        <section className="settings-section" aria-labelledby="settings-android-title">
+          <div className="settings-section-heading">
+            <div>
+              <h3 id="settings-android-title">安卓客户端</h3>
+              <p>在手机上安装 MemoIsle，使用同一账号同步收藏、录音和密码库。</p>
+            </div>
+          </div>
+          <a
+            className="secondary-button android-download-link"
+            href={androidDownloadUrl()}
+            download="MemoIsle-android.apk"
+          >↓ 下载安卓端（APK）</a>
+        </section>
         <section className="settings-section" aria-labelledby="settings-history-title">
           <div className="settings-section-heading">
             <div>
