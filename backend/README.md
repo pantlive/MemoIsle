@@ -51,6 +51,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_DEEPSEEK_BASE_URL`：分类生成接口地址，默认 `https://api.deepseek.com/v1`。
 - `MEMOISLE_DEEPSEEK_MODEL`：分类生成模型，默认 `deepseek-flash`，支持覆盖为部署中可用的 DeepSeek 模型。
 - `MEMOISLE_DEEPSEEK_TIMEOUT_SECONDS`：分类生成请求超时秒数，默认 30。
+- `MEMOISLE_RESOURCE_SUMMARY_ENABLED`：是否用 DeepSeek 通道为网页资料生成用途简介，默认开启；账号和服务器都没有 DeepSeek 凭据时自动跳过。
 - `MEMOISLE_JEV_API_KEY` / `TYPESAFE_API_KEY`：Jev 网页归类的服务器默认凭证；也可在 Web 设置中配置。
 - `MEMOISLE_JEV_BASE_URL` / `MEMOISLE_JEV_MODEL`：默认 `https://api.typesafe.ai/v1` 和 `jev-1.13.0`。
 - `MEMOISLE_JEV_MIN_CONFIDENCE`：Jev 自动归类的最低置信度，默认 0.7；应使用实际收藏样本评估后调整。
@@ -150,6 +151,10 @@ Jev 模板包含完整分类路径，区分不同父分类下的同名子类别�
 超时、连接失败、HTTP 408/429/500/502/503/504 只对当前网页最多自动重试两次，分别等待至少 5 秒、15 秒；服务端 `Retry-After` 指定更长等待时遵守该时间，超过五分钟则暂停并提示稍后继续。认证、额度不足、无效模型或请求配置立即暂停并显示相应原因，不展示原始响应或凭据。等待时间和重试次数存入数据库，重启或重复点击不会跳过等待；等待期间释放租约，不阻塞其他账号。耗尽重试后停止当前账号的自动请求，保留队列和全部进度。
 
 `GET /api/v1/resource-classification` 返回本人待处理、已完成、保留数量和最近任务进度，任务包含 `error_code`、`retry_count`、`retry_limit`、`next_retry_at`；`POST /api/v1/resource-classification` 返回 202 并排队剩余网页。`POST /api/v1/resource-classification/classified/retry` 把当前可处理的已完成模型分类重新排队，保留原分类直到有新结果；人工确认、用户规则和确认失效的网页不纳入。`GET /api/v1/resource-classification/folders` 列出每个文件夹和标签对应的分类与涉及网页数；`POST /api/v1/resource-classification/folders/map?limit=5` 每次让 Jev 判断几个还没判断的文件夹或标签（需要 Jev，否则返回 400，上游故障返回 502）；`PUT /api/v1/resource-classification/folders/override` 以 `mode` 为 `category` / `skip` / `auto` 手动指定、设为不沿用或恢复由 Jev 判断。`POST /api/v1/resource-classification/folders/retry` 只把原归类已对应到分类的已导入网页排队重新判断（需要 Jev），同样跳过人工确认、用户规则和确认失效；状态里的 `folder_retry_count` 是带原归类的网页数。已有任务正在运行时返回 409。暂停任务会被新的已完成队列替换。修复设置后使用 `POST /api/v1/resource-classification/resume` 或 Web「继续任务」，从暂停位置继续原队列，保留任务编号、创建时间、成功与未确定计数；已处理的成功或低置信度网页均不重复请求。旧客户端对暂停任务调用启动接口也会继续原队列。继续接口在没有暂停任务时返回 409；对仍在运行或等待重试的任务返回现有进度。队列租约防止多个工作线程重复领取，条目版本检查保护推理期间的手动修改或网址变更。
+
+## 网页用途简介
+
+网页元数据抓取结束后，后台循环每 20 秒按账号取最多 8 条还没有简介的网页资料，用该账号生效的 DeepSeek 配置写一句不超过 60 字的中文简介，说明网页是什么、能用来做什么，存入 `resource_ai_summary`。历史网页也会这样逐步补齐。只发送网址、网页标题、收藏标题、网页描述、站点名和公开正文摘要，不发送个人备注。写入时检查版本号和网址都没变，然后提升版本号，让客户端增量同步；处理期间被编辑或换了网址就丢弃结果。模型回答信息不足、请求失败或超时只记录尝试时间，一天后再试，不改版本号。认证、额度或限流错误（HTTP 401/402/403/429）会停下该账号本轮的剩余请求。更换网址或切换类型会清空简介、重新生成；备份恢复会保留已有简介，搜索覆盖简介内容。Web 和 Android 的列表、快速访问和回顾优先显示这条简介，详情页在网页描述上方单独显示「用途」。
 
 ## 第三方登录回调
 

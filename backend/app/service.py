@@ -266,6 +266,7 @@ def search_token_condition(pattern: str, escaped_json_pattern: str):
         Memo.source_title.ilike(pattern, escape="\\"),
         Memo.resource_page_title.ilike(pattern, escape="\\"),
         Memo.resource_description.ilike(pattern, escape="\\"),
+        Memo.resource_ai_summary.ilike(pattern, escape="\\"),
         Memo.resource_site_name.ilike(pattern, escape="\\"),
         Memo.resource_category.ilike(pattern, escape="\\"),
         Memo.resource_category_label.ilike(pattern, escape="\\"),
@@ -889,6 +890,8 @@ def update_memo(
         memo.canonical_url = _canonical_url_or_none(memo.source_url)
         # 修改网址后重新执行元数据、分类与健康检查。
         memo.resource_ai_classified_at = None
+        memo.resource_ai_summary = None
+        memo.resource_ai_summary_attempted_at = None
         memo.resource_text_excerpt = None
         memo.resource_ai_assessment = None
         memo.resource_ai_confirmation_pending = False
@@ -922,6 +925,8 @@ def _reset_type_specific_fields(memo: Memo, target_type: MemoType) -> None:
     """切换条目类型时清理不再适用的扩展字段。"""
 
     memo.resource_ai_classified_at = None
+    memo.resource_ai_summary = None
+    memo.resource_ai_summary_attempted_at = None
     memo.resource_text_excerpt = None
     memo.resource_ai_assessment = None
     memo.resource_ai_confirmation_pending = False

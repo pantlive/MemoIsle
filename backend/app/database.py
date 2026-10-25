@@ -157,6 +157,12 @@ class Database:
             "resource_description": (
                 "ALTER TABLE memo ADD COLUMN resource_description TEXT"
             ),
+            "resource_ai_summary": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_summary TEXT"
+            ),
+            "resource_ai_summary_attempted_at": (
+                "ALTER TABLE memo ADD COLUMN resource_ai_summary_attempted_at DATETIME"
+            ),
             "resource_site_name": (
                 "ALTER TABLE memo ADD COLUMN resource_site_name VARCHAR(200)"
             ),

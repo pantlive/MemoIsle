@@ -452,6 +452,11 @@ def _apply_imported_fields(
         description = _text_value(_lookup_value(values, "resource_description"))
         if description:
             memo.resource_description = description
+        # 恢复已生成的简介，避免为同一批网页再付一次模型费用。
+        summary = _text_value(_lookup_value(values, "resource_ai_summary"))
+        if summary:
+            memo.resource_ai_summary = summary
+            memo.resource_ai_summary_attempted_at = datetime.now(UTC)
         site_name = _text_value(_lookup_value(values, "resource_site_name"))
         if site_name:
             memo.resource_site_name = site_name

@@ -789,6 +789,8 @@ class MemoRead(BaseModel):
     source_title: str | None
     resource_page_title: str | None
     resource_description: str | None
+    # 大模型生成的用途简介；未配置模型或尚未生成时为空。
+    resource_ai_summary: str | None = None
     resource_site_name: str | None
     resource_favicon_url: str | None
     resource_image_url: str | None

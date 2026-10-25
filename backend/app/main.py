@@ -21,6 +21,7 @@ from app.memo_tools_api import router as memo_tools_router
 from app.model_settings_api import router as model_settings_router
 from app.resource_classification_api import router as resource_classification_router
 from app.resource_classification_service import resource_classification_loop
+from app.resource_summary_service import resource_summary_loop
 from app.vault_api import router as vault_router
 
 
@@ -42,6 +43,11 @@ def create_app(
         monitor_task: asyncio.Task[None] | None = None
         classification_task = asyncio.create_task(
             resource_classification_loop(
+                resolved_settings.database_url, resolved_settings, stop_event,
+            )
+        )
+        summary_task = asyncio.create_task(
+            resource_summary_loop(
                 resolved_settings.database_url, resolved_settings, stop_event,
             )
         )
@@ -86,6 +92,7 @@ def create_app(
             if monitor_task is not None:
                 await monitor_task
             await classification_task
+            await summary_task
             await image_organization_task
             await bookmark_recovery_task
             await image_ocr_recovery_task

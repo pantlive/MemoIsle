@@ -151,6 +151,8 @@ class Settings:
     apple_client_secret: str = ""
     oauth_login_enabled: bool = False
     resource_enrichment_enabled: bool = True
+    # 用 DeepSeek 通道为网页资料写一句用途简介；账号未配置模型时自动跳过。
+    resource_summary_enabled: bool = True
     resource_fetch_timeout_seconds: float = 6.0
     resource_fetch_max_bytes: int = 512 * 1024
     resource_health_monitor_enabled: bool = True
@@ -288,6 +290,10 @@ class Settings:
             "MEMOISLE_RESOURCE_HEALTH_MONITOR_ENABLED",
             True,
         )
+        resource_summary_enabled = environment_flag(
+            "MEMOISLE_RESOURCE_SUMMARY_ENABLED",
+            True,
+        )
         return cls(
             android_apk_path=Path(
                 os.environ.get("MEMOISLE_ANDROID_APK_PATH", DEFAULT_ANDROID_APK_PATH),
@@ -404,6 +410,7 @@ class Settings:
             ),
             resource_enrichment_enabled=resource_enrichment_enabled,
             resource_health_monitor_enabled=resource_health_monitor_enabled,
+            resource_summary_enabled=resource_summary_enabled,
             resource_fetch_timeout_seconds=float(
                 os.environ.get("MEMOISLE_RESOURCE_FETCH_TIMEOUT_SECONDS", "6"),
             ),

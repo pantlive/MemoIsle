@@ -307,6 +307,12 @@ class Memo(Base):
         nullable=True,
     )
     resource_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 大模型写的一句话用途简介；网址或类型变化时清空重写。
+    resource_ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 最近一次尝试生成简介的时间；失败后隔一段时间再试，避免反复请求。
+    resource_ai_summary_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
     resource_site_name: Mapped[str | None] = mapped_column(
         String(200),
         nullable=True,
