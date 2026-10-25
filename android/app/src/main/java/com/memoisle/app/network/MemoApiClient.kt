@@ -858,6 +858,12 @@ private fun JSONObject.toMemo(): Memo {
         } else {
             getString("resource_description")
         },
+        // 旧服务端没有这个字段，isNull 对缺失字段同样返回 true。
+        resourceAiSummary = if (isNull("resource_ai_summary")) {
+            null
+        } else {
+            getString("resource_ai_summary").takeIf { it.isNotBlank() }
+        },
         resourceSiteName = if (isNull("resource_site_name")) {
             null
         } else {

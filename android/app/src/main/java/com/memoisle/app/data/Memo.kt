@@ -33,6 +33,8 @@ data class Memo(
     val sourceUrl: String?,
     val sourceTitle: String?,
     val resourceDescription: String? = null,
+    // 服务端大模型写的用途简介，列表和快速访问优先显示。
+    val resourceAiSummary: String? = null,
     val resourceSiteName: String? = null,
     val resourceImageUrl: String? = null,
     val resourceCategory: String? = null,
@@ -98,6 +100,7 @@ fun Memo.matchesQuery(query: String): Boolean {
         sourceUrl,
         sourceTitle,
         resourceDescription,
+        resourceAiSummary,
         resourceSiteName,
         resourceCategory,
         resourceKind,

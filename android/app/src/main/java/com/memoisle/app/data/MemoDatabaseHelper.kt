@@ -22,6 +22,7 @@ class MemoDatabaseHelper(context: Context) :
                 source_url TEXT,
                 source_title TEXT,
                 resource_description TEXT,
+                resource_ai_summary TEXT,
                 resource_site_name TEXT,
                 resource_image_url TEXT,
                 resource_category TEXT,
@@ -213,6 +214,11 @@ class MemoDatabaseHelper(context: Context) :
                     "NOT NULL DEFAULT '[]'",
             )
         }
+        if (oldVersion < 15) {
+            database.execSQL("ALTER TABLE memo ADD COLUMN resource_ai_summary TEXT")
+            // 升级前服务端已写好的简介不会再出现在增量同步里，重新完整同步一次。
+            database.delete(TABLE_SYNC_STATE, null, null)
+        }
     }
 
     @Synchronized
@@ -263,6 +269,7 @@ class MemoDatabaseHelper(context: Context) :
             put(COLUMN_SOURCE_URL, memo.sourceUrl)
             put(COLUMN_SOURCE_TITLE, memo.sourceTitle)
             put(COLUMN_RESOURCE_DESCRIPTION, memo.resourceDescription)
+            put(COLUMN_RESOURCE_AI_SUMMARY, memo.resourceAiSummary)
             put(COLUMN_RESOURCE_SITE_NAME, memo.resourceSiteName)
             put(COLUMN_RESOURCE_IMAGE_URL, memo.resourceImageUrl)
             put(COLUMN_RESOURCE_CATEGORY, memo.resourceCategory)
@@ -451,6 +458,7 @@ class MemoDatabaseHelper(context: Context) :
         val sourceUrlIndex = getColumnIndexOrThrow(COLUMN_SOURCE_URL)
         val sourceTitleIndex = getColumnIndexOrThrow(COLUMN_SOURCE_TITLE)
         val resourceDescriptionIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_DESCRIPTION)
+        val resourceAiSummaryIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_AI_SUMMARY)
         val resourceSiteNameIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_SITE_NAME)
         val resourceImageUrlIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_IMAGE_URL)
         val resourceCategoryIndex = getColumnIndexOrThrow(COLUMN_RESOURCE_CATEGORY)
@@ -531,6 +539,11 @@ class MemoDatabaseHelper(context: Context) :
                 null
             } else {
                 getString(resourceDescriptionIndex)
+            },
+            resourceAiSummary = if (isNull(resourceAiSummaryIndex)) {
+                null
+            } else {
+                getString(resourceAiSummaryIndex)
             },
             resourceSiteName = if (isNull(resourceSiteNameIndex)) {
                 null
@@ -645,7 +658,7 @@ class MemoDatabaseHelper(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "memoisle.db"
-        const val DATABASE_VERSION = 14
+        const val DATABASE_VERSION = 15
         const val TABLE_MEMO = "memo"
         const val TABLE_SYNC_STATE = "sync_state"
         const val COLUMN_STATE_ID = "state_id"
@@ -660,6 +673,7 @@ class MemoDatabaseHelper(context: Context) :
         const val COLUMN_SOURCE_URL = "source_url"
         const val COLUMN_SOURCE_TITLE = "source_title"
         const val COLUMN_RESOURCE_DESCRIPTION = "resource_description"
+        const val COLUMN_RESOURCE_AI_SUMMARY = "resource_ai_summary"
         const val COLUMN_RESOURCE_SITE_NAME = "resource_site_name"
         const val COLUMN_RESOURCE_IMAGE_URL = "resource_image_url"
         const val COLUMN_RESOURCE_CATEGORY = "resource_category"
@@ -718,6 +732,7 @@ class MemoDatabaseHelper(context: Context) :
             COLUMN_SOURCE_URL,
             COLUMN_SOURCE_TITLE,
             COLUMN_RESOURCE_DESCRIPTION,
+            COLUMN_RESOURCE_AI_SUMMARY,
             COLUMN_RESOURCE_SITE_NAME,
             COLUMN_RESOURCE_IMAGE_URL,
             COLUMN_RESOURCE_CATEGORY,

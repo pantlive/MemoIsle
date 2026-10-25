@@ -2076,9 +2076,9 @@ private fun ReviewSession(
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
-                        current.resourceDescription?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, style = MaterialTheme.typography.bodyMedium)
-                        }
+                        (current.resourceAiSummary ?: current.resourceDescription)
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                         Button(
                             onClick = onOpenResource,
                             modifier = Modifier
@@ -2655,6 +2655,14 @@ private fun IdeaComposer(
     }
 }
 
+/** 网页资料的简介：优先用大模型写的用途简介，其次网页自带描述，最后备注；备注只是网址时不算。 */
+private fun resourceSummary(memo: Memo): String? =
+    (memo.resourceAiSummary?.takeIf { it.isNotBlank() }
+        ?: memo.resourceDescription?.takeIf { it.isNotBlank() }
+        ?: memo.body.takeIf { it.isNotBlank() && it.trim() != memo.sourceUrl })
+        ?.trim()
+        ?.replace(Regex("\\s*\n\\s*"), " ")
+
 /** 标题取自正文第一行时，摘要只显示后面的内容，避免同一句话出现两次。 */
 private fun bodySnippet(memo: Memo): String {
     val body = memo.body.trim()
@@ -2689,9 +2697,7 @@ private fun MemoRow(
     val host = if (isResource) memo.sourceUrl?.let(::resourceHost).orEmpty() else ""
     val subtitle = when {
         isImage -> imageRowSubtitle(memo)
-        isResource -> memo.resourceDescription?.takeIf { it.isNotBlank() }
-            ?: memo.body.takeIf { it.isNotBlank() && it != memo.sourceUrl }
-            ?: host
+        isResource -> resourceSummary(memo) ?: host
         isWord -> listOfNotNull(
             memo.wordPhonetic?.takeIf { it.isNotBlank() },
             memo.wordMeaning?.takeIf { it.isNotBlank() }?.lineSequence()?.firstOrNull(),
@@ -3196,6 +3202,20 @@ private fun ResourceDetailDialog(
                 "巡检：${linkHealthLabel(memo.linkHealthStatus)}",
                 icon = Icons.Outlined.HealthAndSafety,
             )
+        }
+        memo.resourceAiSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+            // 大模型写的用途简介放在最前，比网页自带描述更醒目。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ResourceSoft, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text("用途", color = ResourceAccent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 2.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(summary, style = MaterialTheme.typography.bodyMedium, color = TextStrong)
+            }
         }
         memo.resourceDescription?.takeIf { it.isNotBlank() }?.let { description ->
             Text(description, style = MaterialTheme.typography.bodyLarge)
@@ -4318,9 +4338,10 @@ private fun QuickAccessSection(
             items(entries, key = { it.memo.clientId }) { entry ->
                 val memo = entry.memo
                 val host = quickAccessHost(memo.sourceUrl)
+                val summary = resourceSummary(memo)
                 Card(
                     onClick = { onOpen(memo) },
-                    modifier = Modifier.width(156.dp),
+                    modifier = Modifier.width(176.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                     border = BorderStroke(1.dp, Border),
@@ -4349,6 +4370,17 @@ private fun QuickAccessSection(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(end = 8.dp),
                         )
+                        // 固定两行高度，有无简介的卡片都一样高。
+                        Text(
+                            summary ?: "暂无简介",
+                            color = if (summary == null) TextMuted.copy(alpha = 0.6f) else TextMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            minLines = 2,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp, end = 8.dp),
+                        )
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             "${entry.openCount} 次 · $host",
                             color = TextMuted,
