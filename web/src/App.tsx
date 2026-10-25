@@ -17,6 +17,7 @@ import DataMenu from "./DataMenu";
 import MemoBatchToolbar from "./MemoBatchToolbar";
 import ResourceMonogram, { ResourceLinkGlyph } from "./ResourceIcon";
 import { normalizeWebUrl, sourceHost } from "./webUrl";
+import { resourceSummary } from "./resourceSummary";
 import {
   MeetingAudioUnavailableError,
   startMeetingCapture,
@@ -5027,10 +5028,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       )}
                       <span>
                         {memo.type === "resource"
-                          ? memo.resource_description ||
-                            (memo.body === memo.source_url
-                              ? sourceHost(memo.source_url)
-                              : memo.body)
+                          ? resourceSummary(memo) || sourceHost(memo.source_url)
                           : memo.type === "word"
                             ? memo.word_phonetic || memo.word_meaning || "等待补充释义"
                             : memo.type === "image"

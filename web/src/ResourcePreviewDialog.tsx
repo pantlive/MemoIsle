@@ -256,6 +256,12 @@ export default function ResourcePreviewDialog({
         ) : (
           <>
             <div className="resource-preview-content">
+              {memo.resource_ai_summary && (
+                <p className="resource-ai-summary">
+                  <span>用途</span>
+                  {memo.resource_ai_summary}
+                </p>
+              )}
               {memo.resource_description && <p>{memo.resource_description}</p>}
               {savedNote && (
                 <div className="resource-preview-note">

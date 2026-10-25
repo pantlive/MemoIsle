@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 
+import { resourceSummary } from "./resourceSummary";
 import type { Memo } from "./types";
 import { sourceHost } from "./webUrl";
 
@@ -40,6 +41,7 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
       {items.length > 0 && <ul className="quick-access-grid">
         {items.map((memo) => {
           const host = sourceHost(memo.source_url);
+          const summary = resourceSummary(memo);
           return (
             <li key={memo.id}>
               <a
@@ -48,7 +50,7 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
                 href={memo.source_url ?? undefined}
                 target="_blank"
                 rel="noreferrer"
-                title={`${memo.title}\n${memo.source_url ?? ""}`}
+                title={[memo.title, summary, memo.source_url].filter(Boolean).join("\n")}
                 onClick={() => onOpen(memo)}
                 onAuxClick={(event) => {
                   // 中键在新标签页打开同样计数。
@@ -64,6 +66,7 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
                 </span>
                 <span className="quick-access-text">
                   <strong>{memo.title}</strong>
+                  {summary && <span className="quick-access-summary">{summary}</span>}
                   <small>{memo.resource_open_count} 次 · {host}</small>
                 </span>
               </a>

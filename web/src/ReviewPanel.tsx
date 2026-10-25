@@ -335,7 +335,9 @@ export default function ReviewPanel({
                   ? ` · ${current.resource_category_label}`
                   : ""}
             </p>
-            {current.resource_description && <p>{current.resource_description}</p>}
+            {(current.resource_ai_summary || current.resource_description) && (
+              <p>{current.resource_ai_summary || current.resource_description}</p>
+            )}
             <div className="review-actions">
               <button type="button" className="primary" disabled={busy} onClick={() => onOpenResource(current)}>打开原网页</button>
               <button type="button" disabled={busy} onClick={() => onStarResource(current)}>

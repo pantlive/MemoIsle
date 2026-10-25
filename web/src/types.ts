@@ -201,6 +201,8 @@ export interface Memo {
   source_title: string | null;
   resource_page_title: string | null;
   resource_description: string | null;
+  // 大模型生成的用途简介；未配置模型或尚未生成时为空，旧接口可能不返回。
+  resource_ai_summary?: string | null;
   resource_site_name: string | null;
   resource_favicon_url: string | null;
   resource_image_url: string | null;
