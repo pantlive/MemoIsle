@@ -22,6 +22,9 @@ conda env create --prefix /opt/memoisle/.conda --file environment-vps.yml
 上传内容应包含 `backend/app`、`backend/scripts`、`backend/requirements.txt`、
 `extension` 的运行文件、`deploy` 和本地执行 `cd web && npm ci && npm run build`
 生成的 `web/dist`。扩展文件不可遗漏，Web 的扩展下载接口会直接读取它们。
+扩展下载包会按 `MEMOISLE_WEB_BASE_URL` 自动生成正式 Web/API 地址和内容脚本
+匹配范围，保留 9443 等端口；源码中的本机开发地址不会作为正式下载包的回退地址。
+更新扩展后，需在浏览器扩展管理页重新加载，再刷新已登录的网站以同步登录状态。
 上传后将源码与静态目录设为 0755、文件设为 0644，确保 memoisle 和 caddy
 可以读取；私有环境配置和数据目录继续使用上述独立权限。
 

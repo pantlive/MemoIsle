@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MemoIsle 网页收藏",
   "description": "同步当前浏览器打开的网页、书签和浏览历史，支持一键收藏网页、选中文本和任意页面图片，并在 MemoIsle 中快速收藏与批量导入。",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "permissions": [
     "activeTab",
     "scripting",

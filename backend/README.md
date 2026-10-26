@@ -26,7 +26,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_APPLE_CLIENT_ID` / `MEMOISLE_APPLE_CLIENT_SECRET`：Apple Services ID 与预生成的 client secret。
 - `MEMOISLE_AUTH_MOBILE_REDIRECT_URI`：Android 登录回跳地址，默认 `memoisle://auth/callback`。
 - `MEMOISLE_LOCAL_USER_ID`：本地开发登录使用的用户标识。
-- `MEMOISLE_WEB_BASE_URL`：邮箱验证和密码重置链接使用的 Web 地址。
+- `MEMOISLE_WEB_BASE_URL`：邮箱验证和密码重置链接使用的 Web 地址；网站下载的浏览器扩展也使用此地址配置正式回连与登录同步。
 - `MEMOISLE_AUTH_LOGIN_RATE_LIMIT_ATTEMPTS`：登录失败限流阈值，默认 5 次。
 - `MEMOISLE_AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS`：登录失败限流窗口，默认 900 秒。
 - `MEMOISLE_SMTP_HOST` / `MEMOISLE_SMTP_PORT`：SMTP 服务器与端口。

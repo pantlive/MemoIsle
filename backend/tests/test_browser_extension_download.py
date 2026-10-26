@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import replace
 from io import BytesIO
 from zipfile import ZipFile
 
-from PIL import Image
-
+import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 
 def test_browser_extension_download_contains_runtime_files(
@@ -41,7 +43,7 @@ def test_browser_extension_download_contains_runtime_files(
             BytesIO(archive.read("memoisle-extension/icons/icon128.png")),
         ).convert("RGBA")
     assert (
-        f'memoisle-browser-extension-{manifest["version"]}.zip'
+        f"memoisle-browser-extension-{manifest['version']}.zip"
         in response.headers["content-disposition"]
     )
     assert manifest["manifest_version"] == 3
@@ -59,3 +61,63 @@ def test_browser_extension_download_contains_runtime_files(
     # 角落应是主页同款浅薄荷底，而不是旧版日出浪纹的深青绿。
     mint = icon.getpixel((24, 24))
     assert mint[0] > 180 and mint[1] > 200 and mint[2] > 180
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://memo.17115859.xyz:9443",
+        "https://memo.example.com",
+    ],
+)
+def test_download_uses_configured_deployment_origin(
+    client: TestClient,
+    origin: str,
+) -> None:
+    """正式下载包的注入范围、回连地址和更新脚本使用同一部署源与端口。"""
+
+    client.app.state.settings = replace(
+        client.app.state.settings,
+        web_base_url=f"{origin}/",
+    )
+    response = client.get(
+        "/api/v1/browser-extension/download",
+        headers={"host": "untrusted.example", "x-forwarded-host": "other.example"},
+    )
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response.content)) as archive:
+        manifest = json.loads(archive.read("memoisle-extension/manifest.json"))
+        background = archive.read("memoisle-extension/background.js").decode()
+        installer = archive.read("memoisle-extension/install.ps1").decode()
+    assert manifest["version"] == "0.5.1"
+    assert manifest["content_scripts"][0]["matches"] == [f"{origin}/*"]
+    assert f"{origin}/*" in manifest["host_permissions"]
+    assert all(
+        "localhost" not in value and "127.0.0.1" not in value
+        for value in manifest["host_permissions"]
+    )
+    config_match = re.search(
+        r"const DEFAULT_CONFIG = (\{.*?\});", background, re.DOTALL
+    )
+    assert config_match is not None
+    assert json.loads(config_match[1]) == {
+        "apiBaseUrl": f"{origin}/api/v1",
+        "webBaseUrl": f"{origin}/",
+    }
+    assert f'[string]$ApiBase = "{origin}/api/v1"' in installer
+    assert "untrusted.example" not in background
+
+
+def test_local_download_keeps_development_port_discovery(client: TestClient) -> None:
+    """本地开发继续接受启动器分配的 Vite 端口。"""
+
+    client.app.state.settings = replace(
+        client.app.state.settings,
+        web_base_url="http://localhost:5174/",
+    )
+    response = client.get("/api/v1/browser-extension/download")
+    with ZipFile(BytesIO(response.content)) as archive:
+        manifest = json.loads(archive.read("memoisle-extension/manifest.json"))
+    matches = manifest["content_scripts"][0]["matches"]
+    assert "http://localhost:5174/*" in matches
+    assert "http://127.0.0.1:5178/*" in matches

@@ -1,6 +1,6 @@
 # MemoIsle 扩展一键下载/更新脚本。
 # 用法：运行同目录下的 install.cmd，或 PowerShell 执行本文件。
-#   默认从本机后端下载；部署到其他地址时传入 API 地址：
+#   网站下载版默认连接该网站；源码开发版默认连接本机，也可传入 API 地址：
 #     install.ps1 -ApiBase "https://api.example.com/api/v1"
 param(
     [string]$ApiBase = "http://127.0.0.1:8000/api/v1"

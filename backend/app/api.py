@@ -979,10 +979,10 @@ def download_android_route(settings: SettingsDependency) -> FileResponse:
     response_class=Response,
     tags=["browser-extension"],
 )
-def download_browser_extension_route() -> Response:
+def download_browser_extension_route(settings: SettingsDependency) -> Response:
     """下载可解压后加载到 Chrome 或 Edge 的扩展包。"""
 
-    archive = build_browser_extension_archive()
+    archive = build_browser_extension_archive(settings.web_base_url)
     filename = browser_extension_archive_filename()
     return Response(
         content=archive,

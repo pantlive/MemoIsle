@@ -3,6 +3,7 @@ import { randomUUID, webcrypto } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import { storeBackground } from "../scripts/build-store-package.mjs";
 
 const backgroundSource = await readFile(
   new URL("../background.js", import.meta.url),
@@ -37,6 +38,7 @@ function createHarness({
   historyItems,
   historySearch,
   fetchImpl,
+  backgroundScript = backgroundSource,
   storedConfig = {},
   storedWebContext = null,
   storedAccessToken = "test-access-token",
@@ -407,7 +409,7 @@ function createHarness({
   };
 
   vm.runInContext(
-    backgroundSource,
+    backgroundScript,
     vm.createContext({
       URL,
       AbortController,
@@ -474,7 +476,7 @@ test("安装时注册最小化的网页与图片右键菜单", () => {
 });
 
 test("扩展清单声明图片收藏所需的任意站点权限", () => {
-  assert.equal(manifest.version, "0.5.0");
+  assert.equal(manifest.version, "0.5.1");
   assert.equal(manifest.host_permissions.includes("<all_urls>"), true);
   assert.equal(manifest.host_permissions.includes("http://127.0.0.1:8000/*"), true);
   assert.equal(manifest.host_permissions.includes("http://localhost:8000/*"), true);
@@ -520,6 +522,62 @@ test("扩展清单只在本地 MemoIsle 页面接收登录凭证", () => {
       run_at: "document_start",
     },
   ]);
+});
+
+test("正式包从网站接收登录凭证并把同步请求发送到 VPS", async () => {
+  const origin = "https://memo.17115859.xyz:9443";
+  const harness = createHarness({
+    backgroundScript: storeBackground(
+      backgroundSource, new URL(origin), new URL(`${origin}/api/v1`),
+    ),
+    storedAccessToken: null,
+    storedWebContext: {
+      webBaseUrl: "http://localhost:5174",
+      apiBaseUrl: "http://localhost:5174/api/v1",
+    },
+  });
+  const response = await new Promise((resolve) => {
+    harness.listeners.message({
+      type: "set-access-token",
+      accessToken: "vps-test-access-token",
+      webOrigin: origin,
+      apiBaseUrl: `${origin}/api/v1`,
+    }, { tab: { url: `${origin}/` } }, resolve);
+  });
+  assert.deepEqual(jsonValue(response), { ok: true });
+  assert.equal(harness.localStore.memoisle_access_token, "vps-test-access-token");
+  assert.equal(harness.localStore.memoisle_web_context.webBaseUrl, origin);
+  assert.ok(harness.calls.fetches.some((call) => call.url.endsWith("/browser-tabs/sync")));
+  assert.ok(harness.calls.fetches.every((call) => call.url.startsWith(`${origin}/api/v1/`)));
+});
+
+test("正式包不接受其他网站或其他端口发来的登录凭证", async () => {
+  const origin = "https://memo.17115859.xyz:9443";
+  for (const sender of [
+    "https://memo.17115859.xyz",
+    "https://memo.17115859.xyz:8443",
+    "http://memo.17115859.xyz:9443",
+    "https://untrusted.example",
+    "http://localhost:5173",
+  ]) {
+    const harness = createHarness({
+      backgroundScript: storeBackground(
+        backgroundSource, new URL(origin), new URL(`${origin}/api/v1`),
+      ),
+      storedAccessToken: null,
+    });
+    const response = await new Promise((resolve) => {
+      harness.listeners.message({
+        type: "set-access-token",
+        accessToken: "untrusted-test-token",
+        webOrigin: sender,
+        apiBaseUrl: `${sender}/api/v1`,
+      }, { tab: { url: `${sender}/` } }, resolve);
+    });
+    assert.deepEqual(jsonValue(response), { ok: false }, sender);
+    assert.equal(harness.localStore.memoisle_access_token, undefined);
+    assert.equal(harness.calls.fetches.length, 0);
+  }
 });
 
 test("本地 MemoIsle 页面会把登录凭证和地址转发给扩展后台", () => {
