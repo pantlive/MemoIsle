@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import Icon from "./Icon";
 import WordPronunciation from "./WordPronunciation";
 import { sourceHost } from "./webUrl";
 import type {
@@ -246,7 +247,7 @@ export default function ReviewPanel({
           onSave={onSaveReviewSettings}
         />
         <div className="review-complete">
-          <span className="review-complete-icon" aria-hidden="true">◷</span>
+          <span className="review-complete-icon" aria-hidden="true"><Icon name="review" size={20} /></span>
           <h2>今天的回顾已经完成</h2>
           <p>到期单词、待读资料和待整理灵感都会出现在这里。可以返回资料库继续收藏。</p>
         </div>

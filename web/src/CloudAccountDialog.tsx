@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import Icon from "./Icon";
 
 import {
   createCloudAccount,
@@ -135,112 +136,124 @@ export default function CloudAccountDialog({
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <div className="dialog-backdrop cloud-account-backdrop" role="presentation">
       <section
-        className="cloud-dialog"
+        className="cloud-dialog cloud-account-dialog dialog-shell"
         role="dialog"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
         aria-modal="true"
         aria-labelledby="cloud-dialog-title"
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label">电子书转存</span>
+            <span className="type-label"><Icon name="cloud" size={16} /> 电子书转存</span>
             <h2 id="cloud-dialog-title">云盘绑定</h2>
           </div>
           <button
+            autoFocus
             type="button"
             className="icon-button"
             aria-label="关闭云盘绑定"
             onClick={onClose}
-          >×</button>
+          ><Icon name="close" size={16} /></button>
         </div>
 
-        <p className="cloud-dialog-note">
-          电子书收藏需要先把文件存进你自己的云盘。请在浏览器登录阿里云盘后，
-          从开发者工具复制登录态（refresh_token，或包含 refresh_token 的
-          cookie）粘贴到下面。凭据会加密保存，页面只显示末尾四位。
-        </p>
+        <div className="dialog-body">
+          <p className="cloud-dialog-note">
+            电子书收藏需要先把文件存进你自己的云盘。请在浏览器登录阿里云盘后，
+            从开发者工具复制登录态（refresh_token，或包含 refresh_token 的
+            cookie）粘贴到下面。凭据会加密保存，页面只显示末尾四位。
+          </p>
 
-        <section className="cloud-bind-form">
-          <label>
-            <span>云盘</span>
-            <select
-              value={provider}
-              onChange={(event) =>
-                setProvider(event.target.value as CloudProvider)
-              }
-            >
-              <option value="aliyun">阿里云盘</option>
-              <option value="baidu">百度网盘</option>
-            </select>
-          </label>
-          <label>
-            <span>默认转存目录</span>
-            <input
-              value={defaultFolder}
-              onChange={(event) => setDefaultFolder(event.target.value)}
-              placeholder="/MemoIsle/电子书"
-              maxLength={500}
-            />
-          </label>
-          <label className="cloud-credential-field">
-            <span>登录态</span>
-            <textarea
-              value={credential}
-              onChange={(event) => setCredential(event.target.value)}
-              placeholder={credentialPlaceholder[provider]}
-              rows={4}
-              maxLength={8000}
-            />
-          </label>
+          <section className="cloud-bind-form">
+            <label>
+              <span>云盘</span>
+              <select
+                value={provider}
+                onChange={(event) =>
+                  setProvider(event.target.value as CloudProvider)
+                }
+              >
+                <option value="aliyun">阿里云盘</option>
+                <option value="baidu">百度网盘</option>
+              </select>
+            </label>
+            <label>
+              <span>默认转存目录</span>
+              <input
+                value={defaultFolder}
+                onChange={(event) => setDefaultFolder(event.target.value)}
+                placeholder="/MemoIsle/电子书"
+                maxLength={500}
+              />
+            </label>
+            <label className="cloud-credential-field">
+              <span>登录态</span>
+              <textarea
+                value={credential}
+                onChange={(event) => setCredential(event.target.value)}
+                placeholder={credentialPlaceholder[provider]}
+                rows={4}
+                maxLength={8000}
+              />
+            </label>
+
+            <p className="cloud-dialog-hint">{credentialHint[provider]}</p>
+          </section>
+
+          <section className="cloud-account-list" aria-label="已绑定云盘">
+            {loading && <div className="cloud-empty">正在读取绑定…</div>}
+            {!loading && !accounts.length && (
+              <div className="cloud-empty">还没有绑定任何云盘。</div>
+            )}
+            {!loading && accounts.map((account) => (
+              <article className="cloud-account" key={account.id}>
+                <div className="cloud-account-heading">
+                  <div>
+                    <span className={`cloud-status ${account.status}`}>
+                      {account.status === "active" ? "可用" : "已失效"}
+                    </span>
+                    <h3>{providerLabels[account.provider]} · {account.display_name}</h3>
+                  </div>
+                  <span className="cloud-account-hint">{account.credential_hint}</span>
+                </div>
+                <div className="cloud-account-meta">
+                  <span>默认目录：{account.default_folder}</span>
+                  <span>最近校验：{formatTime(account.last_checked_at)}</span>
+                  {account.last_error && <span>问题：{account.last_error}</span>}
+                </div>
+                <div className="cloud-account-actions">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleVerify(account.id)}
+                  >重新校验</button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={busy}
+                    onClick={() => void handleDelete(account.id)}
+                  >解绑</button>
+                </div>
+              </article>
+            ))}
+          </section>
+        </div>
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose}>关闭</button>
           <button
             type="button"
-            className="primary-button"
+            className="primary"
             disabled={busy}
             onClick={() => void handleBind()}
           >绑定云盘</button>
-          <p className="cloud-dialog-hint">{credentialHint[provider]}</p>
-        </section>
-
-        <section className="cloud-account-list" aria-label="已绑定云盘">
-          {loading && <div className="cloud-empty">正在读取绑定…</div>}
-          {!loading && !accounts.length && (
-            <div className="cloud-empty">还没有绑定任何云盘。</div>
-          )}
-          {!loading && accounts.map((account) => (
-            <article className="cloud-account" key={account.id}>
-              <div className="cloud-account-heading">
-                <div>
-                  <span className={`cloud-status ${account.status}`}>
-                    {account.status === "active" ? "可用" : "已失效"}
-                  </span>
-                  <h3>{providerLabels[account.provider]} · {account.display_name}</h3>
-                </div>
-                <span className="cloud-account-hint">{account.credential_hint}</span>
-              </div>
-              <div className="cloud-account-meta">
-                <span>默认目录：{account.default_folder}</span>
-                <span>最近校验：{formatTime(account.last_checked_at)}</span>
-                {account.last_error && <span>问题：{account.last_error}</span>}
-              </div>
-              <div className="cloud-account-actions">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void handleVerify(account.id)}
-                >重新校验</button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={busy}
-                  onClick={() => void handleDelete(account.id)}
-                >解绑</button>
-              </div>
-            </article>
-          ))}
-        </section>
-
-        {message && <p className="cloud-dialog-message" role="status">{message}</p>}
+        </div>
+        {message && <p className="dialog-error cloud-dialog-message" role="status">{message}</p>}
       </section>
     </div>
   );

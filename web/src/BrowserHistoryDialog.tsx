@@ -18,6 +18,7 @@ import type {
   Memo,
 } from "./types";
 import { sourceHost } from "./webUrl";
+import Icon from "./Icon";
 
 // 每页条数；服务端单页上限 1000，翻页没有总量限制。
 const PAGE_SIZE = 200;
@@ -384,6 +385,16 @@ export default function BrowserHistoryDialog({
     }
   };
 
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
   const clearHistory = async () => {
     if (
       !window.confirm(
@@ -414,14 +425,14 @@ export default function BrowserHistoryDialog({
   return (
     <div className="dialog-backdrop" role="presentation">
       <section
-        className="history-dialog"
+        className="history-dialog dialog-shell"
         role="dialog"
         aria-modal="true"
         aria-labelledby="history-dialog-title"
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label">浏览历史</span>
+            <span className="type-label"><Icon name="history" size={16} /> 浏览历史</span>
             <h2 id="history-dialog-title">最近浏览的网页</h2>
             <p>
               {snapshot?.extension_connected
@@ -432,13 +443,14 @@ export default function BrowserHistoryDialog({
             </p>
           </div>
           <button className="icon-button" aria-label="关闭浏览历史" onClick={onClose}>
-            ×
+            <Icon name="close" size={16} />
           </button>
         </div>
 
+        <div className="dialog-body">
         <div className="history-toolbar">
           <label className="search-box history-search">
-            <span aria-hidden="true">⌕</span>
+            <Icon name="search" size={18} />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -448,7 +460,7 @@ export default function BrowserHistoryDialog({
             />
             {search && (
               <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}>
-                ×
+                <Icon name="close" size={14} />
               </button>
             )}
           </label>
@@ -620,7 +632,6 @@ export default function BrowserHistoryDialog({
         )}
 
         {notice && <p className="history-notice">{notice}</p>}
-        {error && <p className="history-error">{error}</p>}
 
         <div className="history-list">
           {loading && <div className="history-empty">正在读取浏览历史……</div>}
@@ -695,10 +706,11 @@ export default function BrowserHistoryDialog({
               </section>
             ))}
         </div>
+        </div>
 
         <div className="dialog-actions">
           {hasMore && (
-            <button type="button" onClick={() => void loadMore()} disabled={loadingMore}>
+            <button type="button" className="ghost" onClick={() => void loadMore()} disabled={loadingMore}>
               {loadingMore
                 ? "加载中…"
                 : `加载下一页（已显示 ${entries.length} / ${snapshot?.total_count ?? 0}）`}
@@ -717,6 +729,7 @@ export default function BrowserHistoryDialog({
             关闭
           </button>
         </div>
+        {error && <div className="dialog-error" role="alert">{error}</div>}
       </section>
     </div>
   );

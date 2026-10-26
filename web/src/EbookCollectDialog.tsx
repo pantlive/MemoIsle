@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Icon from "./Icon";
 
 import {
   createEbookJob,
@@ -158,128 +159,140 @@ export default function EbookCollectDialog({
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <div className="dialog-backdrop ebook-collect-backdrop" role="presentation">
       <section
-        className="cloud-dialog"
+        className="cloud-dialog ebook-collect-dialog dialog-shell"
         role="dialog"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
         aria-modal="true"
         aria-labelledby="ebook-dialog-title"
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label">电子书</span>
+            <span className="type-label"><Icon name="book" size={16} /> 电子书</span>
             <h2 id="ebook-dialog-title">收藏电子书</h2>
           </div>
           <button
+            autoFocus
             type="button"
             className="icon-button"
             aria-label="关闭收藏电子书"
             onClick={onClose}
-          >×</button>
+          ><Icon name="close" size={16} /></button>
         </div>
 
-        {!activeAccount && (
-          <p className="cloud-dialog-note">
-            还没有可用的云盘绑定。请先关闭本窗口，在「☁ 云盘绑定」里绑定阿里云盘，
-            电子书才有地方存放。
-          </p>
-        )}
+        <div className="dialog-body">
+          {!activeAccount && (
+            <p className="cloud-dialog-note">
+              还没有可用的云盘绑定。请先关闭本窗口，在「云盘绑定」里绑定阿里云盘，
+              电子书才有地方存放。
+            </p>
+          )}
 
-        <section className="cloud-bind-form">
-          <label className="cloud-credential-field">
-            <span>电子书链接</span>
-            <input
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="云盘分享链接，或出版社/图书馆的下载直链"
-              maxLength={2048}
-            />
-          </label>
-          <label>
-            <span>分享提取码（可选）</span>
-            <input
-              value={sharePassword}
-              onChange={(event) => setSharePassword(event.target.value)}
-              placeholder="链接里带 ?pwd= 时可留空"
-              maxLength={100}
-            />
-          </label>
-          <label>
-            <span>转存目录</span>
-            <input
-              value={targetFolder}
-              onChange={(event) => setTargetFolder(event.target.value)}
-              placeholder={
-                activeAccount ? activeAccount.default_folder : "/MemoIsle/电子书"
-              }
-              maxLength={500}
-            />
-          </label>
-          <label>
-            <span>标签（逗号分隔）</span>
-            <input
-              value={tagsInput}
-              onChange={(event) => setTagsInput(event.target.value)}
-              placeholder="编程, 待读"
-            />
-          </label>
-          <label className="cloud-credential-field">
-            <span>备注（可选）</span>
-            <textarea
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder="从哪看到的、为什么想读"
-              rows={2}
-              maxLength={2000}
-            />
-          </label>
+          <section className="cloud-bind-form">
+            <label className="cloud-credential-field">
+              <span>电子书链接</span>
+              <input
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder="云盘分享链接，或出版社/图书馆的下载直链"
+                maxLength={2048}
+              />
+            </label>
+            <label>
+              <span>分享提取码（可选）</span>
+              <input
+                value={sharePassword}
+                onChange={(event) => setSharePassword(event.target.value)}
+                placeholder="链接里带 ?pwd= 时可留空"
+                maxLength={100}
+              />
+            </label>
+            <label>
+              <span>转存目录</span>
+              <input
+                value={targetFolder}
+                onChange={(event) => setTargetFolder(event.target.value)}
+                placeholder={
+                  activeAccount ? activeAccount.default_folder : "/MemoIsle/电子书"
+                }
+                maxLength={500}
+              />
+            </label>
+            <label>
+              <span>标签（逗号分隔）</span>
+              <input
+                value={tagsInput}
+                onChange={(event) => setTagsInput(event.target.value)}
+                placeholder="编程, 待读"
+              />
+            </label>
+            <label className="cloud-credential-field">
+              <span>备注（可选）</span>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="从哪看到的、为什么想读"
+                rows={2}
+                maxLength={2000}
+              />
+            </label>
+
+            <p className="cloud-dialog-hint">
+              云盘分享链接会被转存到你的云盘；普通直链由服务端下载后上传。
+              MemoIsle 只保存云盘链接与元数据快照，不保存电子书本体。
+            </p>
+          </section>
+
+          <section className="cloud-account-list" aria-label="电子书任务">
+            {!jobs.length && <div className="cloud-empty">还没有电子书任务。</div>}
+            {jobs.map((job) => (
+              <article className="ebook-job" key={job.id}>
+                <div className="cloud-account-heading">
+                  <div>
+                    <span className={`cloud-status ${job.status}`}>
+                      {statusLabels[job.status]}
+                    </span>
+                    <h3>{modeLabels[job.mode]} · {job.stage || "等待开始"}</h3>
+                  </div>
+                  <span className="cloud-account-hint">{job.progress}%</span>
+                </div>
+                <div className="ebook-progress" aria-hidden="true">
+                  <span style={{ width: `${job.progress}%` }} />
+                </div>
+                <div className="cloud-account-meta">
+                  <span className="ebook-source">{job.source_url}</span>
+                  <span>目标目录：{job.target_folder}</span>
+                  {job.error && <span>失败原因：{job.error}</span>}
+                </div>
+                {job.status === "failed" && (
+                  <div className="cloud-account-actions">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleRetry(job.id)}
+                    >重试</button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </section>
+        </div>
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose}>关闭</button>
           <button
             type="button"
-            className="primary-button"
+            className="primary"
             disabled={busy || !activeAccount}
             onClick={() => void handleSubmit()}
           >提交并转存</button>
-          <p className="cloud-dialog-hint">
-            云盘分享链接会被转存到你的云盘；普通直链由服务端下载后上传。
-            MemoIsle 只保存云盘链接与元数据快照，不保存电子书本体。
-          </p>
-        </section>
-
-        <section className="cloud-account-list" aria-label="电子书任务">
-          {!jobs.length && <div className="cloud-empty">还没有电子书任务。</div>}
-          {jobs.map((job) => (
-            <article className="ebook-job" key={job.id}>
-              <div className="cloud-account-heading">
-                <div>
-                  <span className={`cloud-status ${job.status}`}>
-                    {statusLabels[job.status]}
-                  </span>
-                  <h3>{modeLabels[job.mode]} · {job.stage || "等待开始"}</h3>
-                </div>
-                <span className="cloud-account-hint">{job.progress}%</span>
-              </div>
-              <div className="ebook-progress" aria-hidden="true">
-                <span style={{ width: `${job.progress}%` }} />
-              </div>
-              <div className="cloud-account-meta">
-                <span className="ebook-source">{job.source_url}</span>
-                <span>目标目录：{job.target_folder}</span>
-                {job.error && <span>失败原因：{job.error}</span>}
-              </div>
-              {job.status === "failed" && (
-                <div className="cloud-account-actions">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void handleRetry(job.id)}
-                  >重试</button>
-                </div>
-              )}
-            </article>
-          ))}
-        </section>
-
-        {message && <p className="cloud-dialog-message" role="status">{message}</p>}
+        </div>
+        {message && <p className="dialog-error cloud-dialog-message" role="status">{message}</p>}
       </section>
     </div>
   );

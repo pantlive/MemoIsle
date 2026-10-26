@@ -6,6 +6,7 @@ import {
   getResourceClassificationReviews,
   retryResourceClassificationReviews,
 } from "./api";
+import Icon from "./Icon";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
 import type { ResourceCategoryOption, ResourceClassificationReviewAction, ResourceClassificationReviewList } from "./types";
 
@@ -84,6 +85,14 @@ export default function ResourceClassificationReviewDialog({
     return updated;
   });
 
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [busy, onClose]);
+
   const confirm = async (action: ResourceClassificationReviewAction): Promise<void> => {
     if (disabled || selectedRows.length === 0) return;
     setBusy(true);
@@ -116,32 +125,18 @@ export default function ResourceClassificationReviewDialog({
   };
 
   return <div className="dialog-backdrop" role="presentation">
-    <section className="classification-review-dialog" role="dialog" aria-modal="true" aria-labelledby="classification-review-title">
+    <section className="classification-review-dialog dialog-shell" role="dialog" aria-modal="true" aria-labelledby="classification-review-title">
       <div className="dialog-header">
         <div>
+          <span className="type-label"><Icon name="review" size={16} /> 智能分类</span>
           <h2 id="classification-review-title">分类确认中心</h2>
           <p>复核模型未确定的网页。也可以把全部待确认网页重新交给大模型按分类模板归类；人工确认后不再自动分类。确认失效的网页不进入分类确认。</p>
         </div>
-        <div className="classification-review-header-actions">
-          <button
-            type="button"
-            disabled={disabled || (list?.total_count ?? 0) === 0}
-            onClick={() => {
-              if (disabled || (list?.total_count ?? 0) === 0) return;
-              setBusy(true);
-              setError("");
-              setNotice("");
-              void retryResourceClassificationReviews().then(() => {
-                onChangedRef.current();
-                onClose();
-              }).catch((retryError: unknown) => {
-                setError(retryError instanceof Error ? retryError.message : "重新分类待确认网页失败");
-              }).finally(() => setBusy(false));
-            }}
-          >重新分类全部待确认 {list?.total_count ?? 0}</button>
-          <button type="button" className="icon-button" aria-label="关闭分类确认中心" onClick={onClose} disabled={busy}>×</button>
-        </div>
+        <button type="button" className="icon-button" aria-label="关闭分类确认中心" onClick={onClose} disabled={busy}>
+          <Icon name="close" size={16} />
+        </button>
       </div>
+      <div className="dialog-body">
       <div className="classification-review-filters">
         <label>搜索待确认网页<input type="search" maxLength={200} value={query} disabled={busy}
           onChange={(event) => setFilter(() => setQuery(event.target.value))} placeholder="标题、网址或网页描述" /></label>
@@ -163,20 +158,18 @@ export default function ResourceClassificationReviewDialog({
           checked={rows.length > 0 && selectedRows.length === rows.length}
           onChange={(event) => setSelected(event.target.checked ? new Set(rows.map((item) => item.id)) : new Set())} />全选当前页</label>
         <span>已选 {selectedRows.length} 条</span>
-        <button type="button" disabled={disabled || availableChoices.length === 0} onClick={() => void confirm("adopt")}>采纳所选候选</button>
-        <button type="button" disabled={disabled || selectedRows.length === 0} onClick={() => void confirm("keep")}>保留原分类</button>
+        <button type="button" className="ghost" disabled={disabled || selectedRows.length === 0} onClick={() => void confirm("keep")}>保留原分类</button>
         <label>指定分类<select value={target} disabled={disabled} onChange={(event) => setTarget(event.target.value)}>
           <option value="">选择分类</option>
           {categories.filter((item) => item.is_active).map((item) => <option key={item.code} value={item.code}>{item.path || item.name}</option>)}
         </select></label>
-        <button type="button" disabled={disabled || selectedRows.length === 0 || !target || !categories.some((item) => item.code === target && item.is_active)}
+        <button type="button" className="ghost" disabled={disabled || selectedRows.length === 0 || !target || !categories.some((item) => item.code === target && item.is_active)}
           onClick={() => void confirm("assign")}>应用指定分类</button>
       </div>
       {notice && <p role="status">{notice}</p>}
       {skipped.length > 0 && <details className="classification-review-skipped" open><summary>跳过原因</summary>
         <ul>{skipped.map((message, index) => <li key={index}>{message}</li>)}</ul>
       </details>}
-      {error && <p role="alert">{error}</p>}
       {loading ? <p role="status">正在读取待确认网页…</p> : <>
         <p className="classification-review-total">共 {list?.total_count ?? 0} 条符合筛选条件{rows.length > 0 && ` · 当前 ${offset + 1}–${offset + rows.length} 条`}</p>
         {rows.length === 0 && !error && <p>当前没有待确认的网页。</p>}
@@ -200,10 +193,32 @@ export default function ResourceClassificationReviewDialog({
         </div>
       </>}
       <div className="classification-review-pagination">
-        <button type="button" disabled={disabled || offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>上一页</button>
-        <button type="button" disabled={disabled || !list || offset + list.limit >= list.total_count} onClick={() => setOffset(offset + 50)}>下一页</button>
-        <button type="button" disabled={disabled} onClick={() => setRefresh((value) => value + 1)}>刷新列表</button>
+        <button type="button" className="ghost" disabled={disabled || offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>上一页</button>
+        <button type="button" className="ghost" disabled={disabled || !list || offset + list.limit >= list.total_count} onClick={() => setOffset(offset + 50)}>下一页</button>
+        <button type="button" className="ghost" disabled={disabled} onClick={() => setRefresh((value) => value + 1)}>刷新列表</button>
       </div>
+      </div>
+      <div className="dialog-actions">
+        <button
+          type="button"
+          className="ghost"
+          disabled={disabled || (list?.total_count ?? 0) === 0}
+          onClick={() => {
+            if (disabled || (list?.total_count ?? 0) === 0) return;
+            setBusy(true);
+            setError("");
+            setNotice("");
+            void retryResourceClassificationReviews().then(() => {
+              onChangedRef.current();
+              onClose();
+            }).catch((retryError: unknown) => {
+              setError(retryError instanceof Error ? retryError.message : "重新分类待确认网页失败");
+            }).finally(() => setBusy(false));
+          }}
+        >重新分类全部待确认 {list?.total_count ?? 0}</button>
+        <button type="button" className="primary" disabled={disabled || availableChoices.length === 0} onClick={() => void confirm("adopt")}>采纳所选候选</button>
+      </div>
+      {error && <div className="dialog-error" role="alert">{error}</div>}
     </section>
   </div>;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import Icon from "./Icon";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
-import { ResourceLinkGlyph as ResourceLinkIcon } from "./ResourceIcon";
 import type { Memo, MemoType } from "./types";
 import { normalizeWebUrl, sourceHost } from "./webUrl";
 
@@ -167,18 +167,18 @@ export default function ResourcePreviewDialog({
   };
 
   return (
-    <div className="dialog-backdrop">
+    <div className="dialog-backdrop" role="presentation">
       <section
         ref={dialogRef}
         tabIndex={-1}
-        className="resource-preview-dialog"
+        className="resource-preview-dialog dialog-shell"
         role="dialog"
         aria-modal="true"
         aria-labelledby="resource-preview-title"
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label"><ResourceLinkIcon size={13} />网页资料</span>
+            <span className="type-label"><Icon name="link" size={16} /> 网页资料</span>
             <h2 id="resource-preview-title">{editing ? "编辑网页资料" : memo.title}</h2>
           </div>
           <button
@@ -188,12 +188,13 @@ export default function ResourcePreviewDialog({
             onClick={onClose}
             disabled={saving}
           >
-            ×
+            <Icon name="close" size={16} />
           </button>
         </div>
 
         {editing ? (
           <form className="resource-edit-form" onSubmit={(event) => void handleSubmit(event)}>
+            <div className="dialog-body">
             <label>
               标题
               <input
@@ -236,10 +237,11 @@ export default function ResourcePreviewDialog({
               />
               <small>最多 {MAX_TAGS} 个。</small>
             </label>
-            {error && <p className="resource-edit-error" role="alert">{error}</p>}
+            </div>
             <div className="dialog-actions resource-preview-actions">
               <button
                 type="button"
+                className="ghost"
                 onClick={() => {
                   setEditing(false);
                   setError("");
@@ -252,9 +254,11 @@ export default function ResourcePreviewDialog({
                 {saving ? "保存中…" : "保存"}
               </button>
             </div>
+            {error && <div className="dialog-error" role="alert">{error}</div>}
           </form>
         ) : (
           <>
+            <div className="dialog-body">
             <div className="resource-preview-content">
               {memo.resource_ai_summary && (
                 <p className="resource-ai-summary">
@@ -335,12 +339,23 @@ export default function ResourcePreviewDialog({
                 </select>
               </label>
             </div>
+            </div>
             <div className="dialog-actions resource-preview-actions">
-              <button type="button" onClick={startEditing} disabled={busy}>编辑</button>
-              <button type="button" onClick={onCopyLink} disabled={!memo.source_url}>复制链接</button>
-              <button type="button" onClick={onArchive} disabled={busy}>
-                {busy ? "处理中…" : "归档"}
-              </button>
+              <button type="button" className="ghost" onClick={startEditing} disabled={busy}>编辑</button>
+              <details className="resource-preview-more">
+                <summary aria-label="更多操作">
+                  <Icon name="more" size={16} />
+                </summary>
+                <div
+                  className="resource-preview-more-menu"
+                  onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}
+                >
+                  <button type="button" onClick={onCopyLink} disabled={!memo.source_url}>复制链接</button>
+                  <button type="button" onClick={onArchive} disabled={busy}>
+                    {busy ? "处理中…" : "归档"}
+                  </button>
+                </div>
+              </details>
               <button type="button" className="danger-button" onClick={onTrash}>回收站</button>
               <button
                 type="button"

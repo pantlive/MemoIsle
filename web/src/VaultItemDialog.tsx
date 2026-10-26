@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import Icon from "./Icon";
 
 import {
   VAULT_ROTATE_OPTIONS,
@@ -182,7 +183,7 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
                 className="danger-text"
                 aria-label={`删除恢复码 ${item.code}`}
                 onClick={() => onChange(codes.filter((_, current) => current !== index))}
-              >×</button>
+              ><Icon name="close" size={16} /></button>
             </li>
           ))}
         </ul>
@@ -272,9 +273,11 @@ export default function VaultItemDialog({
   };
 
   return (
-    <div className="dialog-backdrop">
-      <section
-        className="vault-item-dialog"
+    <div className="dialog-backdrop vault-item-backdrop" role="presentation">
+      <form
+        className="vault-item-dialog dialog-shell"
+        onSubmit={handleSubmit}
+        autoComplete="off"
         role="dialog"
         aria-modal="true"
         aria-labelledby="vault-item-title"
@@ -292,9 +295,9 @@ export default function VaultItemDialog({
             onClick={() => {
               if (!dirty || window.confirm("有未保存的修改，确定放弃吗？")) onClose();
             }}
-          >×</button>
+          ><Icon name="close" size={16} /></button>
         </div>
-        <form className="vault-form" onSubmit={handleSubmit} autoComplete="off">
+        <div className="dialog-body vault-form">
           {reminders.length > 0 && (
             <ul className="vault-dialog-reminders" aria-label="这一条的提醒">
               {reminders.map((reminder) => (
@@ -495,20 +498,20 @@ export default function VaultItemDialog({
             />
           </label>
 
-          {error && <p className="vault-error" role="alert">{error}</p>}
-          <div className="dialog-actions vault-dialog-actions">
-            {!isNew && (
-              <button type="button" className="danger-button" onClick={onDelete} disabled={busy}>
-                删除
-              </button>
-            )}
-            <span className="vault-dialog-spacer" />
-            <button type="submit" className="primary" disabled={busy || !draft.title.trim() || (!dirty && !isNew)}>
-              {busy ? "加密保存中…" : "保存"}
+        </div>
+        <div className="dialog-actions vault-dialog-actions">
+          {!isNew && (
+            <button type="button" className="danger-button" onClick={onDelete} disabled={busy}>
+              删除
             </button>
-          </div>
-        </form>
-      </section>
+          )}
+          <span className="vault-dialog-spacer" />
+          <button type="submit" className="primary" disabled={busy || !draft.title.trim() || (!dirty && !isNew)}>
+            {busy ? "加密保存中…" : "保存"}
+          </button>
+        </div>
+        {error && <p className="dialog-error" role="alert">{error}</p>}
+      </form>
     </div>
   );
 }

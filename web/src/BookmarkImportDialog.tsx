@@ -23,6 +23,7 @@ import type {
   BookmarkInput,
   BookmarkPreviewItem,
 } from "./types";
+import Icon from "./Icon";
 
 interface BookmarkImportDialogProps {
   onClose: () => void;
@@ -237,28 +238,40 @@ export default function BookmarkImportDialog({
     setError("");
   };
 
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
   return (
     <div className="dialog-backdrop" role="presentation">
       <section
-        className="bookmark-dialog"
+        className="bookmark-dialog dialog-shell"
         role="dialog"
         aria-modal="true"
         aria-labelledby="bookmark-import-title"
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label">当前浏览器</span>
+            <span className="type-label"><Icon name="bookmark" size={16} /> 当前浏览器</span>
             <h2 id="bookmark-import-title">导入浏览器书签</h2>
+            <p>从当前浏览器读取书签，或选择导出的 HTML 作为备用。</p>
           </div>
           <button className="icon-button" aria-label="关闭书签导入" onClick={onClose}>
-            ×
+            <Icon name="close" size={16} />
           </button>
         </div>
 
+        <div className="dialog-body">
         {!preview && !batch && (
           <div className="bookmark-source-options">
             <section className="browser-bookmark-source">
-              <span aria-hidden="true">◎</span>
+              <span aria-hidden="true"><Icon name="bookmark" size={20} /></span>
               <div>
                 <strong>
                   {busy ? "正在读取并检查当前浏览器书签…" : "从当前浏览器直接读取"}
@@ -275,7 +288,7 @@ export default function BookmarkImportDialog({
             </section>
             <div className="bookmark-source-divider"><span>备用方式</span></div>
             <label className="bookmark-file-picker compact">
-              <span aria-hidden="true">⇧</span>
+              <span><Icon name="upload" size={20} /></span>
               <span>
                 <strong>选择浏览器导出的书签 HTML</strong>
                 <small>Chrome、Edge、Firefox 都可以，Firefox 书签的标签会一起保留；原始文件不会上传。</small>
@@ -315,17 +328,6 @@ export default function BookmarkImportDialog({
                 </section>
               ))}
             </div>
-            <div className="dialog-actions">
-              <button type="button" onClick={chooseAnotherSource}>重新选择</button>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || preview.valid_count === 0}
-                onClick={() => void handleImport()}
-              >
-                {busy ? "正在创建导入任务…" : `确认导入 ${preview.valid_count} 条`}
-              </button>
-            </div>
           </>
         )}
 
@@ -354,20 +356,38 @@ export default function BookmarkImportDialog({
             <p className="bookmark-progress-note">
               已导入资料可以立即搜索；网页信息与自动分类会在后台继续更新。
             </p>
-            <div className="dialog-actions">
-              {batch.failed_count > 0 && batch.status !== "undone" && (
-                <button type="button" disabled={busy} onClick={() => void handleRetry()}>
-                  {busy ? "正在重试…" : "重试失败项目"}
-                </button>
-              )}
-              {batch.imported_count > 0 && batch.status !== "undone" && (
-                <button type="button" className="danger-button" disabled={busy} onClick={() => void handleUndo()}>
-                  撤销本批导入
-                </button>
-              )}
-              <button type="button" className="primary" onClick={onClose}>完成</button>
-            </div>
           </>
+        )}
+        </div>
+
+        {preview && !batch && (
+          <div className="dialog-actions">
+            <button type="button" className="ghost" onClick={chooseAnotherSource}>重新选择</button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || preview.valid_count === 0}
+              onClick={() => void handleImport()}
+            >
+              {busy ? "正在创建导入任务…" : `确认导入 ${preview.valid_count} 条`}
+            </button>
+          </div>
+        )}
+
+        {batch && (
+          <div className="dialog-actions">
+            {batch.failed_count > 0 && batch.status !== "undone" && (
+              <button type="button" className="ghost" disabled={busy} onClick={() => void handleRetry()}>
+                {busy ? "正在重试…" : "重试失败项目"}
+              </button>
+            )}
+            {batch.imported_count > 0 && batch.status !== "undone" && (
+              <button type="button" className="danger-button" disabled={busy} onClick={() => void handleUndo()}>
+                撤销本批导入
+              </button>
+            )}
+            <button type="button" className="primary" onClick={onClose}>完成</button>
+          </div>
         )}
 
         {error && <div className="dialog-error" role="alert">{error}</div>}

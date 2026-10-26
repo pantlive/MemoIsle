@@ -6,6 +6,7 @@ import {
   retryFolderClassifications,
   setBookmarkFolderOverride,
 } from "./api";
+import Icon from "./Icon";
 import type { BookmarkFolderMapping, BookmarkFolderMappingList } from "./types";
 
 const AUTO = "__auto";
@@ -117,18 +118,22 @@ export default function BookmarkFolderMappingDialog({
   const judged = list ? list.items.length - list.pending_count : 0;
 
   return <div className="dialog-backdrop" role="presentation">
-    <section className="classification-review-dialog folder-mapping-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-mapping-title">
+    <section className="classification-review-dialog folder-mapping-dialog dialog-shell" role="dialog" aria-modal="true" aria-labelledby="folder-mapping-title">
       <div className="dialog-header">
         <div>
+          <span className="type-label"><Icon name="folder" size={16} /> 书签文件夹</span>
           <h2 id="folder-mapping-title">按书签文件夹重新判断</h2>
           <p>{
             "书签原来的归类在文件夹上（Firefox 书签还有标签）。先让 Jev 判断每个文件夹对应哪个分类，"
             + "你可以改正或设为不沿用；确认后再逐条判断网页，只有文件夹对应到分类的网页会参与。"
           }</p>
         </div>
-        <button type="button" className="icon-button" aria-label="关闭" onClick={onClose} disabled={busy || mapping}>×</button>
+        <button type="button" className="icon-button" aria-label="关闭" onClick={onClose} disabled={busy || mapping}>
+          <Icon name="close" size={16} />
+        </button>
       </div>
 
+      <div className="dialog-body">
       {!list && !error && <p role="status">正在读取书签文件夹…</p>}
       {list && <>
         <div className="folder-mapping-summary">
@@ -185,18 +190,19 @@ export default function BookmarkFolderMappingDialog({
           </li>)}
         </ul>
       </>}
-      {error && <p role="alert" className="folder-mapping-error">{error}</p>}
+      </div>
       <div className="dialog-actions">
-        <button type="button" onClick={onClose} disabled={busy || mapping}>关闭</button>
+        <button type="button" className="ghost" onClick={onClose} disabled={busy || mapping}>关闭</button>
         <button
           type="button"
-          className="folder-mapping-primary"
+          className="primary folder-mapping-primary"
           disabled={busy || mapping || !list?.retry_count}
           onClick={() => void startRetry()}
         >
           逐条判断 {list?.retry_count ?? 0} 条网页
         </button>
       </div>
+      {error && <div className="dialog-error" role="alert">{error}</div>}
     </section>
   </div>;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import Icon from "./Icon";
 
 type Shortcut = { keys: string[][]; label: string };
 
@@ -67,55 +68,66 @@ export default function ShortcutHelpDialog({ onClose }: { onClose: () => void })
 
   return (
     <div
-      className="dialog-backdrop"
+      className="dialog-backdrop shortcut-help-backdrop"
+      role="presentation"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <section
-        className="shortcut-help-dialog"
+        className="shortcut-help-dialog dialog-shell"
         role="dialog"
         aria-modal="true"
         aria-labelledby="shortcut-help-title"
       >
         <div className="dialog-header">
-          <h2 id="shortcut-help-title">键盘快捷键</h2>
+          <div>
+            <span className="type-label"><Icon name="keyboard" size={16} /> 操作指南</span>
+            <h2 id="shortcut-help-title">键盘快捷键</h2>
+          </div>
           <button
             ref={closeRef}
             type="button"
             className="icon-button"
             aria-label="关闭快捷键说明"
             onClick={onClose}
-          >×</button>
+          ><Icon name="close" size={16} /></button>
         </div>
-        <p className="shortcut-help-hint">在输入框里打字时，单键快捷键不会生效。</p>
-        <div className="shortcut-help-sections">
-          {sections.map((section) => (
-            <div className="shortcut-help-section" key={section.title}>
-              <h3>{section.title}</h3>
-              <dl>
-                {section.items.map((item) => (
-                  <div key={item.label}>
-                    <dt>
-                      {item.keys.map((combo, index) => (
-                        <span key={combo.join("+")}>
-                          {index > 0 && <span className="shortcut-or">或</span>}
-                          {combo.map((key, keyIndex) => (
-                            <span key={key}>
-                              {keyIndex > 0 && "+"}
-                              <kbd>{key}</kbd>
-                            </span>
-                          ))}
-                        </span>
-                      ))}
-                    </dt>
-                    <dd>{item.label}</dd>
-                  </div>
-                ))}
-              </dl>
-              {section.note && <small>{section.note}</small>}
-            </div>
-          ))}
+        <div className="dialog-body">
+          <p className="shortcut-help-hint">在输入框里打字时，单键快捷键不会生效。</p>
+          <div className="shortcut-help-sections">
+            {sections.map((section) => (
+              <div className="shortcut-help-section" key={section.title}>
+                <h3>{section.title}</h3>
+                <dl>
+                  {section.items.map((item) => (
+                    <div key={item.label}>
+                      <dt>
+                        {item.keys.map((combo, index) => (
+                          <span key={combo.join("+")}>
+                            {index > 0 && <span className="shortcut-or">或</span>}
+                            {combo.map((key, keyIndex) => (
+                              <span key={key}>
+                                {keyIndex > 0 && "+"}
+                                <kbd aria-label={key === "↓" ? "向下" : key === "↑" ? "向上" : key === "→" ? "向右" : key === "←" ? "向左" : undefined}>
+                                  {key === "↓" ? <Icon name="arrowDown" size={12} />
+                                    : key === "↑" ? <Icon name="arrowUp" size={12} />
+                                    : key === "→" ? <Icon name="arrowRight" size={12} />
+                                    : key === "←" ? <Icon name="arrowLeft" size={12} /> : key}
+                                </kbd>
+                              </span>
+                            ))}
+                          </span>
+                        ))}
+                      </dt>
+                      <dd>{item.label}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {section.note && <small>{section.note}</small>}
+              </div>
+            ))}
+          </div>
         </div>
       </section>
     </div>

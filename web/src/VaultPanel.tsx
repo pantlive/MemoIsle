@@ -49,6 +49,7 @@ import {
   subscribeVaultSession,
   touchVaultSession,
 } from "./vaultSession";
+import Icon from "./Icon";
 
 const CLIPBOARD_CLEAR_MS = 30_000;
 const RESET_PHRASE = "清空密码库";
@@ -205,6 +206,18 @@ export default function VaultPanel() {
   const [importPassword, setImportPassword] = useState("");
   const [importProgress, setImportProgress] = useState("");
   const [importError, setImportError] = useState("");
+
+  useEffect(() => {
+    if (!importState && !changeOpen) return;
+    // 提交按钮禁用时可能失去焦点，错误返回后仍应能通过 Esc 关闭表单。
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || busy) return;
+      if (importState) setImportState(null);
+      if (changeOpen) setChangeOpen(false);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [busy, changeOpen, importState]);
 
   const clearSecrets = () => {
     setPassword("");
@@ -611,7 +624,7 @@ export default function VaultPanel() {
       {notice && (
         <div className="status-message" role="status">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice("")} aria-label="关闭提示">×</button>
+          <button type="button" onClick={() => setNotice("")} aria-label="关闭提示"><Icon name="close" size={16} /></button>
         </div>
       )}
 
@@ -720,7 +733,7 @@ export default function VaultPanel() {
         <>
           <div className="vault-toolbar">
             <div className="resource-search vault-search">
-              <span aria-hidden="true">⌕</span>
+              <Icon name="search" size={18} />
               <input
                 aria-label="搜索密码库"
                 value={query}
@@ -902,22 +915,19 @@ export default function VaultPanel() {
       )}
 
       {importState && (
-        <div className="dialog-backdrop">
+        <div className="dialog-backdrop vault-import-backdrop" role="presentation">
           <form
-            className="vault-item-dialog"
+            className="vault-item-dialog dialog-shell"
             role="dialog"
             aria-modal="true"
             aria-labelledby="vault-import-title"
             onSubmit={(event) => void handleImportBackup(event)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && !busy) setImportState(null);
-            }}
           >
             <div className="dialog-header">
               <h2 id="vault-import-title">导入加密备份</h2>
-              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setImportState(null)}>×</button>
+              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setImportState(null)}><Icon name="close" size={16} /></button>
             </div>
-            <div className="vault-form">
+            <div className="dialog-body vault-form">
               <p className="vault-import-summary">
                 「{importState.fileName}」：{importState.backup.items.length} 条，
                 导出于 {new Date(importState.backup.exported_at).toLocaleString("zh-CN")}。
@@ -935,35 +945,32 @@ export default function VaultPanel() {
                 />
               </label>
               {importProgress && <p className="vault-hint" role="status">{importProgress}</p>}
-              {importError && <p className="vault-error" role="alert">{importError}</p>}
-              <div className="dialog-actions">
-                <button type="button" onClick={() => setImportState(null)} disabled={busy}>取消</button>
-                <button type="submit" className="primary" disabled={busy || !importPassword}>
-                  {busy ? "导入中…" : "导入"}
-                </button>
-              </div>
             </div>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setImportState(null)} disabled={busy}>取消</button>
+              <button type="submit" className="primary" disabled={busy || !importPassword}>
+                {busy ? "导入中…" : "导入"}
+              </button>
+            </div>
+            {importError && <p className="dialog-error" role="alert">{importError}</p>}
           </form>
         </div>
       )}
 
       {changeOpen && (
-        <div className="dialog-backdrop">
+        <div className="dialog-backdrop vault-password-backdrop" role="presentation">
           <form
-            className="vault-item-dialog"
+            className="vault-item-dialog dialog-shell"
             role="dialog"
             aria-modal="true"
             aria-labelledby="vault-change-title"
             onSubmit={(event) => void handleChangePassword(event)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && !busy) setChangeOpen(false);
-            }}
           >
             <div className="dialog-header">
               <h2 id="vault-change-title">更改主密码</h2>
-              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setChangeOpen(false)}>×</button>
+              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setChangeOpen(false)}><Icon name="close" size={16} /></button>
             </div>
-            <div className="vault-form">
+            <div className="dialog-body vault-form">
               <label className="vault-field">
                 <span className="vault-field-label"><span>当前主密码</span></span>
                 <input
@@ -981,18 +988,18 @@ export default function VaultPanel() {
                 onPassword={setPassword}
                 onConfirm={setConfirm}
               />
-              {formError && <p className="vault-error" role="alert">{formError}</p>}
-              <div className="dialog-actions">
-                <button type="button" onClick={() => setChangeOpen(false)} disabled={busy}>取消</button>
-                <button
-                  type="submit"
-                  className="primary"
-                  disabled={busy || !currentPassword || !masterPasswordReady(password, confirm)}
-                >
-                  {busy ? "重新加密中…" : "更改主密码"}
-                </button>
-              </div>
             </div>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setChangeOpen(false)} disabled={busy}>取消</button>
+              <button
+                type="submit"
+                className="primary"
+                disabled={busy || !currentPassword || !masterPasswordReady(password, confirm)}
+              >
+                {busy ? "重新加密中…" : "更改主密码"}
+              </button>
+            </div>
+            {formError && <p className="dialog-error" role="alert">{formError}</p>}
           </form>
         </div>
       )}

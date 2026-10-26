@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import Icon from "./Icon";
 import { pendingHealthIssueCount } from "./linkHealth";
 
 import {
@@ -189,7 +190,7 @@ export default function LinkHealthDialog({
   return (
     <div className="dialog-backdrop" role="presentation">
       <section
-        className="health-dialog"
+        className="health-dialog dialog-shell"
         role="dialog"
         aria-modal="true"
         aria-labelledby="health-dialog-title"
@@ -202,9 +203,12 @@ export default function LinkHealthDialog({
               当前显示 {center.items.length} 条，共 {filter ? center.counts[filter] : pendingHealthIssueCount(center.counts)} 条待处理
             </p>}
           </div>
-          <button className="icon-button" aria-label="关闭巡检中心" onClick={onClose}>×</button>
+          <button className="icon-button" aria-label="关闭巡检中心" onClick={onClose}>
+            <Icon name="close" size={16} />
+          </button>
         </div>
 
+        <div className="dialog-body">
         <div className="health-summary">
           <div className="danger"><strong>{counts?.failed ?? 0}</strong><span>确认失效</span></div>
           <div><strong>{counts?.redirected ?? 0}</strong><span>网址跳转</span></div>
@@ -287,7 +291,14 @@ export default function LinkHealthDialog({
           {!loading && !center?.items.length && (
             <div className="health-empty">这个分组目前没有需要处理的网页。</div>
           )}
-          {!loading && center?.items.map((memo) => (
+          {!loading && center && center.items.map((memo) => {
+            const actions = actionsFor(memo);
+            const [primary, ...rest] = actions;
+            const hostname = hostnameFromUrl(memo.source_url);
+            const sitePaused = Boolean(
+              hostname && center.settings.paused_sites.includes(hostname),
+            );
+            return (
             <article className="health-result" key={memo.id}>
               <div className="health-result-heading">
                 <div>
@@ -312,37 +323,56 @@ export default function LinkHealthDialog({
                 <span>{memo.link_health_error || (memo.link_health_http_status ? `HTTP ${memo.link_health_http_status}` : "等待判定")}</span>
               </div>
               <div className="health-actions">
-                {actionsFor(memo).map((action) => (
+                {primary && (
                   <button
                     type="button"
-                    className={action === "delete" ? "danger-button" : ""}
+                    className={primary === "delete" ? "danger-button" : "primary"}
                     disabled={actingId === memo.id}
-                    key={action}
-                    onClick={() => void handleAction(memo, action)}
-                  >{actingId === memo.id ? "处理中…" : actionLabel(action)}</button>
-                ))}
-                {hostnameFromUrl(memo.source_url) && (
-                  <button
-                    type="button"
-                    disabled={settingsBusy || actingId === memo.id}
-                    onClick={() => {
-                      const hostname = hostnameFromUrl(memo.source_url);
-                      if (hostname) {
-                        void handleSitePause(
-                          hostname,
-                          !center?.settings.paused_sites.includes(hostname),
-                        );
-                      }
-                    }}
+                    onClick={() => void handleAction(memo, primary)}
                   >
-                    {center?.settings.paused_sites.includes(
-                      hostnameFromUrl(memo.source_url) || "",
-                    ) ? "恢复此站点" : "暂停此站点"}
+                    {actingId === memo.id ? "处理中…" : actionLabel(primary)}
                   </button>
+                )}
+                {(rest.length > 0 || hostname) && (
+                  <details className="health-more">
+                    <summary aria-label="更多操作">
+                      <Icon name="more" size={16} />
+                    </summary>
+                    <div
+                      className="health-more-menu"
+                      // 选中任一操作后收起菜单，避免处理中时菜单还挂在列表上。
+                      onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}
+                    >
+                      {rest.map((action) => (
+                        <button
+                          type="button"
+                          className={action === "delete" ? "danger-button" : ""}
+                          disabled={actingId === memo.id}
+                          key={action}
+                          onClick={() => void handleAction(memo, action)}
+                        >
+                          {actingId === memo.id ? "处理中…" : actionLabel(action)}
+                        </button>
+                      ))}
+                      {hostname && (
+                        <button
+                          type="button"
+                          disabled={settingsBusy || actingId === memo.id}
+                          onClick={() => {
+                            void handleSitePause(hostname, !sitePaused);
+                          }}
+                        >
+                          {sitePaused ? "恢复此站点" : "暂停此站点"}
+                        </button>
+                      )}
+                    </div>
+                  </details>
                 )}
               </div>
             </article>
-          ))}
+            );
+          })}
+        </div>
         </div>
 
         {error && <div className="dialog-error" role="alert">{error}</div>}

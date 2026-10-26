@@ -1,3 +1,4 @@
+import Icon from "./Icon";
 import { isIdeographic, sourceMonogram } from "./webUrl";
 
 interface ResourceMonogramProps {
@@ -45,35 +46,12 @@ export default function ResourceMonogram({
 
 /** 没有可用站点首字时的兜底图标：矢量外链箭头。 */
 export function ResourceLinkGlyph({
-  size = 17,
+  size = 18,
   className,
 }: {
   size?: number;
   className?: string;
 }) {
-  return (
-    <svg
-      className={className}
-      width={size}
-      height={size}
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        d="M5.6 14.4 14.1 5.9"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-      <path
-        d="M7.7 5.7h6.6v6.6"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  // 兼容原调用位置，同时收敛到 16、18、20 三档尺寸。
+  return <Icon name="link" size={size <= 16 ? 16 : size <= 18 ? 18 : 20} className={className} />;
 }

@@ -10,6 +10,7 @@ import {
 
 import BookmarkImportDialog from "./BookmarkImportDialog";
 import BrandLogo from "./BrandLogo";
+import Icon, { type IconName } from "./Icon";
 import CategoryGenerator from "./CategoryGenerator";
 import ResourceClassificationPanel from "./ResourceClassificationPanel";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
@@ -69,7 +70,6 @@ import {
   browserExtensionDownloadUrl,
   createImageMemo,
   createMemo,
-  androidDownloadUrl,
   downloadUserData,
   emptyTrash,
   exchangeBrowserCapture,
@@ -168,9 +168,8 @@ interface AppProps {
 
 interface NavigationItem {
   label: string;
-  /** 文字字形图标；资源链接一项改用矢量图，见 vectorIcon。 */
-  icon: string;
-  vectorIcon?: "resource-link";
+  /** 导航统一使用内联 SVG 图标。 */
+  icon: IconName;
   view?: ActiveView;
   action?: "health" | "settings" | "vault" | "history";
 }
@@ -192,18 +191,18 @@ interface ImageUploadTask {
 }
 
 const navigation: NavigationItem[] = [
-  { label: "首页", icon: "⌂", view: "all" },
-  { label: "收件箱", icon: "▣", view: "inbox" },
-  { label: "英语单词", icon: "Aa", view: "word" },
-  { label: "网页资料", icon: "↗", vectorIcon: "resource-link", view: "resource" },
-  { label: "图片收藏", icon: "▧", view: "image" },
-  { label: "网页巡检", icon: "!", action: "health" },
-  { label: "浏览历史", icon: "◶", action: "history" },
-  { label: "灵感", icon: "✦", view: "idea" },
-  { label: "回顾", icon: "◷", view: "review" },
-  { label: "回收站", icon: "♻", view: "trash" },
-  { label: "密码库", icon: "◈", action: "vault" },
-  { label: "设置", icon: "⚙", action: "settings" },
+  { label: "首页", icon: "home", view: "all" },
+  { label: "收件箱", icon: "inbox", view: "inbox" },
+  { label: "英语单词", icon: "word", view: "word" },
+  { label: "网页资料", icon: "link", view: "resource" },
+  { label: "图片收藏", icon: "image", view: "image" },
+  { label: "网页巡检", icon: "health", action: "health" },
+  { label: "浏览历史", icon: "history", action: "history" },
+  { label: "灵感", icon: "idea", view: "idea" },
+  { label: "回顾", icon: "review", view: "review" },
+  { label: "回收站", icon: "trash", view: "trash" },
+  { label: "密码库", icon: "vault", action: "vault" },
+  { label: "设置", icon: "settings", action: "settings" },
 ];
 
 const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
@@ -280,7 +279,7 @@ const viewCopy = {
   all: {
     title: "最近内容",
     eyebrow: "一个入口，找回所有收藏",
-    icon: "□",
+    icon: "collection",
     itemLabel: "内容",
     emptyTitle: "资料库还是空的",
     emptyBody: "从灵感、英语单词或网页资料开始收藏第一条内容。",
@@ -288,7 +287,7 @@ const viewCopy = {
   idea: {
     title: "灵感",
     eyebrow: "捕捉此刻的想法",
-    icon: "✦",
+    icon: "idea",
     itemLabel: "灵感",
     emptyTitle: "第一条灵感正在等你",
     emptyBody: "从上方快速记录开始，内容会同步到你的 Android 设备。",
@@ -296,7 +295,7 @@ const viewCopy = {
   resource: {
     title: "网页资料",
     eyebrow: "保存值得再次打开的内容",
-    icon: "↗",
+    icon: "link",
     itemLabel: "资料",
     emptyTitle: "还没有收藏网页资料",
     emptyBody: "粘贴文章、课程、工具或视频链接，稍后继续阅读。",
@@ -304,7 +303,7 @@ const viewCopy = {
   word: {
     title: "英语单词",
     eyebrow: "收藏语境，按计划再次遇见",
-    icon: "Aa",
+    icon: "word",
     itemLabel: "单词",
     emptyTitle: "从第一个英语单词开始",
     emptyBody: "保存词形、释义和例句，稍后使用三档反馈进行复习。",
@@ -312,7 +311,7 @@ const viewCopy = {
   image: {
     title: "图片收藏",
     eyebrow: "收藏画面，随时再看一眼",
-    icon: "▧",
+    icon: "image",
     itemLabel: "图片",
     emptyTitle: "还没有收藏图片",
     emptyBody: "选择、拖入或直接粘贴图片，就能开始图片收藏。",
@@ -320,7 +319,7 @@ const viewCopy = {
   review: {
     title: "今日回顾",
     eyebrow: "用几分钟再次遇见值得留下的内容",
-    icon: "◷",
+    icon: "review",
     itemLabel: "回顾",
     emptyTitle: "今天没有需要回顾的内容",
     emptyBody: "到期单词、未读资料和待整理灵感会显示在这里。",
@@ -328,7 +327,7 @@ const viewCopy = {
   inbox: {
     title: "收件箱",
     eyebrow: "先记下的内容，在这里补完再放进资料库",
-    icon: "▣",
+    icon: "inbox",
     itemLabel: "待整理条目",
     emptyTitle: "收件箱是空的",
     emptyBody: "快速记下的灵感会先到这里。补上标题或整理完成后，就会离开收件箱。",
@@ -336,7 +335,7 @@ const viewCopy = {
   trash: {
     title: "回收站",
     eyebrow: "删除的内容默认保留 30 天",
-    icon: "♻",
+    icon: "trash",
     itemLabel: "回收站条目",
     emptyTitle: "回收站是空的",
     emptyBody: "移入回收站的内容会在这里保留 30 天，之后永久删除。",
@@ -541,7 +540,7 @@ function MemoImageThumb({
   }, [memoId, version]);
 
   if (failed) {
-    return <span className="image-thumb-fallback" aria-hidden="true">▧</span>;
+    return <span className="image-thumb-fallback" aria-hidden="true"><Icon name="image" size={20} /></span>;
   }
   if (!url) {
     return <span className="image-thumb-loading" aria-hidden="true" />;
@@ -738,6 +737,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   activeTypeRef.current = activeType;
   const searchRef = useRef<HTMLInputElement>(null);
   const resourceSearchRef = useRef<HTMLInputElement>(null);
+  const voiceCloseRef = useRef<HTMLButtonElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const voiceStartedAtRef = useRef(0);
@@ -763,6 +763,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   // 与基准版本对应的服务端内容，用来判断编辑器里有没有未保存的修改。
   const editorBaseContentRef = useRef({ title: "", body: "", phonetic: "", example: "" });
   const captureTokenHandledRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // 关闭放弃确认后将焦点交还录音弹窗，保证后续 Esc 和键盘操作仍然有效。
+    if (voicePanelOpen && !voiceDiscardConfirmOpen) {
+      voiceCloseRef.current?.focus();
+    }
+  }, [voicePanelOpen, voiceDiscardConfirmOpen]);
 
   const stopMeetingCapture = () => {
     if (meetingRemoteTimerRef.current !== null) {
@@ -859,6 +866,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   };
 
   const copy = viewCopy[activeType];
+  const captureHasContent = Boolean(
+    newUrl.trim() ||
+      newTitle.trim() ||
+      newBody.trim() ||
+      newPhonetic.trim() ||
+      newExample.trim() ||
+      webAttachment ||
+      wordLookup,
+  );
   // 网页收藏使用视图内搜索框，其他视图沿用顶部搜索框。
   const viewQuery = activeType === "resource" ? resourceQuery : searchQuery;
   const resourcePageCount = Math.max(
@@ -3904,7 +3920,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           <div><strong>MemoIsle</strong><span>Personal sanctuary</span></div>
         </div>
         <button className="new-button" onClick={focusCapture}>
-          <span aria-hidden="true">＋</span> 新建
+          <Icon name="plus" size={18} /> 新建
         </button>
         <nav>
           {navigation.map((item) => {
@@ -3936,16 +3952,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     setBrowserHistoryOpen(true);
                   }
                 }}
-                title={enabled ? undefined : "将在后续里程碑开放"}
+                title={enabled ? item.label : "将在后续里程碑开放"}
               >
                 <span className="nav-icon" aria-hidden="true">
-                  {item.vectorIcon === "resource-link" ? (
-                    <ResourceLinkGlyph size={15} />
-                  ) : (
-                    item.icon
-                  )}
+                  <Icon name={item.icon} size={18} />
                 </span>
-                {item.label}
+                <span className="nav-label">{item.label}</span>
                 {item.view === "inbox" && memoCounts !== null && (
                   <span className="nav-count">{memoCounts.inbox_count}</span>
                 )}
@@ -3993,7 +4005,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       <div className="workspace">
         <header className="top-bar">
           <div className="search-box">
-            <span aria-hidden="true">⌕</span>
+            <Icon name="search" size={18} />
             <input
               ref={searchRef}
               aria-label="搜索全部内容"
@@ -4008,7 +4020,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 type="button"
                 aria-label="清除搜索"
                 onClick={() => setSearchQuery("")}
-              >×</button>
+              ><Icon name="close" size={16} /></button>
             )}
           </div>
           <span className="sync-status"><span className="sync-dot" /> 已同步</span>
@@ -4017,18 +4029,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             className="model-settings-open"
             onClick={() => setModelSettingsOpen(true)}
             aria-label="打开设置"
-          ><span aria-hidden="true">⚙</span><span className="top-bar-label">设置</span></button>
-          <a
-            className="top-bar-button extension-download-button"
-            href={browserExtensionDownloadUrl()}
-            download={browserExtensionArchiveFilename()}
-            title="下载后解压，并在 Chrome 或 Edge 中加载已解压的扩展"
-          >↓ 下载扩展</a>
-          <a
-            className="top-bar-button android-download-button"
-            href={androidDownloadUrl()}
-            download="MemoIsle-android.apk"
-          >↓ 下载安卓端</a>
+          ><Icon name="settings" size={18} /><span className="top-bar-label">设置</span></button>
           <div className="data-export-controls">
             <input
               ref={wordImportInputRef}
@@ -4071,7 +4072,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             onClick={() => switchType("inbox")}
             aria-label="收件箱"
           >
-            <span aria-hidden="true">▣</span><span className="top-bar-label">收件箱</span>
+            <Icon name="inbox" size={18} /><span className="top-bar-label">收件箱</span>
           </button>
           <button
             className={`trash-shortcut${activeType === "trash" ? " active" : ""}`}
@@ -4079,7 +4080,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             onClick={() => switchType("trash")}
             aria-label="回收站"
           >
-            <span aria-hidden="true">♻</span><span className="top-bar-label">回收站</span>
+            <Icon name="trash" size={18} /><span className="top-bar-label">回收站</span>
           </button>
           <button
             className={`trash-shortcut${vaultOpen ? " active" : ""}`}
@@ -4090,7 +4091,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             }}
             aria-label={vaultReminderCount > 0 ? `密码库，${vaultReminderCount} 条提醒` : "密码库"}
           >
-            <span aria-hidden="true">◈</span><span className="top-bar-label">密码库</span>
+            <Icon name="vault" size={18} /><span className="top-bar-label">密码库</span>
             {vaultReminderCount > 0 && <span className="vault-shortcut-badge" aria-hidden="true">{vaultReminderCount}</span>}
           </button>
           <button
@@ -4099,15 +4100,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             onClick={() => setBrowserHistoryOpen(true)}
             aria-label="浏览历史"
           >
-            <span aria-hidden="true">◶</span><span className="top-bar-label">浏览历史</span>
+            <Icon name="history" size={18} /><span className="top-bar-label">浏览历史</span>
           </button>
-          <button className="compact-new" onClick={focusCapture}>＋ 新建</button>
         </header>
 
         <main className="main-content">
           {vaultOpen ? <VaultPanel /> : <>
           <div className="page-heading">
-            <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1></div>
+            <div><p className="eyebrow">{copy.eyebrow}</p><h1><Icon name={copy.icon} size={20} />{copy.title}</h1></div>
             <span>
               {activeType === "review" && reviewQueue
                 ? `今日计划 ${reviewScheduledCount} 条 · 待处理 ${reviewDueCount} 条`
@@ -4157,20 +4157,20 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
           {activeType === "all" && !searchQuery.trim() && reviewQueue && (
             <section className="today-review-card">
-              <div>
+              <div className="today-review-copy">
                 <p className="eyebrow">今日回顾</p>
                 <h2>今天计划 {reviewScheduledCount} 条</h2>
-                <div className="today-review-stats">
-                  <span>{reviewQueue.word_count} 个单词</span>
-                  <span>{reviewQueue.resource_count} 篇待读</span>
-                  <button
-                    type="button"
-                    className="today-review-inbox-link"
-                    onClick={() => switchType("inbox")}
-                  >
-                    {reviewQueue.idea_count} 条待整理
-                  </button>
-                </div>
+              </div>
+              <div className="today-review-stats">
+                <span>{reviewQueue.word_count} 个单词</span>
+                <span>{reviewQueue.resource_count} 篇待读</span>
+                <button
+                  type="button"
+                  className="today-review-inbox-link"
+                  onClick={() => switchType("inbox")}
+                >
+                  {reviewQueue.idea_count} 条待整理
+                </button>
               </div>
               <button
                 type="button"
@@ -4255,7 +4255,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   queueImageFiles(Array.from(event.dataTransfer.files));
                 }}
               >
-                <span className="image-dropzone-icon" aria-hidden="true">▧</span>
+                <span className="image-dropzone-icon" aria-hidden="true"><Icon name="image" size={20} /></span>
                 <strong>点击选择、拖入或按 Ctrl/⌘+V 粘贴图片</strong>
                 <span>
                   支持 PNG、JPEG、WebP、GIF，单张不超过 20 MB，可一次选择多张。
@@ -4283,8 +4283,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           )}
 
           {activeType !== "all" && activeType !== "review" && activeType !== "inbox" && activeType !== "trash" && activeType !== "image" && (
-          <form className="capture-card" onSubmit={handleCreate}>
+          <form
+            className={`capture-card capture-${activeType}${captureHasContent ? " has-content" : ""}`}
+            onSubmit={handleCreate}
+          >
             <label
+              className="capture-label"
               htmlFor={
                 activeType === "idea"
                   ? "quick-capture"
@@ -4329,6 +4333,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   maxLength={2_048}
                 />
                 <input
+                  className="capture-extra"
                   value={newTitle}
                   onChange={(event) => setNewTitle(event.target.value)}
                   placeholder="标题（可选）"
@@ -4337,7 +4342,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               </div>
             )}
             {activeType === "resource" && webAttachment && (
-              <div className="web-attachment-card">
+              <div className="web-attachment-card capture-extra">
                 {webAttachment.favicon_url ? (
                   <img
                     src={webAttachment.favicon_url}
@@ -4354,11 +4359,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   <strong>{webAttachment.page_title}</strong>
                   <small>{sourceHost(webAttachment.page_url)} · {webAttachment.page_url}</small>
                 </span>
-                <button type="button" aria-label="移除网页附件" onClick={removeWebAttachment}>×</button>
+                <button type="button" aria-label="移除网页附件" onClick={removeWebAttachment}><Icon name="close" size={16} /></button>
               </div>
             )}
             {activeType === "resource" && webAttachmentHelp && !webAttachment && (
-              <div className="web-attachment-help">
+              <div className="web-attachment-help capture-extra">
                 <div className="web-attachment-help-copy">
                   <strong>@网页暂未读取到可收藏的网页</strong>
                   <span>这不代表扩展未安装。请先打开普通公网 HTTP(S) 网页，再输入 @ 重试；浏览器设置页、新标签页和本地页面不会出现在列表中。</span>
@@ -4410,7 +4415,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   autoCapitalize="none"
                   maxLength={200}
                 />
-                <div className="word-phonetic-play-row">
+                <div className="word-phonetic-play-row capture-extra">
                   <input
                     value={newPhonetic}
                     onChange={(event) => setNewPhonetic(event.target.value)}
@@ -4426,7 +4431,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               </div>
             )}
             {activeType === "word" && (
-              <>
+              <div className="capture-extra">
                 <div className="word-lookup-toolbar">
                   <span className="word-lookup-hint">
                     {wordLookupBusy
@@ -4467,7 +4472,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     onClose={clearWordLookup}
                   />
                 )}
-              </>
+              </div>
             )}
             <div className="capture-textarea-area">
               <textarea
@@ -4559,7 +4564,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             </div>
             {activeType === "word" && (
               <textarea
-                className="word-example"
+                className="word-example capture-extra"
                 value={newExample}
                 onChange={(event) => setNewExample(event.target.value)}
                 placeholder="例句（输入单词后自动填入，也可手改）"
@@ -4570,36 +4575,40 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             {activeType === "word" && (
               <button
                 type="button"
-                className="clipboard-fill"
+                className="clipboard-fill capture-extra"
                 onClick={() => void fillWordFromClipboard({ overwrite: true, silent: false })}
               >
                 从剪贴板填入
               </button>
             )}
             <div className="capture-footer">
-              <div className="capture-types" aria-label="内容类型">
+              <div className="capture-types" role="group" aria-label="内容类型">
                 <button
                   type="button"
                   className={activeType === "idea" ? "type-pill active" : "type-pill"}
                   onClick={() => switchType("idea")}
-                >✦ 灵感</button>
+                ><Icon name="idea" size={16} /> 灵感</button>
                 <button
                   type="button"
                   className={activeType === "word" ? "type-pill active" : "type-pill"}
                   onClick={enterWordCapture}
-                >Aa 单词</button>
+                ><Icon name="word" size={16} /> 单词</button>
                 <button
                   type="button"
                   className={activeType === "resource" ? "type-pill active" : "type-pill"}
                   onClick={() => switchType("resource")}
                 >
-                  <ResourceLinkGlyph size={13} /> 资料
+                  <Icon name="link" size={16} />
+                  资料
                 </button>
                 <button
                   type="button"
                   className="type-pill voice-pill"
                   onClick={() => setVoicePanelOpen(true)}
-                >● 语音</button>
+                >
+                  <Icon name="audio" size={16} />
+                  语音
+                </button>
               </div>
               <button
                 type="submit"
@@ -4624,16 +4633,16 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               </div>
               <span className="resource-tool-actions">
                 <button type="button" onClick={() => setHealthCenterOpen(true)}>
-                  ! 网页巡检{healthIssueCount > 0 ? ` ${healthIssueCount}` : ""}
+                  <Icon name="health" size={16} /> 网页巡检{healthIssueCount > 0 ? ` ${healthIssueCount}` : ""}
                 </button>
                 <button type="button" onClick={() => setBookmarkImportOpen(true)}>
-                  ⇧ 导入浏览器书签
+                  <Icon name="upload" size={16} /> 导入浏览器书签
                 </button>
                 <button type="button" onClick={() => setCloudAccountOpen(true)}>
-                  ☁ 云盘绑定
+                  <Icon name="cloud" size={16} /> 云盘绑定
                 </button>
                 <button type="button" onClick={() => setEbookCollectOpen(true)}>
-                  ▤ 收藏电子书
+                  <Icon name="book" size={16} /> 收藏电子书
                 </button>
                 <button
                   type="button"
@@ -4641,7 +4650,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   aria-controls="category-settings-panel"
                   onClick={() => setCategorySettingsOpen((open) => !open)}
                 >
-                  ⚙ 分类模板
+                  <Icon name="settings" size={16} /> 分类模板
                 </button>
                 <button
                   type="button"
@@ -4649,7 +4658,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   aria-controls="classification-tools"
                   onClick={() => setClassificationToolsOpen((open) => !open)}
                 >
-                  ✦ 智能分类{classificationReviewCount > 0 ? ` · 待确认 ${classificationReviewCount}` : ""}
+                  <Icon name="idea" size={16} /> 智能分类{classificationReviewCount > 0 ? ` · 待确认 ${classificationReviewCount}` : ""}
                 </button>
               </span>
             </div>
@@ -4733,10 +4742,21 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           {activeType !== "review" && (
           <section className="recent-section" aria-labelledby="recent-title">
             <div className="section-heading">
-              <h2 id="recent-title">
+              <h2
+                id="recent-title"
+                className={
+                  !viewQuery.trim() && activeType !== "resource" && activeType !== "all"
+                    ? "section-title-quiet"
+                    : undefined
+                }
+              >
                 {viewQuery.trim()
                   ? `“${viewQuery.trim()}”的搜索结果`
-                  : activeType === "resource" ? "收藏列表" : copy.title}
+                  : activeType === "resource"
+                    ? "收藏列表"
+                    : activeType === "all"
+                      ? "全部内容"
+                      : copy.title}
               </h2>
               <div className="section-actions">
                 {activeType === "image" && <select aria-label="筛选图片分类" value={imageCategoryFilter}
@@ -4770,13 +4790,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       onClick={() => setResourceViewMode("list")}
                       aria-label="列表视图"
                       title="列表视图"
-                    >☷</button>
+                    ><Icon name="list" size={16} /></button>
                     <button
                       className={resourceViewMode === "cards" ? "active" : ""}
                       onClick={() => setResourceViewMode("cards")}
                       aria-label="卡片视图"
                       title="卡片视图"
-                    >▦</button>
+                    ><Icon name="collection" size={16} /></button>
                   </span>
                 )}
                 {activeType === "resource" && (
@@ -4785,15 +4805,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     className="shortcut-help-button"
                     onClick={() => setShortcutHelpOpen(true)}
                     title="查看键盘快捷键（?）"
-                  >⌨ 快捷键</button>
+                  ><Icon name="keyboard" size={16} /> 快捷键</button>
                 )}
-                <button onClick={() => void loadCurrentMemos()}>刷新</button>
+                <button onClick={() => void loadCurrentMemos()}><Icon name="refresh" size={16} /> 刷新</button>
               </div>
             </div>
             {activeType === "resource" && (
               <div className="resource-filter-panel" aria-label="资料组合筛选">
                 <div className="resource-search">
-                  <span aria-hidden="true">⌕</span>
+                  <Icon name="search" size={18} />
                   <input
                     ref={resourceSearchRef}
                     aria-label="搜索网页收藏"
@@ -4807,7 +4827,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       type="button"
                       aria-label="清除网页收藏搜索"
                       onClick={() => setResourceQuery("")}
-                    >×</button>
+                    ><Icon name="close" size={16} /></button>
                   )}
                 </div>
                 <div className="category-filter">
@@ -4870,7 +4890,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             {loadState === "ready" && memos.length === 0 && (
               <div className="state-panel empty-state">
                 <span className={`empty-icon ${activeType}`}>
-                  {activeType === "resource" ? <ResourceLinkGlyph size={20} /> : copy.icon}
+                  <Icon name={copy.icon} size={20} />
                 </span>
                 <h3>{viewQuery.trim() ? "没有找到匹配内容" : copy.emptyTitle}</h3>
                 <p>
@@ -4885,10 +4905,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 void loadCurrentMemos(false); void refreshMemoCounts();
               }} />}
             {loadState === "ready" && memos.length > 0 && activeType === "image" && (
-              <div className="image-grid">
+              <div className={`image-grid${batchSelection.size > 0 ? " multiselect" : ""}`}>
                 {memos.map((memo) => (
                   <article
-                    className={`image-card${memo.id === selectedId ? " selected" : ""}`}
+                    className={`image-card${memo.id === selectedId ? " selected" : ""}${batchSelection.has(memo.id) ? " batch-selected" : ""}`}
                     key={memo.id}
                     tabIndex={0}
                     onClick={() => selectMemo(memo)}
@@ -4916,9 +4936,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     </div>
                     <div className="image-card-body">
                       <label className="memo-batch-check" onClick={(event) => event.stopPropagation()}>
-                        <input type="checkbox" aria-label={`选择 ${memo.title}`} disabled={batchBusy} checked={batchSelection.has(memo.id)} onChange={() => toggleBatchMemo(memo)} />选择
+                        <input type="checkbox" aria-label={`选择 ${memo.title}`} disabled={batchBusy} checked={batchSelection.has(memo.id)} onChange={() => toggleBatchMemo(memo)} />
+                        <span>选择</span>
                       </label>
-                      <strong>{memo.starred ? "★ " : ""}{memo.title}</strong>
+                      <strong>{memo.starred && <Icon name="star" size={16} className="is-filled" />}{memo.title}</strong>
                       {memo.resource_category_label && <small>分类：{memo.resource_category_label}</small>}
                       <small>
                         {timeFormatter.format(new Date(memo.created_at))} ·{" "}
@@ -4947,16 +4968,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             {loadState === "ready" && memos.length > 0 && activeType !== "image" && (
               <div
                 className={
-                  activeType === "resource" && resourceViewMode === "cards"
+                  (activeType === "resource" && resourceViewMode === "cards"
                     ? "memo-list card-view"
-                    : "memo-list"
+                    : "memo-list")
+                  + (batchSelection.size > 0 ? " multiselect" : "")
                 }
               >
                 {memos.map((memo) => (
                   <article
                     className={
                       `memo-row${memo.type === "resource" ? " resource-row" : ""}` +
-                      (memo.id === selectedId ? " selected" : "")
+                      (memo.id === selectedId ? " selected" : "") +
+                      (batchSelection.has(memo.id) ? " batch-selected" : "")
                     }
                     key={memo.id}
                     data-memo-id={memo.id}
@@ -4989,7 +5012,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       onChange={() => toggleBatchMemo(memo)} />
                     <span className={`memo-type-icon ${memo.type}`}>
                       {memo.audio_mime_type ? (
-                        "●"
+                        <Icon name="audio" size={18} />
                       ) : memo.type === "image" && memo.image_mime_type ? (
                         <MemoImageThumb
                           memoId={memo.id}
@@ -5003,7 +5026,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                           siteName={memo.resource_site_name}
                         />
                       ) : (
-                        viewCopy[memo.type].icon
+                        <Icon name={viewCopy[memo.type].icon} size={18} />
                       )}
                     </span>
                     <span className="memo-copy">
@@ -5024,7 +5047,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                           {memo.title}
                         </a>
                       ) : (
-                        <strong>{memo.starred ? "★ " : ""}{memo.title}</strong>
+                        <strong>{memo.starred && <Icon name="star" size={16} className="is-filled" />}{memo.title}</strong>
                       )}
                       <span>
                         {memo.type === "resource"
@@ -5193,16 +5216,17 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                               })
                             }
                           >
-                            {memo.starred ? "★" : "☆"}
+                            <Icon name="star" size={16} className={memo.starred ? "is-filled" : undefined} />
                           </button>
                           <button
                             type="button"
                             className="resource-trash-button"
                             aria-label={`将“${memo.title}”移入回收站`}
+                            title="移入回收站"
                             disabled={updatingResourceId === memo.id}
                             onClick={() => void handleMoveToTrash(memo)}
                           >
-                            回收站
+                            <Icon name="trash" size={16} />
                           </button>
                         </span>
                       )}
@@ -5248,14 +5272,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         <aside className="editor-panel image-detail-panel" aria-label="图片详情">
           <div className="editor-header">
             <div>
-              <span className="type-label">▧ 图片</span>
+              <span className="type-label"><Icon name="image" size={16} /> 图片</span>
               <h2>图片详情</h2>
             </div>
             <button
               className="icon-button"
               aria-label="关闭图片详情"
               onClick={() => setSelectedId(null)}
-            >×</button>
+            ><Icon name="close" size={16} /></button>
           </div>
           <div className="image-detail-preview">
             {selectedMemo.image_mime_type ? (
@@ -5467,13 +5491,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           <div className="editor-header">
             <div>
               <span className="type-label">
-                {selectedCopy.icon} {selectedCopy.itemLabel}
+                <Icon name={selectedCopy.icon} size={16} /> {selectedCopy.itemLabel}
               </span>
               <h2>
                 {selectedMemo.type === "word" ? "学习单词" : "继续整理"}
               </h2>
             </div>
-            <button className="icon-button" aria-label="关闭编辑" onClick={() => setSelectedId(null)}>×</button>
+            <button className="icon-button" aria-label="关闭编辑" onClick={() => setSelectedId(null)}><Icon name="close" size={16} /></button>
           </div>
           {selectedMemo.audio_mime_type && (
             <div className="audio-player-card">
@@ -5671,29 +5695,39 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       {shortcutHelpOpen && <ShortcutHelpDialog onClose={closeShortcutHelp} />}
 
       {conflictMemo && (
-        <div className="conflict-backdrop">
+        <div className="dialog-backdrop conflict-backdrop" role="presentation">
           <section
-            className="conflict-dialog"
+            className="conflict-dialog dialog-shell"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setConflictMemo(null);
+              }
+            }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="conflict-title"
           >
-            <div className="conflict-dialog-header">
+            <div className="dialog-header">
               <div>
-                <span className="type-label">! 编辑冲突</span>
+                <span className="type-label"><Icon name="health" size={16} /> 编辑冲突</span>
                 <h2 id="conflict-title">发现其他设备的修改</h2>
               </div>
               <button
+                autoFocus
                 className="icon-button"
                 aria-label="稍后处理编辑冲突"
                 onClick={() => setConflictMemo(null)}
-              >×</button>
+              ><Icon name="close" size={16} /></button>
             </div>
-            <p>
-              “{conflictMemo.title}”已经在其他设备更新。当前编辑框中的修改仍然保留，
-              请选择要继续使用的版本。
-            </p>
-            <div className="conflict-actions">
+            <div className="dialog-body">
+              <p>
+                “{conflictMemo.title}”已经在其他设备更新。当前编辑框中的修改仍然保留，
+                请选择要继续使用的版本。
+              </p>
+            </div>
+            <div className="dialog-actions conflict-actions">
+              <button type="button" className="conflict-later" onClick={() => setConflictMemo(null)}>稍后处理</button>
               <button type="button" onClick={useServerConflict}>
                 采用服务端版本
               </button>
@@ -5701,121 +5735,136 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 保留我的修改
               </button>
             </div>
-            <button
-              type="button"
-              className="conflict-later"
-              onClick={() => setConflictMemo(null)}
-            >
-              稍后处理
-            </button>
           </section>
         </div>
       )}
 
       {voicePanelOpen && (
-        <div className="voice-backdrop" role="presentation">
-          <section className="voice-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-title">
-            <div className="voice-dialog-header">
+        <div className="dialog-backdrop voice-backdrop" role="presentation">
+          <section
+            className="voice-dialog dialog-shell"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                requestVoiceClose();
+              }
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="voice-title"
+          >
+            <div className="dialog-header">
               <div>
-                <span className="type-label">● {meetingMode ? "会议录音" : "语音灵感"}</span>
+                <span className="type-label"><Icon name="audio" size={16} /> {meetingMode ? "会议录音" : "语音灵感"}</span>
                 <h2 id="voice-title">
                   {meetingMode ? "记录这场会议" : "记录此刻的想法"}
                 </h2>
               </div>
               <button
+                autoFocus
                 type="button"
                 className="icon-button"
                 aria-label="关闭语音记录"
+                ref={voiceCloseRef}
                 disabled={voiceState === "saving"}
                 onClick={requestVoiceClose}
-              >×</button>
+              ><Icon name="close" size={16} /></button>
             </div>
 
-            <div
-              className={`voice-orb ${
-                voiceState === "recording"
-                  ? "recording"
-                  : voiceState === "paused" ? "paused" : ""
-              }`}
-            >
-              <span>●</span>
-              <strong>{voiceSeconds} 秒</strong>
-              <small>
-                {voiceState === "recording"
-                  ? "正在录音"
-                  : voiceState === "paused"
-                    ? "已暂停"
-                  : voiceState === "ready" ? "录音已就绪" : "等待开始"}
-              </small>
-            </div>
-
-            <div className="voice-meter" aria-label={`我的麦克风音量 ${voiceVolume}%`}>
-              <span>{meetingMode ? "我的声音" : "输入音量"}</span>
-              <div className="voice-meter-track" aria-hidden="true">
-                <span style={{ width: `${voiceVolume}%` }} />
-              </div>
-              <strong>{voiceVolume}%</strong>
-            </div>
-
-            {meetingMode && (
+            <div className="dialog-body">
               <div
-                className={
-                  meetingRemoteMissing ? "voice-meter missing" : "voice-meter"
-                }
-                aria-label={`对方声音音量 ${meetingRemoteVolume}%`}
+                className={`voice-orb ${
+                  voiceState === "recording"
+                    ? "recording"
+                    : voiceState === "paused" ? "paused" : ""
+                }`}
               >
-                <span>对方声音</span>
-                <div className="voice-meter-track" aria-hidden="true">
-                  <span style={{ width: `${meetingRemoteVolume}%` }} />
-                </div>
-                <strong>{meetingRemoteMissing ? "未接入" : `${meetingRemoteVolume}%`}</strong>
+                <span><Icon name="audio" size={24} /></span>
+                <strong>{voiceSeconds} 秒</strong>
+                <small>
+                  {voiceState === "recording"
+                    ? "正在录音"
+                    : voiceState === "paused"
+                      ? "已暂停"
+                    : voiceState === "ready" ? "录音已就绪" : "等待开始"}
+                </small>
               </div>
-            )}
 
-            <label className="voice-note-label">
-              转写/配套文字（可选）
-              <textarea
-                value={voiceText}
-                onChange={(event) => setVoiceText(event.target.value)}
-                placeholder="录音时会尝试自动转写，也可以手动补充……"
-                rows={4}
-                maxLength={50_000}
-                disabled={voiceState === "saving"}
-              />
-            </label>
-            {voiceTranscriptionMessage && (
-              <p className="voice-transcription-status" aria-live="polite">
-                {voiceTranscriptionMessage}
-              </p>
-            )}
+              <div className="voice-meter" aria-label={`我的麦克风音量 ${voiceVolume}%`}>
+                <span>{meetingMode ? "我的声音" : "输入音量"}</span>
+                <div className="voice-meter-track" aria-hidden="true">
+                  <span style={{ width: `${voiceVolume}%` }} />
+                </div>
+                <strong>{voiceVolume}%</strong>
+              </div>
 
-            {(voiceState === "idle" || voiceState === "ready") && (
-              <label className="voice-meeting-toggle">
-                <input
-                  type="checkbox"
-                  checked={meetingMode}
-                  onChange={(event) => {
-                    const next = event.target.checked;
-                    setMeetingMode(next);
-                    if (next && !supportsMeetingAudio()) {
-                      setMessage(
-                        "当前浏览器不支持抓取系统音频，会议录音只能录到你的麦克风。建议改用 Chrome 或 Edge。",
-                      );
-                    }
-                  }}
+              {meetingMode && (
+                <div
+                  className={
+                    meetingRemoteMissing ? "voice-meter missing" : "voice-meter"
+                  }
+                  aria-label={`对方声音音量 ${meetingRemoteVolume}%`}
+                >
+                  <span>对方声音</span>
+                  <div className="voice-meter-track" aria-hidden="true">
+                    <span style={{ width: `${meetingRemoteVolume}%` }} />
+                  </div>
+                  <strong>{meetingRemoteMissing ? "未接入" : `${meetingRemoteVolume}%`}</strong>
+                </div>
+              )}
+
+              <label className="voice-note-label">
+                转写/配套文字（可选）
+                <textarea
+                  value={voiceText}
+                  onChange={(event) => setVoiceText(event.target.value)}
+                  placeholder="录音时会尝试自动转写，也可以手动补充……"
+                  rows={4}
+                  maxLength={50_000}
+                  disabled={voiceState === "saving"}
                 />
-                <span>
-                  <strong>会议录音（含对方声音）</strong>
-                  <small>
-                    {supportsMeetingAudio()
-                      ? "开始时会请你共享屏幕并勾选「分享系统音频」，把会议客户端的声音一起录进来。Windows 上的 Chrome / Edge 支持最好。"
-                      : "当前浏览器不支持抓取系统音频，只能录到你的麦克风。"}
-                  </small>
-                </span>
               </label>
-            )}
+              {voiceTranscriptionMessage && (
+                <p className="voice-transcription-status" aria-live="polite">
+                  {voiceTranscriptionMessage}
+                </p>
+              )}
 
-            <div className="voice-actions">
+              {(voiceState === "idle" || voiceState === "ready") && (
+                <label className="voice-meeting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={meetingMode}
+                    onChange={(event) => {
+                      const next = event.target.checked;
+                      setMeetingMode(next);
+                      if (next && !supportsMeetingAudio()) {
+                        setMessage(
+                          "当前浏览器不支持抓取系统音频，会议录音只能录到你的麦克风。建议改用 Chrome 或 Edge。",
+                        );
+                      }
+                    }}
+                  />
+                  <span>
+                    <strong>会议录音（含对方声音）</strong>
+                    <small>
+                      {supportsMeetingAudio()
+                        ? "开始时会请你共享屏幕并勾选「分享系统音频」，把会议客户端的声音一起录进来。Windows 上的 Chrome / Edge 支持最好。"
+                        : "当前浏览器不支持抓取系统音频，只能录到你的麦克风。"}
+                    </small>
+                  </span>
+                </label>
+              )}
+
+              <p className="voice-privacy">
+                Android 使用设备端 SenseVoice；Web 端使用浏览器语音识别（可能由浏览器服务处理）。
+                原始录音始终只保存到你的私人资料库。
+              </p>
+            </div>
+            <div className="dialog-actions voice-actions">
+              {voiceState !== "saving" && (
+                <button type="button" onClick={requestVoiceClose}>取消</button>
+              )}
               {voiceState === "idle" && (
                 <button className="primary" onClick={() => void startVoiceCapture()}>
                   {meetingMode ? "开始会议录音" : "开始录音"}
@@ -5830,7 +5879,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   >
                     {voiceState === "recording" ? "暂停" : "继续"}
                   </button>
-                  <button type="button" className="stop" onClick={stopVoiceCapture}>
+                  <button type="button" className="primary" onClick={stopVoiceCapture}>
                     结束录音
                   </button>
                 </>
@@ -5844,29 +5893,34 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 </>
               )}
               {voiceState === "saving" && <button disabled>正在保存录音…</button>}
-              {voiceState !== "saving" && (
-                <button type="button" onClick={requestVoiceClose}>取消</button>
-              )}
             </div>
-            <p className="voice-privacy">
-              Android 使用设备端 SenseVoice；Web 端使用浏览器语音识别（可能由浏览器服务处理）。
-              原始录音始终只保存到你的私人资料库。
-            </p>
           </section>
         </div>
       )}
 
       {voiceDiscardConfirmOpen && (
-        <div className="voice-discard-backdrop" role="presentation">
+        <div className="dialog-backdrop voice-discard-backdrop" role="presentation">
           <section
-            className="voice-discard-dialog"
+            className="voice-discard-dialog dialog-shell"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setVoiceDiscardConfirmOpen(false);
+              }
+            }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="voice-discard-title"
           >
-            <h2 id="voice-discard-title">放弃这段记录？</h2>
-            <p>录音和当前文字不会保存，确定要放弃吗？</p>
-            <div className="voice-discard-actions">
+            <div className="dialog-header">
+              <div>
+                <span className="type-label"><Icon name="health" size={16} /> 放弃记录</span>
+                <h2 id="voice-discard-title">放弃这段记录？</h2>
+              </div>
+              <button type="button" autoFocus className="icon-button" aria-label="关闭放弃记录确认" onClick={() => setVoiceDiscardConfirmOpen(false)}><Icon name="close" size={16} /></button>
+            </div>
+            <div className="dialog-body"><p>录音和当前文字不会保存，确定要放弃吗？</p></div>
+            <div className="dialog-actions voice-discard-actions">
               <button type="button" onClick={() => setVoiceDiscardConfirmOpen(false)}>
                 继续编辑
               </button>
@@ -5946,15 +6000,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       )}
 
       <nav className="mobile-navigation" aria-label="移动端主导航">
-        <button className={activeType === "all" ? "active" : ""} onClick={() => switchType("all")}>⌂<span>首页</span></button>
+        <button className={activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>首页</span></button>
         <button className={activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
-          <ResourceLinkGlyph size={17} />
+          <Icon name="link" size={20} />
           <span>资料</span>
         </button>
-        <button className={activeType === "image" ? "active" : ""} onClick={() => switchType("image")}>▧<span>图片</span></button>
-        <button className="mobile-create" onClick={focusCapture}>＋<span>新建</span></button>
-        <button className={activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}>✦<span>灵感</span></button>
-        <button className={activeType === "word" ? "active" : ""} onClick={enterWordCapture}>Aa<span>单词</span></button>
+        <button className={activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>图片</span></button>
+        <button className="mobile-create" onClick={focusCapture}><Icon name="plus" size={20} /><span>新建</span></button>
+        <button className={activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>灵感</span></button>
+        <button className={activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>单词</span></button>
       </nav>
     </div>
   );

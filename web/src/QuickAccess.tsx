@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 
+import Icon from "./Icon";
 import { resourceSummary } from "./resourceSummary";
 import type { Memo } from "./types";
 import { sourceHost } from "./webUrl";
@@ -88,7 +89,7 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
                     });
                   }
                 }}
-              >×</button>
+              ><Icon name="close" size={16} /></button>
             </li>
           );
         })}
