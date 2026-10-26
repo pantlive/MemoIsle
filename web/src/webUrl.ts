@@ -102,3 +102,10 @@ export function sourceMonogram(
   const glyph = firstGlyph(label);
   return glyph && !/[\d.:-]/.test(glyph) ? glyph.toLocaleUpperCase() : "";
 }
+
+// 由站点名算出固定色相，同一站点每次显示同一种颜色。
+export function siteHue(text: string): number {
+  let hash = 0;
+  for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) % 360;
+  return hash;
+}

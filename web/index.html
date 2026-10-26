@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f5f6f7" />
+    <meta name="theme-color" content="#f1f1ee" />
     <meta name="color-scheme" content="light dark" />
     <script>
       // 首次绘制前恢复主题，避免系统深色下先闪出深色页面。
@@ -18,7 +18,7 @@
         if (pref !== "system") document.documentElement.dataset.theme = pref;
         const dark = pref === "dark" ||
           (pref === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-        document.querySelector('meta[name="theme-color"]').content = dark ? "#15191c" : "#f5f6f7";
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#0d100f" : "#f1f1ee";
         document.querySelector('meta[name="color-scheme"]').content = dark ? "dark" : "light";
       })();
     </script>

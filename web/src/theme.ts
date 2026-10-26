@@ -41,7 +41,7 @@ export function applyTheme(pref: ThemePreference): void {
   const updateBrowserTheme = (): void => {
     const dark = pref === "dark" || (pref === "system" && systemDark.matches);
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-      ?.setAttribute("content", dark ? "#15191c" : "#f5f6f7");
+      ?.setAttribute("content", dark ? "#0d100f" : "#f1f1ee");
     document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]')
       ?.setAttribute("content", dark ? "dark" : "light");
   };

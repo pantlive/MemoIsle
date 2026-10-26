@@ -3,14 +3,7 @@ import type { CSSProperties } from "react";
 import Icon from "./Icon";
 import { resourceSummary } from "./resourceSummary";
 import type { Memo } from "./types";
-import { sourceHost } from "./webUrl";
-
-// 由站点名算出固定色相，同一站点每次显示同一种颜色。
-function avatarHue(text: string): number {
-  let hash = 0;
-  for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) % 360;
-  return hash;
-}
+import { siteHue, sourceHost } from "./webUrl";
 
 function avatarLetter(memo: Memo): string {
   const name = memo.resource_site_name || sourceHost(memo.source_url) || memo.title;
@@ -61,7 +54,7 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
                 <span
                   className="quick-access-avatar"
                   aria-hidden="true"
-                  style={{ "--avatar-hue": avatarHue(host || memo.title) } as CSSProperties}
+                  style={{ "--avatar-hue": siteHue(host || memo.title) } as CSSProperties}
                 >
                   {avatarLetter(memo)}
                 </span>

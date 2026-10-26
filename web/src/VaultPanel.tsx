@@ -590,8 +590,8 @@ export default function VaultPanel() {
     <section className="vault-panel" aria-labelledby="vault-title">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">端到端加密 · 服务器只保存密文</p>
           <h1 id="vault-title">密码库</h1>
+          <p className="page-subtitle">端到端加密 · 服务器只保存密文</p>
         </div>
         {phase === "unlocked" && (
           <span className="vault-heading-actions">

@@ -1,4 +1,6 @@
 import {
+  Fragment,
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
   useCallback,
@@ -17,7 +19,7 @@ import ResourceClassificationInsight from "./ResourceClassificationInsight";
 import DataMenu from "./DataMenu";
 import MemoBatchToolbar from "./MemoBatchToolbar";
 import ResourceMonogram, { ResourceLinkGlyph } from "./ResourceIcon";
-import { normalizeWebUrl, sourceHost } from "./webUrl";
+import { normalizeWebUrl, siteHue, sourceHost } from "./webUrl";
 import { resourceSummary } from "./resourceSummary";
 import {
   MeetingAudioUnavailableError,
@@ -179,6 +181,8 @@ interface NavigationItem {
   icon: IconName;
   view?: ActiveView;
   action?: "health" | "settings" | "vault" | "history";
+  /** 分组的第一项带上组名，侧栏在它上方显示小标题。 */
+  group?: string;
 }
 
 interface PendingResource {
@@ -200,17 +204,32 @@ interface ImageUploadTask {
 const navigation: NavigationItem[] = [
   { label: "首页", icon: "home", view: "all" },
   { label: "收件箱", icon: "inbox", view: "inbox" },
-  { label: "英语单词", icon: "word", view: "word" },
-  { label: "网页资料", icon: "link", view: "resource" },
-  { label: "图片收藏", icon: "image", view: "image" },
-  { label: "网页巡检", icon: "health", action: "health" },
-  { label: "浏览历史", icon: "history", action: "history" },
-  { label: "灵感", icon: "idea", view: "idea" },
   { label: "回顾", icon: "review", view: "review" },
-  { label: "回收站", icon: "trash", view: "trash" },
+  { label: "网页资料", icon: "link", view: "resource", group: "收藏" },
+  { label: "英语单词", icon: "word", view: "word" },
+  { label: "灵感", icon: "idea", view: "idea" },
+  { label: "图片收藏", icon: "image", view: "image" },
+  { label: "网页巡检", icon: "health", action: "health", group: "工具" },
+  { label: "浏览历史", icon: "history", action: "history" },
   { label: "密码库", icon: "vault", action: "vault" },
+  { label: "回收站", icon: "trash", view: "trash" },
   { label: "设置", icon: "settings", action: "settings" },
 ];
+
+const headingDateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "long",
+  day: "numeric",
+  weekday: "long",
+});
+
+/** 首页标题按当前时段问候。 */
+function greetingForHour(hour: number): string {
+  if (hour < 5) return "夜深了";
+  if (hour < 11) return "早上好";
+  if (hour < 13) return "中午好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+}
 
 const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
   month: "short",
@@ -3937,7 +3956,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       <aside className="side-navigation" aria-label="主导航">
         <div className="brand-block">
           <BrandLogo className="brand-mark" />
-          <div><strong>MemoIsle</strong><span>Personal sanctuary</span></div>
+          <strong>MemoIsle</strong>
         </div>
         <button className="new-button" onClick={focusCapture}>
           <Icon name="plus" size={18} /> 新建
@@ -3952,10 +3971,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 ? browserHistoryOpen
                 : !vaultOpen && item.view === activeType;
             return (
+              <Fragment key={item.label}>
+              {item.group && <span className="nav-group" aria-hidden="true">{item.group}</span>}
               <button
                 className={active ? "nav-item active" : "nav-item"}
                 disabled={!enabled}
-                key={item.label}
                 onClick={() => {
                   if (item.view === "word") {
                     enterWordCapture();
@@ -4003,6 +4023,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   </span>
                 )}
               </button>
+              </Fragment>
             );
           })}
         </nav>
@@ -4134,8 +4155,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         <main className="main-content">
           {vaultOpen ? <VaultPanel /> : <>
           <div className="page-heading">
-            <div><p className="eyebrow">{copy.eyebrow}</p><h1><Icon name={copy.icon} size={20} />{copy.title}</h1></div>
-            <span>
+            {activeType === "all" ? (
+              <div>
+                <h1>{greetingForHour(new Date().getHours())}，{authUser.display_name}</h1>
+                <p className="page-subtitle">{headingDateFormatter.format(new Date())} · {copy.eyebrow}</p>
+              </div>
+            ) : (
+              <div>
+                <h1>{copy.title}</h1>
+                <p className="page-subtitle">{copy.eyebrow}</p>
+              </div>
+            )}
+            <span className="page-count">
               {activeType === "review" && reviewQueue
                 ? `今日计划 ${reviewScheduledCount} 条 · 待处理 ${reviewDueCount} 条`
                 : activeType === "inbox"
@@ -4185,18 +4216,21 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           {activeType === "all" && !searchQuery.trim() && reviewQueue && (
             <section className="today-review-card">
               <div className="today-review-copy">
-                <p className="eyebrow">今日回顾</p>
-                <h2>今天计划 {reviewScheduledCount} 条</h2>
+                <span className="today-review-icon" aria-hidden="true"><Icon name="review" size={20} /></span>
+                <div>
+                  <p className="today-review-label">今日回顾</p>
+                  <h2>{reviewScheduledCount === 0 ? "今天的回顾都完成了" : `今天计划 ${reviewScheduledCount} 条`}</h2>
+                </div>
               </div>
               <div className="today-review-stats">
-                <span>{reviewQueue.word_count} 个单词</span>
-                <span>{reviewQueue.resource_count} 篇待读</span>
+                <span><strong>{reviewQueue.word_count}</strong>个单词</span>
+                <span><strong>{reviewQueue.resource_count}</strong>篇待读</span>
                 <button
                   type="button"
                   className="today-review-inbox-link"
                   onClick={() => switchType("inbox")}
                 >
-                  {reviewQueue.idea_count} 条待整理
+                  <strong>{reviewQueue.idea_count}</strong>条待整理
                 </button>
               </div>
               <button
@@ -4653,11 +4687,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           )}
 
           {activeType === "resource" && (
-            <div className="resource-library-tools">
-              <div>
-                <strong>整理工具</strong>
-                <span>导入书签、巡检失效链接、管理分类</span>
-              </div>
+            <div className="resource-library-tools" role="toolbar" aria-label="整理工具">
               <span className="resource-tool-actions">
                 <button type="button" onClick={() => setHealthCenterOpen(true)}>
                   <Icon name="health" size={16} /> 网页巡检{healthIssueCount > 0 ? ` ${healthIssueCount}` : ""}
@@ -5037,7 +5067,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     <input className="memo-batch-check" type="checkbox" aria-label={`选择 ${memo.title}`}
                       disabled={batchBusy} checked={batchSelection.has(memo.id)} onClick={(event) => event.stopPropagation()}
                       onChange={() => toggleBatchMemo(memo)} />
-                    <span className={`memo-type-icon ${memo.type}`}>
+                    <span
+                      className={`memo-type-icon ${memo.type}`}
+                      style={memo.type === "resource"
+                        ? { "--avatar-hue": siteHue(sourceHost(memo.source_url) || memo.title) } as CSSProperties
+                        : undefined}
+                    >
                       {memo.audio_mime_type ? (
                         <Icon name="audio" size={18} />
                       ) : memo.type === "image" && memo.image_mime_type ? (
@@ -5085,13 +5120,6 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                               ? memo.body || "图片收藏"
                               : memo.body}
                       </span>
-                      {memo.type === "resource" && memo.tags.length > 0 && (
-                        <div className="resource-user-tags" aria-label="我的标签">
-                          {memo.tags.map((tag) => (
-                            <span key={tag} className="resource-user-tag">#{tag}</span>
-                          ))}
-                        </div>
-                      )}
                       {memo.type === "resource" && <ResourceClassificationInsight memo={memo} compact />}
                       <small className="memo-meta-line">
                         {memo.type === "resource"
@@ -5103,6 +5131,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                               )}
                               {memo.resource_open_count > 0 && (
                                 <span className="memo-open-count">打开 {memo.resource_open_count} 次</span>
+                              )}
+                              {memo.tags.length > 0 && (
+                                <span className="memo-tags" aria-label="我的标签">
+                                  {memo.tags.map((tag) => (
+                                    <span key={tag} className="memo-tag">#{tag}</span>
+                                  ))}
+                                </span>
                               )}
                               {memo.ebook_path && (
                                 <span
