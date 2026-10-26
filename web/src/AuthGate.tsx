@@ -8,6 +8,7 @@ import {
 
 import App from "./App";
 import BrandLogo from "./BrandLogo";
+import Icon from "./Icon";
 import {
   ApiError,
   androidDownloadUrl,
@@ -398,13 +399,13 @@ export default function AuthGate(): ReactNode {
         </div>
         {error && (
           <p className="auth-feedback auth-feedback-error" role="alert">
-            <span aria-hidden="true">!</span>
+            <Icon name="health" size={16} />
             {error}
           </p>
         )}
         {notice && (
           <p className="auth-feedback auth-feedback-notice" role="status">
-            <span aria-hidden="true">✓</span>
+            <Icon name="check" size={16} />
             {notice}
           </p>
         )}
@@ -708,10 +709,10 @@ export default function AuthGate(): ReactNode {
           className="auth-android-download"
           href={androidDownloadUrl()}
           download="MemoIsle-android.apk"
-        >↓ 下载安卓端（APK）</a>
+        ><Icon name="download" size={16} /> 下载安卓端（APK）</a>
         {isEmailMode && (
           <div className="auth-trust-note">
-            <span className="auth-trust-icon" aria-hidden="true">↔</span>
+            <span className="auth-trust-icon" aria-hidden="true"><Icon name="swap" size={14} /></span>
             <span>你的资料只属于你 · Web 与 Android 自动同步</span>
           </div>
         )}

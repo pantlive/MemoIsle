@@ -3,16 +3,25 @@ interface BrandLogoProps {
 }
 
 export default function BrandLogo({ className }: BrandLogoProps) {
-  // 页面与浏览器标签共用 Stitch 矢量稿，避免独立字形或配色发生偏差。
+  // 沿用 favicon 的图形，通过主题变量适配页面配色。
   return (
-    <img
+    <svg
       className={className}
-      src={`${import.meta.env.BASE_URL}favicon.svg`}
       width={64}
       height={64}
-      alt=""
+      viewBox="0 0 64 64"
+      fill="none"
       aria-hidden="true"
-      draggable={false}
-    />
+      focusable="false"
+    >
+      <rect width="64" height="64" rx="16" fill="var(--primary-soft)" />
+      <path
+        d="M15 47V21L28 35.5C30.2 37.9 33.8 37.9 36 35.5L49 21V47"
+        stroke="var(--primary)"
+        strokeWidth="7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

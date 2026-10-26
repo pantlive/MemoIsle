@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { synthesizeSpeech } from "./api";
+import Icon from "./Icon";
 import { speakText } from "./wordSpeech";
 
 interface SpeechPronunciationProps {
@@ -91,7 +92,7 @@ export default function SpeechPronunciation({
   return (
     <div className="word-pronunciation speech-pronunciation" aria-label={label}>
       <button type="button" onClick={() => void play()} disabled={!text.trim() || playing}>
-        {playing ? "播放中…" : `▶ ${label}`}
+        {playing ? "播放中…" : <><Icon name="play" size={14} /> {label}</>}
       </button>
     </div>
   );

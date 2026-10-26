@@ -8,6 +8,7 @@ import {
   updateResourceCategory,
   updateResourceCategoryRule,
 } from "./api";
+import Icon from "./Icon";
 import {
   buildCategoryTree,
   categoryDepth,
@@ -530,7 +531,7 @@ export default function CategoryTemplatePanel({
                     aria-expanded={open}
                     onClick={() => toggle(node.code)}
                   >
-                    <span className="template-node-arrow" aria-hidden="true">{open ? "▾" : "▸"}</span>
+                    <span className="template-node-arrow" aria-hidden="true"><Icon name={open ? "chevronDown" : "chevronRight"} size={14} /></span>
                     <span className="template-node-text">{copy}</span>
                   </button>
                 ) : (

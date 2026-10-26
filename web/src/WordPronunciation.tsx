@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { synthesizeSpeech } from "./api";
+import Icon from "./Icon";
 import {
   speakLemma,
   speechLocaleAvailable,
@@ -175,7 +176,7 @@ export default function WordPronunciation({
         onClick={() => void speak("en-US", usAvailable, resolvedUsAudio)}
         title="美式读音"
       >
-        {playing === "en-US" && !phonetic?.trim() ? "播放中…" : "▶美"}
+        {playing === "en-US" && !phonetic?.trim() ? "播放中…" : <><Icon name="play" size={14} />美</>}
       </button>
       <button
         type="button"
@@ -183,7 +184,7 @@ export default function WordPronunciation({
         onClick={() => void speak("en-GB", ukAvailable, resolvedUkAudio)}
         title="英式读音"
       >
-        {playing === "en-GB" ? "播放中…" : "▶英"}
+        {playing === "en-GB" ? "播放中…" : <><Icon name="play" size={14} />英</>}
       </button>
     </div>
   );

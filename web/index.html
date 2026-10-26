@@ -3,9 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f5f6f7" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#15191c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f6f7" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      // 首次绘制前恢复主题，避免系统深色下先闪出深色页面。
+      (() => {
+        let pref = "system";
+        try {
+          const stored = localStorage.getItem("memoisle_theme");
+          if (stored === "light" || stored === "dark") pref = stored;
+        } catch {
+          // 存储不可用时保持跟随系统。
+        }
+        if (pref !== "system") document.documentElement.dataset.theme = pref;
+        const dark = pref === "dark" ||
+          (pref === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#15191c" : "#f5f6f7";
+        document.querySelector('meta[name="color-scheme"]').content = dark ? "dark" : "light";
+      })();
+    </script>
     <link rel="icon" href="%BASE_URL%favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" sizes="any" />
     <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" sizes="180x180" />

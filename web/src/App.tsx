@@ -31,6 +31,13 @@ import { categoryDepth } from "./categoryTree";
 import ImageOrganizationPanel from "./ImageOrganizationPanel";
 import CloudAccountDialog from "./CloudAccountDialog";
 import ModelSettingsDialog from "./ModelSettingsDialog";
+import {
+  applyTheme,
+  readThemePreference,
+  saveThemePreference,
+  themeOptions,
+  type ThemePreference,
+} from "./theme";
 import EbookCollectDialog from "./EbookCollectDialog";
 import { parseClipboardWord } from "./clipboardWord";
 import LinkHealthDialog from "./LinkHealthDialog";
@@ -553,6 +560,19 @@ function resourceRowElements(): HTMLElement[] {
 }
 
 export default function App({ authUser, onLogout, onPasswordChanged }: AppProps) {
+  // 两个主题入口共用一份状态，存储失败时同步回退为跟随系统。
+  const [themePreference, setThemePreference] = useState(readThemePreference);
+  const currentThemeIndex = themeOptions.findIndex((option) => option.value === themePreference);
+  const currentTheme = themeOptions[currentThemeIndex];
+  const nextTheme = themeOptions[(currentThemeIndex + 1) % themeOptions.length];
+  const themeButtonLabel = `主题：${currentTheme.label}，点击切换为${nextTheme.label}`;
+
+  function handleThemeChange(pref: ThemePreference): void {
+    const saved = saveThemePreference(pref);
+    applyTheme(saved);
+    setThemePreference(saved);
+  }
+
   const [activeType, setActiveType] = useState<ActiveView>("all");
   const [memos, setMemos] = useState<Memo[]>([]);
   const [currentResultCount, setCurrentResultCount] = useState(0);
@@ -4026,6 +4046,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           <span className="sync-status"><span className="sync-dot" /> 已同步</span>
           <button
             type="button"
+            className="top-bar-button theme-toggle"
+            onClick={() => handleThemeChange(nextTheme.value)}
+            aria-label={themeButtonLabel}
+            title={themeButtonLabel}
+          ><Icon name={currentTheme.icon} size={18} /></button>
+          <button
+            type="button"
             className="model-settings-open"
             onClick={() => setModelSettingsOpen(true)}
             aria-label="打开设置"
@@ -5979,6 +6006,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
       {modelSettingsOpen && (
         <ModelSettingsDialog
+          themePreference={themePreference}
+          onThemeChange={handleThemeChange}
           onClose={() => setModelSettingsOpen(false)}
           accountEmail={authUser.email}
           onPasswordChanged={() => {

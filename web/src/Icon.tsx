@@ -28,6 +28,10 @@ const paths = {
   close: <path d="m6 6 12 12M6 18 18 6" />,
   sync: <><path d="M7 3v18m-4-4 4 4 4-4M17 21V3m-4 4 4-4 4 4" /></>,
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronRight: <path d="m9 6 6 6-6 6" />,
+  play: <path d="M8 5v14l11-7Z" />,
+  check: <path d="m5 12 5 5L20 7" />,
+  swap: <><path d="M3 8h18m-4-4 4 4-4 4M21 16H3m4-4-4 4 4 4" /></>,
   upload: <><path d="M12 21V9m-5 5 5-5 5 5M3 8V3h18v5" /></>,
   cloud: <path d="M7 19a5 5 0 0 1-.9-9.9 6 6 0 0 1 11.6 1.4A4 4 0 0 1 17 19Z" />,
   audio: <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></>,
@@ -37,6 +41,9 @@ const paths = {
   arrowLeft: <path d="M20 12H4m6-6-6 6 6 6" />,
   bookmark: <path d="M7 4h10a1 1 0 0 1 1 1v16l-6-3.5L6 21V5a1 1 0 0 1 1-1Z" />,
   folder: <path d="M3 6h6l2 2h10v11H3Z" />,
+  monitor: <><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M12 17v4m-4 0h8" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>,
+  moon: <path d="M21 12.8A9 9 0 0 1 11.2 3 9 9 0 1 0 21 12.8Z" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof paths;

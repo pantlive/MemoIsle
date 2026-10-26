@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "./Icon";
+import { themeOptions, type ThemePreference } from "./theme";
 
 import {
   androidDownloadUrl,
@@ -14,6 +15,8 @@ import {
 import type { ModelProvider, ModelSetting } from "./types";
 
 interface ModelSettingsDialogProps {
+  themePreference: ThemePreference;
+  onThemeChange: (pref: ThemePreference) => void;
   onClose: () => void;
   accountEmail: string | null;
   onPasswordChanged: () => void;
@@ -60,6 +63,8 @@ function createForm(saved: ModelSetting): ModelSettingForm {
 }
 
 export default function ModelSettingsDialog({
+  themePreference,
+  onThemeChange,
   onClose,
   accountEmail,
   onPasswordChanged,
@@ -243,6 +248,25 @@ export default function ModelSettingsDialog({
           ><Icon name="close" size={16} /></button>
         </div>
         <div className="dialog-body">
+          <section className="settings-section" aria-labelledby="settings-appearance-title">
+            <div className="settings-section-heading">
+              <div>
+                <h3 id="settings-appearance-title">外观</h3>
+                <p>选择页面主题，偏好会保存在当前浏览器。</p>
+              </div>
+            </div>
+            <div className="view-switch theme-options" role="group" aria-label="主题偏好">
+              {themeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={themePreference === option.value ? "active" : ""}
+                  aria-pressed={themePreference === option.value}
+                  onClick={() => onThemeChange(option.value)}
+                >{option.label}</button>
+              ))}
+            </div>
+          </section>
           <section className="settings-section" aria-labelledby="settings-password-title">
             <div className="settings-section-heading">
               <div>
