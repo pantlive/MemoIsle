@@ -786,6 +786,35 @@ fun imageFileExtensionForMimeType(mimeType: String?): String? = when (normalizeI
     else -> null
 }
 
+private val audioFileExtensions = mapOf(
+    "audio/mp4" to "m4a",
+    "audio/x-m4a" to "m4a",
+    "audio/m4a" to "m4a",
+    "audio/mpeg" to "mp3",
+    "audio/ogg" to "ogg",
+    "audio/webm" to "webm",
+    "audio/wav" to "wav",
+    "audio/x-wav" to "wav",
+)
+
+fun audioFileExtensionForMimeType(mimeType: String?): String? {
+    val normalized = mimeType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT) ?: return null
+    return audioFileExtensions[normalized]
+}
+
+/** 保存录音时使用可读标题和真实容器扩展名，会议录音与普通语音灵感共用。 */
+fun audioDownloadFileName(memo: Memo): String {
+    val extension = audioFileExtensionForMimeType(memo.audioMimeType) ?: "audio"
+    val fallback = if ("会议" in memo.tags) "会议录音" else "语音灵感"
+    val title = memo.title.trim()
+        .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        .trim()
+        .take(80)
+        .ifBlank { fallback }
+    val date = memo.createdAt.substringBefore('T').takeIf { it.length == 10 } ?: "record"
+    return "$title-$date.$extension"
+}
+
 fun imageMemoTitleFromFileName(displayName: String?): String {
     val fileName = displayName
         ?.substringAfterLast('/')

@@ -158,6 +158,7 @@ import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
 import com.memoisle.app.data.assignedCategoryCodes
+import com.memoisle.app.data.audioDownloadFileName
 import com.memoisle.app.data.formatFileSize
 import com.memoisle.app.data.hasUploadedImage
 import com.memoisle.app.data.imageDimensionsLabel
@@ -217,6 +218,16 @@ fun MemoHomeScreen(
     }
     var draft by rememberSaveable { mutableStateOf("") }
     var selectedMemo by remember { mutableStateOf<Memo?>(null) }
+    var pendingAudioDownload by remember { mutableStateOf<Memo?>(null) }
+    val audioDownloadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/*"),
+    ) { uri ->
+        val memo = pendingAudioDownload
+        pendingAudioDownload = null
+        if (uri != null && memo != null) {
+            viewModel.downloadAudio(memo, uri, context.contentResolver)
+        }
+    }
     var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var sharedResourcePending by rememberSaveable { mutableStateOf(false) }
     var activeType by rememberSaveable { mutableStateOf(TYPE_IDEA) }
@@ -1168,6 +1179,7 @@ fun MemoHomeScreen(
             EditMemoDialog(
                 memo = memo,
                 isSaving = uiState.isSaving,
+                isDownloadingAudio = uiState.isDownloadingAudio,
                 onDismiss = { selectedMemo = null },
                 onMoveToTrash = { pendingMoveToTrash = memo },
                 onSave = { title, body, phonetic, meaning, example ->
@@ -1195,6 +1207,10 @@ fun MemoHomeScreen(
                 },
                 onPlayAudio = {
                     viewModel.playAudio(memo)
+                },
+                onDownloadAudio = {
+                    pendingAudioDownload = memo
+                    audioDownloadLauncher.launch(audioDownloadFileName(memo))
                 },
                 resetToServerMemo = resetEditorToServerMemo,
             )
@@ -3448,11 +3464,13 @@ private fun ImageOcrSection(memo: Memo) {
 private fun EditMemoDialog(
     memo: Memo,
     isSaving: Boolean,
+    isDownloadingAudio: Boolean,
     onDismiss: () -> Unit,
     onMoveToTrash: () -> Unit,
     onSave: (String, String, String?, String?, String?) -> Unit,
     onReview: (String) -> Unit,
     onPlayAudio: () -> Unit,
+    onDownloadAudio: () -> Unit,
     resetToServerMemo: Memo? = null,
 ) {
     var title by rememberSaveable(memo.clientId) { mutableStateOf(memo.title) }
@@ -3541,18 +3559,43 @@ private fun EditMemoDialog(
     ) {
         if (memo.audioMimeType != null) {
             val seconds = (memo.audioDurationMs ?: 0) / 1_000
-            OutlinedButton(
-                onClick = onPlayAudio,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                enabled = memo.id != null,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = IdeaAccent),
+            val hasAudio = memo.id != null || memo.localAudioPath != null
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (seconds > 0) "播放原始录音 · ${seconds} 秒" else "播放原始录音")
+                OutlinedButton(
+                    onClick = onPlayAudio,
+                    modifier = Modifier
+                        .weight(1.15f)
+                        .height(48.dp),
+                    enabled = hasAudio,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = IdeaAccent),
+                ) {
+                    Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (seconds > 0) "播放 · ${seconds} 秒" else "播放录音",
+                        maxLines = 1,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onDownloadAudio,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    enabled = hasAudio && !isDownloadingAudio,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = IdeaAccent),
+                ) {
+                    Icon(Icons.Outlined.FileDownload, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (isDownloadingAudio) "保存中…" else "下载录音",
+                        maxLines = 1,
+                    )
+                }
             }
         }
         if (!memo.transcript.isNullOrBlank()) {

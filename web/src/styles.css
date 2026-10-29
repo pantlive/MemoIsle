@@ -2540,11 +2540,50 @@ button.resource-user-tag:hover {
   padding: 14px;
 }
 
-.audio-player-card > div {
+.audio-player-heading {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 10px;
   color: var(--primary-hover);
   font-size: 13px;
+}
+
+.audio-player-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.audio-player-heading strong {
+  white-space: nowrap;
+}
+
+.audio-download-button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 0 10px;
+  color: var(--primary-hover);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.audio-download-button:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--surface-subtle);
+}
+
+.audio-download-button:disabled {
+  color: var(--muted);
+  cursor: default;
 }
 
 .audio-player-card audio {

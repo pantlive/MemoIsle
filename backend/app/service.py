@@ -118,6 +118,14 @@ ALLOWED_AUDIO_TYPES = {
     "audio/webm",
     "audio/x-m4a",
 }
+# 下载文件名跟着实际容器走，避免浏览器只能存成无法直接播放的 .audio。
+AUDIO_FILE_EXTENSIONS = {
+    "audio/mp4": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/ogg": "ogg",
+    "audio/webm": "webm",
+    "audio/x-m4a": "m4a",
+}
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 12_000
@@ -1548,6 +1556,13 @@ def get_audio_path(
     if not audio_path.is_file():
         raise MemoNotFoundError
     return memo, audio_path
+
+
+def audio_download_filename(memo: Memo) -> str:
+    """生成带真实容器扩展名的下载文件名，不暴露用户原始文件名。"""
+
+    extension = AUDIO_FILE_EXTENSIONS.get(memo.audio_mime_type or "", "audio")
+    return f"memoisle-{memo.id}.{extension}"
 
 
 def _decode_image(content: bytes, declared_mime_type: str) -> Image.Image:

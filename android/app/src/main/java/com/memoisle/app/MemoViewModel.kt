@@ -24,6 +24,7 @@ import com.memoisle.app.network.DuplicateResourceException
 import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.network.ReviewSettings
 import com.memoisle.app.network.WordLookupResponse
+import java.nio.file.Files
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,6 +42,7 @@ data class MemoUiState(
     val isLookingUpWord: Boolean = false,
     val wordLookup: WordLookupResponse? = null,
     val isUploadingImage: Boolean = false,
+    val isDownloadingAudio: Boolean = false,
     val reviewSettings: ReviewSettings = ReviewSettings(
         dailyLimit = 10,
         intervalsDays = listOf(1, 3, 7, 14, 30, 60),
@@ -151,6 +153,37 @@ class MemoViewModel(
                 uiState = uiState.copy(
                     isExporting = false,
                     message = "数据导出失败：${error.readableMessage()}",
+                )
+            }
+        }
+    }
+
+    /**
+     * 下载当前条目的原始录音到用户通过系统文件选择器指定的位置。
+     * 已在本机的录音直接复制，未同步的离线录音也无需先上传。
+     */
+    fun downloadAudio(memo: Memo, uri: Uri, contentResolver: ContentResolver): Unit {
+        if (uiState.isDownloadingAudio) {
+            return
+        }
+        viewModelScope.launch {
+            uiState = uiState.copy(isDownloadingAudio = true, message = null)
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val audioFile = repository.audioFile(memo)
+                    val output = contentResolver.openOutputStream(uri)
+                        ?: error("无法打开保存文件")
+                    output.use { Files.copy(audioFile, it) }
+                }
+            }.onSuccess {
+                uiState = uiState.copy(
+                    isDownloadingAudio = false,
+                    message = "录音已保存到你选择的位置",
+                )
+            }.onFailure { error ->
+                uiState = uiState.copy(
+                    isDownloadingAudio = false,
+                    message = "录音下载失败：${error.readableMessage()}",
                 )
             }
         }
