@@ -284,6 +284,7 @@ from app.service import (
     WordDuplicateError,
     attach_audio,
     attach_image,
+    audio_download_filename,
     count_memos,
     count_memos_by_type,
     create_memo,
@@ -2869,8 +2870,9 @@ def download_memo_audio_route(
     session: SessionDependency,
     user_id: UserDependency,
     settings: SettingsDependency,
+    inline: Annotated[bool, Query()] = False,
 ) -> FileResponse:
-    """下载或播放当前用户的一条录音。"""
+    """下载当前用户的一条录音；显式要求在线播放时返回 inline。"""
 
     try:
         memo, audio_path = get_audio_path(
@@ -2884,8 +2886,9 @@ def download_memo_audio_route(
     return FileResponse(
         path=audio_path,
         media_type=memo.audio_mime_type or "application/octet-stream",
-        filename=f"memoisle-{memo.id}.audio",
-        content_disposition_type="inline",
+        # 默认按附件下载；客户端需要在线播放时可传 inline=true。
+        filename=audio_download_filename(memo),
+        content_disposition_type="inline" if inline else "attachment",
     )
 
 

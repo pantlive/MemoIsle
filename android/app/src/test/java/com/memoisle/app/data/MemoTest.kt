@@ -259,6 +259,29 @@ class MemoTest {
     }
 
     @Test
+    fun audioFileExtensionFollowsContainer() {
+        assertEquals("m4a", audioFileExtensionForMimeType("audio/mp4"))
+        assertEquals("m4a", audioFileExtensionForMimeType("audio/x-m4a"))
+        assertEquals("webm", audioFileExtensionForMimeType("audio/webm;codecs=opus"))
+        assertEquals("mp3", audioFileExtensionForMimeType("audio/mpeg"))
+        assertEquals(null, audioFileExtensionForMimeType("audio/aac"))
+        assertEquals(null, audioFileExtensionForMimeType(null))
+    }
+
+    @Test
+    fun audioDownloadFileNameUsesTitleContainerAndMeetingFallback() {
+        val meeting = newLocalVoiceIdea("产品周会", "/tmp/voice.m4a", 2_500)
+            .copy(tags = listOf("语音", "会议"), createdAt = "2026-10-20T10:00:00Z")
+        assertEquals("产品周会-2026-10-20.m4a", audioDownloadFileName(meeting))
+
+        val untitledMeeting = meeting.copy(title = "")
+        assertEquals("会议录音-2026-10-20.m4a", audioDownloadFileName(untitledMeeting))
+
+        val unsafeTitle = meeting.copy(title = "周会/录音:第一段?")
+        assertEquals("周会_录音_第一段_-2026-10-20.m4a", audioDownloadFileName(unsafeTitle))
+    }
+
+    @Test
     fun imageMetadataLabelsAreHumanReadable() {
         assertEquals("320 × 180 像素", imageDimensionsLabel(320, 180))
         assertEquals(null, imageDimensionsLabel(null, 180))

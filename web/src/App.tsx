@@ -519,6 +519,51 @@ function imageFileExtension(mimeType: string | null): string {
   }
 }
 
+function audioFileExtension(mimeType: string | null): string {
+  switch ((mimeType ?? "").split(";")[0].trim().toLowerCase()) {
+    case "audio/mp4":
+    case "audio/x-m4a":
+    case "audio/m4a":
+      return "m4a";
+    case "audio/mpeg":
+      return "mp3";
+    case "audio/ogg":
+      return "ogg";
+    case "audio/webm":
+      return "webm";
+    case "audio/wav":
+    case "audio/x-wav":
+      return "wav";
+    default:
+      return "audio";
+  }
+}
+
+function isMeetingRecording(memo: Memo): boolean {
+  // 会议模式创建时固定带上「会议」标签；普通语音也可能有转写文本，不能据 transcript 判断。
+  return memo.tags.includes("会议");
+}
+
+function audioDownloadFileName(memo: Memo): string {
+  const fallback = isMeetingRecording(memo) ? "会议录音" : "语音灵感";
+  const title = (memo.title || fallback)
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+    .trim()
+    .slice(0, 80);
+  const date = memo.created_at.slice(0, 10);
+  return `${title || fallback}-${date}.${audioFileExtension(memo.audio_mime_type)}`;
+}
+
+function triggerBlobDownload(url: string, filename: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith("image/") || imageMimeFromFile(file) !== "";
 }
@@ -713,6 +758,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const [meetingRemoteVolume, setMeetingRemoteVolume] = useState(0);
   const [meetingRemoteMissing, setMeetingRemoteMissing] = useState(false);
   const [audioUrl, setAudioUrl] = useState("");
+  // 对象 URL 对应的条目；切换详情时避免把上一条录音误当成当前条目下载。
+  const [audioUrlMemoId, setAudioUrlMemoId] = useState("");
+  const [audioDownloadBusy, setAudioDownloadBusy] = useState(false);
   const [imageUploadTasks, setImageUploadTasks] = useState<ImageUploadTask[]>([]);
   const [imageDragActive, setImageDragActive] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
@@ -1011,6 +1059,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   useEffect(() => {
     let active = true;
     let objectUrl: string | null = null;
+    setAudioUrlMemoId("");
     if (!selectedMemo?.audio_mime_type) {
       setAudioUrl("");
       return;
@@ -1025,10 +1074,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         }
         objectUrl = url;
         setAudioUrl(url);
+        setAudioUrlMemoId(selectedMemo.id);
       })
       .catch(() => {
         if (active) {
           setAudioUrl("");
+          setAudioUrlMemoId("");
         }
       });
     return () => {
@@ -3689,12 +3740,56 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       resetVoiceCapture();
       setMessage(
         meetingMode
-          ? "会议录音已保存，可在详情中播放并查看转写。"
-          : "语音灵感已保存，并可在详情中播放。",
+          ? "会议录音已保存，可在详情中播放、下载并查看转写。"
+          : "语音灵感已保存，可在详情中播放并下载。",
       );
     } catch (error) {
       setVoiceState("ready");
       setMessage(describeError(error));
+    }
+  };
+
+  // 保存前也允许先下载；会议录音与普通语音灵感走同一套 Blob 保存逻辑。
+  const downloadVoiceCapture = () => {
+    if (!voiceBlob) {
+      return;
+    }
+    const objectUrl = URL.createObjectURL(voiceBlob);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    triggerBlobDownload(
+      objectUrl,
+      `${meetingMode ? "会议录音" : "语音灵感"}-${stamp}.${audioFileExtension(voiceBlob.type)}`,
+    );
+    // 下载动作是同步触发的，延迟释放避免浏览器还没读取完 Blob。
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    setMessage("录音已开始下载。");
+  };
+
+  // 已保存的录音先读取带 Bearer 头的 Blob，再按标题和真实容器生成文件名。
+  const handleDownloadAudio = async (memo: Memo) => {
+    if (!memo.audio_mime_type || audioDownloadBusy) {
+      return;
+    }
+    setAudioDownloadBusy(true);
+    let objectUrl: string | null = null;
+    try {
+      let url = audioUrlMemoId === memo.id ? audioUrl : "";
+      if (!url) {
+        objectUrl = await loadMemoAudioUrl(memo.id);
+        url = objectUrl;
+      }
+      triggerBlobDownload(url, audioDownloadFileName(memo));
+      setMessage(
+        isMeetingRecording(memo) ? "会议录音已开始下载。" : "录音已开始下载。",
+      );
+    } catch (error) {
+      setMessage(describeError(error));
+    } finally {
+      setAudioDownloadBusy(false);
+      const revokeUrl = objectUrl;
+      if (revokeUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(revokeUrl), 60_000);
+      }
     }
   };
 
@@ -5563,13 +5658,26 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           </div>
           {selectedMemo.audio_mime_type && (
             <div className="audio-player-card">
-              <div>
-                <strong>原始录音</strong>
-                <span>
-                  {selectedMemo.audio_duration_ms
-                    ? `${Math.round(selectedMemo.audio_duration_ms / 1_000)} 秒`
-                    : "语音记录"}
-                </span>
+              <div className="audio-player-heading">
+                <div>
+                  <strong>
+                    {isMeetingRecording(selectedMemo) ? "会议录音" : "原始录音"}
+                  </strong>
+                  <span>
+                    {selectedMemo.audio_duration_ms
+                      ? `${Math.round(selectedMemo.audio_duration_ms / 1_000)} 秒`
+                      : "语音记录"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="audio-download-button"
+                  onClick={() => void handleDownloadAudio(selectedMemo)}
+                  disabled={audioDownloadBusy}
+                >
+                  <Icon name="download" size={14} />
+                  {audioDownloadBusy ? "下载中…" : "下载录音"}
+                </button>
               </div>
               <audio controls preload="metadata" src={audioUrl || undefined} />
             </div>
@@ -5949,6 +6057,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               {voiceState === "ready" && (
                 <>
                   <button type="button" onClick={resetVoiceCapture}>重新录制</button>
+                  <button type="button" onClick={downloadVoiceCapture}>下载录音</button>
                   <button type="button" className="primary" onClick={() => void saveVoiceCapture()}>
                     {meetingMode ? "保存会议记录" : "保存语音灵感"}
                   </button>

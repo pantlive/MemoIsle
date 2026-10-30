@@ -1021,7 +1021,7 @@ def test_word_requires_lemma_and_non_word_cannot_be_reviewed(
 
 
 def test_upload_and_download_idea_audio(client: TestClient) -> None:
-    """语音灵感可上传原始音频并再次读取。"""
+    """语音灵感可上传原始音频，并按真实容器名下载或在线读取。"""
 
     idea = create_idea(client)
     audio_content = b"webm-test-audio"
@@ -1044,11 +1044,22 @@ def test_upload_and_download_idea_audio(client: TestClient) -> None:
     download_response = client.get(f"/api/v1/memos/{idea['id']}/audio")
     assert download_response.status_code == 200
     assert download_response.headers["content-type"] == "audio/webm"
+    disposition = download_response.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert f'filename="memoisle-{idea["id"]}.webm"' in disposition
     assert download_response.content == audio_content
+
+    inline_response = client.get(
+        f"/api/v1/memos/{idea['id']}/audio",
+        params={"inline": "true"},
+    )
+    assert inline_response.status_code == 200
+    assert inline_response.headers["content-disposition"].startswith("inline;")
+    assert inline_response.content == audio_content
 
 
 def test_upload_meeting_audio_preserves_transcript(client: TestClient) -> None:
-    """会议纪要正文与转写字段可以分别保存，上传音频不会覆盖转写。"""
+    """会议纪要正文与转写字段可以分别保存，会议录音同样可下载。"""
 
     created_response = client.post(
         "/api/v1/memos",
@@ -1079,6 +1090,14 @@ def test_upload_meeting_audio_preserves_transcript(client: TestClient) -> None:
     assert uploaded["body"] == "会议概要：确认上线时间。"
     assert uploaded["transcript"] == "主持人：我们先确认上线时间。"
     assert uploaded["transcript_status"] == "manual"
+
+    download_response = client.get(f"/api/v1/memos/{meeting['id']}/audio")
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"] == "audio/mp4"
+    disposition = download_response.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert f'filename="memoisle-{meeting["id"]}.m4a"' in disposition
+    assert download_response.content == b"meeting-audio"
 
 
 def test_audio_rejects_wrong_memo_type_and_format(client: TestClient) -> None:
