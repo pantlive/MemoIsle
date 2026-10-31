@@ -51,7 +51,7 @@ export function daysUntilDate(isoDate: string, now = new Date()): number {
 
 export function lastChangedAt(entry: Pick<VaultEntry, "createdAt" | "data">): string {
   const { data } = entry;
-  return (data.kind === "login" || data.kind === "secret" || data.kind === "server" || data.kind === "subscription")
+  return (data.kind === "login" || data.kind === "secret" || data.kind === "server")
     && data.changedAt
     ? data.changedAt
     : entry.createdAt;
@@ -77,7 +77,7 @@ export function isWeakPassword(password: string): boolean {
 }
 
 function hasSecretValue(data: VaultItemData): boolean {
-  if (data.kind === "login" || data.kind === "subscription") return Boolean(data.password);
+  if (data.kind === "login") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
   if (data.kind === "server") {
     // 私钥和密码任一存在就算有凭据，用于到期与定期更换提醒。
@@ -100,7 +100,7 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
   const byPassword = new Map<string, VaultEntry[]>();
   for (const entry of entries) {
     const { data } = entry;
-    if ((data.kind === "subscription" || (data.kind === "login" && !data.skipChecks)) && data.password) {
+    if (data.kind === "login" && !data.skipChecks && data.password) {
       byPassword.set(data.password, [...(byPassword.get(data.password) ?? []), entry]);
     }
   }
@@ -120,7 +120,7 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
     }
 
     const hasSecret = hasSecretValue(data);
-    // 订阅即使没有保存密码，也需要按到期日提醒续费。
+    // 订阅按到期日提醒续费。
     if (data.expiresOn && (data.kind === "subscription" || hasSecret)) {
       const days = daysUntilDate(data.expiresOn, now);
       if (days < 0) {
@@ -138,7 +138,7 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
       }
     }
     // 定期更换仍然只检查已经填写的密码或密钥。
-    if (hasSecret && data.rotateDays > 0) {
+    if (data.kind !== "subscription" && hasSecret && data.rotateDays > 0) {
       const age = daysSince(lastChangedAt(entry), now);
       const left = data.rotateDays - age;
       if (left <= 0) {
@@ -148,7 +148,7 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
       }
     }
 
-    if ((data.kind === "subscription" || (data.kind === "login" && !data.skipChecks)) && data.password) {
+    if (data.kind === "login" && !data.skipChecks && data.password) {
       const others = (byPassword.get(data.password) ?? []).filter((item) => item.id !== entry.id);
       if (others.length > 0) {
         add(entry, "reused", "danger", `和${quoteTitles(others.map((item) => item.data.title))}用的是同一个密码。`);
