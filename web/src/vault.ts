@@ -23,23 +23,15 @@ export const subscriptionProviderLabels = {
 
 export type SubscriptionProvider = keyof typeof subscriptionProviderLabels;
 
-export const subscriptionProviderUrls: Record<SubscriptionProvider, string> = {
-  claude: "https://claude.ai",
-  chatgpt: "https://chatgpt.com",
-  grok: "https://grok.com",
-  other: "",
-};
-
 // 订阅信息全部放在加密 JSON 中，账号和金额也不进入明文 API 字段。
-export interface VaultSubscriptionData extends VaultReminderSettings {
+export interface VaultSubscriptionData {
   kind: "subscription";
   title: string;
   provider: SubscriptionProvider;
   plan: string;
   account: string;
-  password: string;
-  url: string;
   startedOn: string;
+  expiresOn: string;
   billingCycle: "monthly" | "yearly" | "none";
   price: string;
   balance: string;
@@ -346,8 +338,7 @@ function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
         ? provider : "other",
       plan: text(raw.plan),
       account: text(raw.account),
-      password: text(raw.password),
-      url: text(raw.url),
+      // 订阅只管理订阅信息，旧密文中的密码、网址和轮换设置不再保留。
       startedOn: subscriptionDate(raw.startedOn),
       billingCycle: raw.billingCycle === "yearly" || raw.billingCycle === "none"
         ? raw.billingCycle : "monthly",
@@ -355,7 +346,6 @@ function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
       balance: subscriptionAmount(raw.balance),
       currency: /^[A-Z]{3}$/.test(text(raw.currency)) ? text(raw.currency) : "USD",
       notes,
-      ...reminderSettings(raw),
       expiresOn: subscriptionDate(raw.expiresOn),
     };
   }
@@ -482,15 +472,13 @@ export function emptyVaultItem(kind: VaultKind): VaultItemData {
       provider: "claude",
       plan: "",
       account: "",
-      password: "",
-      url: subscriptionProviderUrls.claude,
       startedOn: "",
+      expiresOn: "",
       billingCycle: "monthly",
       price: "",
       balance: "",
       currency: "USD",
       notes: "",
-      ...reminders,
     };
   }
   if (kind === "secret") return { kind, title: "", secret: "", notes: "", ...reminders };
@@ -528,7 +516,7 @@ export function stampSecretChange(
   next: VaultItemData,
   now = new Date().toISOString(),
 ): VaultItemData {
-  if (next.kind === "login" || next.kind === "subscription") {
+  if (next.kind === "login") {
     const before = previous?.kind === next.kind ? previous.password : "";
     if (next.password && next.password !== before) return { ...next, changedAt: now };
   }

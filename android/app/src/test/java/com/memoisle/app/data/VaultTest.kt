@@ -153,8 +153,6 @@ class VaultTest {
             provider = "claude",
             plan = "Max",
             account = "me@example.com",
-            password = "s3cret",
-            url = "https://claude.ai",
             startedOn = "2026-01-15",
             expiresOn = "2026-11-30",
             billingCycle = "yearly",
@@ -162,16 +160,14 @@ class VaultTest {
             balance = "12.50",
             currency = "USD",
             notes = "备注",
-            changedAt = "2026-10-16T00:00:00.000Z",
-            rotateDays = 90,
         )
         val json = JSONObject(original.toJson())
         assertEquals(1, json.getInt("v"))
         assertEquals("subscription", json.getString("kind"))
         listOf(
-            "title", "provider", "plan", "account", "password", "url",
+            "title", "provider", "plan", "account",
             "startedOn", "expiresOn", "billingCycle", "price", "balance",
-            "currency", "notes", "changedAt", "rotateDays",
+            "currency", "notes",
         ).forEach { key -> assertTrue("缺少字段 $key", json.has(key)) }
         assertFalse(json.has("username"))
         assertFalse(json.has("skipChecks"))
@@ -191,17 +187,13 @@ class VaultTest {
               "provider": "grok",
               "plan": "SuperGrok",
               "account": "user@x.com",
-              "password": "pw",
-              "url": "https://grok.com",
               "startedOn": "2026-03-01",
               "expiresOn": "2027-03-01",
               "billingCycle": "monthly",
               "price": "30",
               "balance": "0.00",
               "currency": "USD",
-              "notes": "n",
-              "changedAt": "2026-10-01T12:00:00.000Z",
-              "rotateDays": 30
+              "notes": "n"
             }
             """.trimIndent(),
         )
@@ -210,8 +202,6 @@ class VaultTest {
         assertEquals("grok", fromWeb.provider)
         assertEquals("SuperGrok", fromWeb.plan)
         assertEquals("user@x.com", fromWeb.account)
-        assertEquals("pw", fromWeb.password)
-        assertEquals("https://grok.com", fromWeb.url)
         assertEquals("2026-03-01", fromWeb.startedOn)
         assertEquals("2027-03-01", fromWeb.expiresOn)
         assertEquals("monthly", fromWeb.billingCycle)
@@ -219,8 +209,6 @@ class VaultTest {
         assertEquals("0.00", fromWeb.balance)
         assertEquals("USD", fromWeb.currency)
         assertEquals("n", fromWeb.notes)
-        assertEquals("2026-10-01T12:00:00.000Z", fromWeb.changedAt)
-        assertEquals(30, fromWeb.rotateDays)
         val savedAgain = VaultItemData.fromJson(fromWeb.toJson())
         assertEquals(fromWeb, savedAgain)
     }
@@ -289,10 +277,6 @@ class VaultTest {
         assertEquals("", written.getString("startedOn"))
         assertEquals("", written.getString("expiresOn"))
 
-        assertEquals("https://claude.ai", defaultSubscriptionUrl("claude"))
-        assertEquals("https://chatgpt.com", defaultSubscriptionUrl("chatgpt"))
-        assertEquals("https://grok.com", defaultSubscriptionUrl("grok"))
-        assertEquals("", defaultSubscriptionUrl("other"))
         assertEquals("Claude Max", defaultSubscriptionTitle("claude", "Max"))
         assertEquals("\$12.50", formatVaultMoney("USD", "12.50"))
         assertEquals("¥8", formatVaultMoney("CNY", "8"))
@@ -300,10 +284,45 @@ class VaultTest {
     }
 
     @Test
-    fun subscriptionPasswordChangeStampsAndRemindsLikeLogin() {
+    fun subscriptionSerializationDropsLegacyPasswordAndUrlAfterEditing() {
+        // 共用数据类即使带有旧字段，订阅写回时也只保存管理信息。
+        val legacy = VaultItemData(
+            kind = VAULT_KIND_SUBSCRIPTION,
+            title = "Claude Max",
+            account = "me@example.com",
+            password = "abc123",
+            url = "https://claude.ai",
+            expiresOn = "2026-11-30",
+        )
+        val serialized = JSONObject(legacy.toJson())
+        assertFalse(serialized.has("password"))
+        assertFalse(serialized.has("url"))
+
+        // 模拟解密旧版 JSON 后编辑备注，再次保存不能保留密码和网址。
+        val oldJson = serialized.put("password", legacy.password).put("url", legacy.url)
+            .put("rotateDays", 90).put("changedAt", "2026-03-30T00:00:00Z")
+        val parsed = VaultItemData.fromJson(oldJson.toString())
+        assertEquals("", parsed.password)
+        assertEquals("", parsed.url)
+        assertEquals("", parsed.secretValue)
+        assertEquals(0, parsed.rotateDays)
+        assertEquals("", parsed.changedAt)
+        val edited = parsed.copy(notes = "已确认续费")
+        val saved = JSONObject(edited.toJson())
+        assertFalse(saved.has("password"))
+        assertFalse(saved.has("url"))
+        assertFalse(saved.has("rotateDays"))
+        assertFalse(saved.has("changedAt"))
+        assertEquals("已确认续费", saved.getString("notes"))
+        assertEquals("me@example.com", saved.getString("account"))
+        assertEquals("2026-11-30", saved.getString("expiresOn"))
+    }
+
+    @Test
+    fun subscriptionIgnoresLegacyPasswordChecksAndRotation() {
         val now = Instant.parse("2026-10-16T00:00:00Z")
         val before = VaultItemData(kind = VAULT_KIND_SUBSCRIPTION, title = "Claude", password = "old")
-        assertEquals(now.toString(), stampSecretChange(before, before.copy(password = "new"), now).changedAt)
+        assertEquals("", stampSecretChange(before, before.copy(password = "new"), now).changedAt)
         assertEquals("", stampSecretChange(before, before.copy(notes = "x"), now).changedAt)
 
         val today = LocalDate.of(2026, 10, 16)
@@ -323,15 +342,11 @@ class VaultTest {
             entry("login", VaultItemData(VAULT_KIND_LOGIN, "同密码", password = "abc123")),
         )
         val reminders = collectVaultReminders(entries, today, ZoneOffset.UTC)
-        val types = reminders.filter { it.entryId == "sub" }.map { it.type }.toSet()
-        assertTrue(types.contains(VaultReminderType.EXPIRED))
-        assertTrue(types.contains(VaultReminderType.ROTATE))
-        assertTrue(types.contains(VaultReminderType.WEAK))
-        assertTrue(types.contains(VaultReminderType.REUSED))
-        assertTrue(reminders.any { it.entryId == "login" && it.type == VaultReminderType.REUSED })
+        assertEquals(listOf(VaultReminderType.EXPIRED), reminders.filter { it.entryId == "sub" }.map { it.type })
+        assertEquals(listOf(VaultReminderType.WEAK), reminders.filter { it.entryId == "login" }.map { it.type })
         assertEquals(
             "已于 2026-10-13 到期（3 天前），请续费或更新到期日。",
-            reminders.first { it.entryId == "sub" && it.type == VaultReminderType.EXPIRED }.message,
+            reminders.first { it.entryId == "sub" }.message,
         )
     }
 
@@ -371,7 +386,7 @@ class VaultTest {
         assertEquals(listOf(VaultReminderType.EXPIRING), byEntry["soon"])
         assertFalse(byEntry.containsKey("far"))
         assertFalse(byEntry.containsKey("rotateNoPw"))
-        assertEquals(listOf(VaultReminderType.ROTATE), byEntry["rotatePw"])
+        assertFalse(byEntry.containsKey("rotatePw"))
         assertEquals("已于 2026-10-13 到期（3 天前），请续费或更新到期日。", reminders.first { it.entryId == "expired" }.message)
         assertEquals("今天到期，请确认续费。", reminders.first { it.entryId == "today" }.message)
         assertEquals("10 天后到期续费（2026-10-26）。", reminders.first { it.entryId == "soon" }.message)

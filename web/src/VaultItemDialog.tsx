@@ -6,7 +6,6 @@ import {
   generatePassword,
   parseRecoveryCodes,
   subscriptionProviderLabels,
-  subscriptionProviderUrls,
   vaultKindLabels,
   type RecoveryCode,
   type SubscriptionProvider,
@@ -106,26 +105,30 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
   return (
     <fieldset className="vault-reminder-fields">
       <legend>提醒</legend>
-      <p className="vault-hint">
-        {draft.kind === "login" || draft.kind === "subscription"
-          ? "密码"
-          : draft.kind === "server"
-            ? "登录凭据"
-            : "密钥"}上次更换：
-        {secretChanged ? "保存后记为今天" : changedLabel}
-      </p>
+      {draft.kind !== "subscription" && (
+        <p className="vault-hint">
+          {draft.kind === "login"
+            ? "密码"
+            : draft.kind === "server"
+              ? "登录凭据"
+              : "密钥"}上次更换：
+          {secretChanged ? "保存后记为今天" : changedLabel}
+        </p>
+      )}
       <div className="vault-reminder-grid">
-        <label className="vault-field">
-          <span className="vault-field-label"><span>定期更换</span></span>
-          <select
-            value={draft.rotateDays}
-            onChange={(event) => onChange("rotateDays", Number(event.target.value))}
-          >
-            {VAULT_ROTATE_OPTIONS.map((days) => (
-              <option key={days} value={days}>{rotateLabel(days)}</option>
-            ))}
-          </select>
-        </label>
+        {draft.kind !== "subscription" && (
+          <label className="vault-field">
+            <span className="vault-field-label"><span>定期更换</span></span>
+            <select
+              value={draft.rotateDays}
+              onChange={(event) => onChange("rotateDays", Number(event.target.value))}
+            >
+              {VAULT_ROTATE_OPTIONS.map((days) => (
+                <option key={days} value={days}>{rotateLabel(days)}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="vault-field">
           <span className="vault-field-label">
             <span>{draft.kind === "subscription" ? "到期 / 下次续费日期" : "到期日"}</span>
@@ -282,17 +285,14 @@ export default function VaultItemDialog({
   const updateProvider = (provider: SubscriptionProvider): void => {
     setDraft((current) => {
       if (current.kind !== "subscription") return current;
-      // 新建时跟随服务商预填网址，用户已填的自定义地址保留。
-      const useDefaultUrl = isNew && (!current.url || current.url === subscriptionProviderUrls[current.provider]);
       return {
         ...current,
         provider,
-        url: useDefaultUrl ? subscriptionProviderUrls[provider] : current.url,
       };
     });
   };
 
-  const secretChanged = ((draft.kind === "login" || draft.kind === "subscription") && draft.kind === initial.kind && draft.password !== initial.password && Boolean(draft.password))
+  const secretChanged = (draft.kind === "login" && initial.kind === "login" && draft.password !== initial.password && Boolean(draft.password))
     || (draft.kind === "secret" && initial.kind === "secret" && draft.secret !== initial.secret && Boolean(draft.secret))
     || (draft.kind === "server" && initial.kind === "server" && (
       draft.authMethod === "key"
@@ -410,6 +410,10 @@ export default function VaultItemDialog({
                   spellCheck={false}
                 />
               </label>
+            </>
+          )}
+          {draft.kind === "login" && (
+            <>
               <SecretInput
                 label="密码"
                 value={draft.password}
@@ -417,13 +421,13 @@ export default function VaultItemDialog({
                 onCopy={() => onCopy(draft.password, "密码")}
                 onGenerate={() => update("password", generatePassword())}
               />
-              {(draft.kind === "subscription" || !draft.skipChecks) && isWeakPassword(draft.password) && (
+              {!draft.skipChecks && isWeakPassword(draft.password) && (
                 <small className="vault-hint warn vault-weak-hint">
                   密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。
                 </small>
               )}
               <label className="vault-field">
-                <span className="vault-field-label"><span>{draft.kind === "subscription" ? "登录 / 管理地址" : "网址"}</span></span>
+                <span className="vault-field-label"><span>网址</span></span>
                 <input
                   value={draft.url}
                   onChange={(event) => update("url", event.target.value)}

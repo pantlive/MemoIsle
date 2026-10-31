@@ -84,13 +84,6 @@ fun normalizeVaultMoney(value: String): String =
 fun normalizeVaultCurrency(value: String): String =
     value.takeIf { VAULT_CURRENCY_PATTERN.matches(it) } ?: VAULT_CURRENCY_USD
 
-fun defaultSubscriptionUrl(provider: String): String = when (normalizeVaultProvider(provider)) {
-    VAULT_PROVIDER_CLAUDE -> "https://claude.ai"
-    VAULT_PROVIDER_CHATGPT -> "https://chatgpt.com"
-    VAULT_PROVIDER_GROK -> "https://grok.com"
-    else -> ""
-}
-
 fun defaultSubscriptionTitle(provider: String, plan: String): String {
     val name = VAULT_PROVIDER_LABELS.getValue(normalizeVaultProvider(provider))
     val trimmedPlan = plan.trim()
@@ -147,7 +140,7 @@ data class VaultItemData(
 ) {
     val secretValue: String
         get() = when (kind) {
-            VAULT_KIND_LOGIN, VAULT_KIND_SUBSCRIPTION -> password
+            VAULT_KIND_LOGIN -> password
             VAULT_KIND_SECRET -> secret
             // 服务器按当前认证方式取对应凭据，提醒与「上次更换」都依赖它。
             VAULT_KIND_SERVER -> if (authMethod == VAULT_AUTH_KEY) privateKey else password
@@ -184,15 +177,13 @@ data class VaultItemData(
                     .put("provider", item.provider)
                     .put("plan", item.plan)
                     .put("account", item.account)
-                    .put("password", item.password)
-                    .put("url", item.url)
                     .put("startedOn", item.startedOn)
                     .put("billingCycle", item.billingCycle)
                     .put("price", item.price)
                     .put("balance", item.balance)
                     .put("currency", item.currency)
                     .put("notes", item.notes)
-                    .putReminderSettings(item)
+                    .put("expiresOn", item.expiresOn)
             }
             else -> json
                 .put("account", account)
@@ -213,7 +204,6 @@ data class VaultItemData(
                 kind = kind,
                 title = defaultSubscriptionTitle(VAULT_PROVIDER_CLAUDE, ""),
                 provider = VAULT_PROVIDER_CLAUDE,
-                url = defaultSubscriptionUrl(VAULT_PROVIDER_CLAUDE),
                 billingCycle = VAULT_BILLING_MONTHLY,
                 currency = VAULT_CURRENCY_USD,
             )
@@ -294,8 +284,7 @@ data class VaultItemData(
                     provider = raw.optString("provider"),
                     plan = raw.optString("plan"),
                     account = raw.optString("account"),
-                    password = raw.optString("password"),
-                    url = raw.optString("url"),
+                    // 旧订阅密文中的密码、网址和轮换设置不再读入。
                     startedOn = raw.optString("startedOn"),
                     expiresOn = raw.optString("expiresOn"),
                     billingCycle = raw.optString("billingCycle"),
@@ -303,8 +292,6 @@ data class VaultItemData(
                     balance = raw.optString("balance"),
                     currency = raw.optString("currency"),
                     notes = notes,
-                    changedAt = changedAt,
-                    rotateDays = rotateDays,
                 ).normalizedSubscription()
                 else -> VaultItemData(
                     kind = VAULT_KIND_LOGIN,
@@ -456,7 +443,7 @@ fun collectVaultReminders(
             }
             continue
         }
-        // 订阅的到期提醒看续费日，不要求已填密码；密码更换提醒仍只在有密码时生效。
+        // 订阅的到期提醒只看续费日。
         val checkExpiry = data.kind == VAULT_KIND_SUBSCRIPTION || data.secretValue.isNotEmpty()
         if (checkExpiry && data.expiresOn.isNotEmpty()) {
             val days = try {
@@ -524,7 +511,6 @@ private fun VaultItemData.participatesInPasswordChecks(): Boolean {
     if (password.isEmpty()) return false
     return when (kind) {
         VAULT_KIND_LOGIN -> !skipChecks
-        VAULT_KIND_SUBSCRIPTION -> true
         else -> false
     }
 }

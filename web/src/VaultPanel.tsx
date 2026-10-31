@@ -112,7 +112,7 @@ function entrySubtitle(data: VaultItemData): string {
 }
 
 function entryHasSecret(data: VaultItemData): boolean {
-  if (data.kind === "login" || data.kind === "subscription") return Boolean(data.password);
+  if (data.kind === "login") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
   if (data.kind === "server") {
     return data.authMethod === "key"
@@ -131,7 +131,7 @@ function matchesQuery(data: VaultItemData, query: string): boolean {
     data.kind === "login" ? `${data.username} ${data.url}` : "",
     data.kind === "recovery" ? data.account : "",
     data.kind === "subscription"
-      ? `${subscriptionProviderLabels[data.provider]} ${data.plan} ${data.account} ${data.url}`
+      ? `${subscriptionProviderLabels[data.provider]} ${data.plan} ${data.account}`
       : "",
     // 服务器可以按主机名、IP、用户名、端口搜到。
     data.kind === "server"
@@ -139,16 +139,6 @@ function matchesQuery(data: VaultItemData, query: string): boolean {
       : "",
   ].join(" ").toLowerCase();
   return haystack.includes(query.toLowerCase());
-}
-
-// 自定义登录地址只允许打开网页协议，避免执行粘贴进来的脚本地址。
-function subscriptionWebUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
-  } catch {
-    return null;
-  }
 }
 
 function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFocus }: {
@@ -844,7 +834,6 @@ export default function VaultPanel() {
               const { data } = entry;
               const nextCode = data.kind === "recovery" ? data.codes.find((item) => !item.used) : undefined;
               const entryReminders = remindersByEntry.get(entry.id) ?? [];
-              const webUrl = data.kind === "subscription" ? subscriptionWebUrl(data.url) : null;
               return (
                 <li key={entry.id} className="vault-row">
                   <button type="button" className="vault-row-main" onClick={() => openEntry(entry)}>
@@ -873,12 +862,6 @@ export default function VaultPanel() {
                     {data.kind === "subscription" && (
                       <>
                         <button type="button" disabled={!data.account} onClick={() => void copyValue(data.account, "账号")}>复制账号</button>
-                        <button type="button" disabled={!data.password} onClick={() => void copyValue(data.password, "密码")}>复制密码</button>
-                        <button
-                          type="button"
-                          disabled={!webUrl}
-                          onClick={() => webUrl && window.open(webUrl, "_blank", "noopener,noreferrer")}
-                        >打开网址</button>
                       </>
                     )}
                     {data.kind === "login" && (
