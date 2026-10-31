@@ -3,6 +3,7 @@ package com.memoisle.app.data
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -142,5 +143,238 @@ class VaultTest {
         assertTrue(reminders.takeWhile { it.danger }.size == reminders.count { it.danger })
         assertEquals("已 200 天没有更换，设定为每 90 天换一次。", reminders.first { it.entryId == "old" }.message)
         assertEquals("和「重复乙」用的是同一个密码。", reminders.first { it.entryId == "r1" }.message)
+    }
+
+    @Test
+    fun subscriptionJsonRoundTripKeepsWebFields() {
+        val original = VaultItemData(
+            kind = VAULT_KIND_SUBSCRIPTION,
+            title = "Claude Max",
+            provider = "claude",
+            plan = "Max",
+            account = "me@example.com",
+            password = "s3cret",
+            url = "https://claude.ai",
+            startedOn = "2026-01-15",
+            expiresOn = "2026-11-30",
+            billingCycle = "yearly",
+            price = "20.00",
+            balance = "12.50",
+            currency = "USD",
+            notes = "备注",
+            changedAt = "2026-10-16T00:00:00.000Z",
+            rotateDays = 90,
+        )
+        val json = JSONObject(original.toJson())
+        assertEquals(1, json.getInt("v"))
+        assertEquals("subscription", json.getString("kind"))
+        listOf(
+            "title", "provider", "plan", "account", "password", "url",
+            "startedOn", "expiresOn", "billingCycle", "price", "balance",
+            "currency", "notes", "changedAt", "rotateDays",
+        ).forEach { key -> assertTrue("缺少字段 $key", json.has(key)) }
+        assertFalse(json.has("username"))
+        assertFalse(json.has("skipChecks"))
+        assertFalse(json.has("secret"))
+        assertFalse(json.has("codes"))
+        assertFalse(json.has("host"))
+
+        val parsed = VaultItemData.fromJson(original.toJson())
+        assertEquals(original, parsed)
+
+        val fromWeb = VaultItemData.fromJson(
+            """
+            {
+              "v": 1,
+              "kind": "subscription",
+              "title": "Grok SuperGrok",
+              "provider": "grok",
+              "plan": "SuperGrok",
+              "account": "user@x.com",
+              "password": "pw",
+              "url": "https://grok.com",
+              "startedOn": "2026-03-01",
+              "expiresOn": "2027-03-01",
+              "billingCycle": "monthly",
+              "price": "30",
+              "balance": "0.00",
+              "currency": "USD",
+              "notes": "n",
+              "changedAt": "2026-10-01T12:00:00.000Z",
+              "rotateDays": 30
+            }
+            """.trimIndent(),
+        )
+        assertEquals(VAULT_KIND_SUBSCRIPTION, fromWeb.kind)
+        assertEquals("Grok SuperGrok", fromWeb.title)
+        assertEquals("grok", fromWeb.provider)
+        assertEquals("SuperGrok", fromWeb.plan)
+        assertEquals("user@x.com", fromWeb.account)
+        assertEquals("pw", fromWeb.password)
+        assertEquals("https://grok.com", fromWeb.url)
+        assertEquals("2026-03-01", fromWeb.startedOn)
+        assertEquals("2027-03-01", fromWeb.expiresOn)
+        assertEquals("monthly", fromWeb.billingCycle)
+        assertEquals("30", fromWeb.price)
+        assertEquals("0.00", fromWeb.balance)
+        assertEquals("USD", fromWeb.currency)
+        assertEquals("n", fromWeb.notes)
+        assertEquals("2026-10-01T12:00:00.000Z", fromWeb.changedAt)
+        assertEquals(30, fromWeb.rotateDays)
+        val savedAgain = VaultItemData.fromJson(fromWeb.toJson())
+        assertEquals(fromWeb, savedAgain)
+    }
+
+    @Test
+    fun subscriptionJsonNormalizesInvalidFields() {
+        val normalized = VaultItemData.fromJson(
+            """
+            {
+              "kind": "subscription",
+              "title": "",
+              "provider": "unknown-ai",
+              "plan": "X",
+              "account": "a",
+              "password": "p",
+              "url": "https://x.com",
+              "startedOn": "not-a-date",
+              "expiresOn": "2026-13-40",
+              "billingCycle": "weekly",
+              "price": "12.345",
+              "balance": "-5",
+              "currency": "usd",
+              "notes": "",
+              "rotateDays": 7
+            }
+            """.trimIndent(),
+        )
+        assertEquals("未命名", normalized.title)
+        assertEquals("other", normalized.provider)
+        assertEquals("X", normalized.plan)
+        assertEquals("", normalized.startedOn)
+        assertEquals("", normalized.expiresOn)
+        assertEquals("monthly", normalized.billingCycle)
+        assertEquals("", normalized.price)
+        assertEquals("", normalized.balance)
+        assertEquals("USD", normalized.currency)
+        assertEquals(0, normalized.rotateDays)
+
+        val numbers = VaultItemData.fromJson(
+            """{"kind":"subscription","price":"123456789.99","balance":"0.5","currency":"CNY","startedOn":"2026-02-28","billingCycle":"none","provider":"chatgpt"}""",
+        )
+        assertEquals("123456789.99", numbers.price)
+        assertEquals("0.5", numbers.balance)
+        assertEquals("CNY", numbers.currency)
+        assertEquals("2026-02-28", numbers.startedOn)
+        assertEquals("none", numbers.billingCycle)
+        assertEquals("chatgpt", numbers.provider)
+
+        val written = JSONObject(
+            VaultItemData(
+                kind = VAULT_KIND_SUBSCRIPTION,
+                provider = "nope",
+                billingCycle = "weekly",
+                price = "12.345",
+                balance = "-1",
+                currency = "us",
+                startedOn = "2026-02-30",
+                expiresOn = "abcd",
+            ).toJson(),
+        )
+        assertEquals("other", written.getString("provider"))
+        assertEquals("monthly", written.getString("billingCycle"))
+        assertEquals("", written.getString("price"))
+        assertEquals("", written.getString("balance"))
+        assertEquals("USD", written.getString("currency"))
+        assertEquals("", written.getString("startedOn"))
+        assertEquals("", written.getString("expiresOn"))
+
+        assertEquals("https://claude.ai", defaultSubscriptionUrl("claude"))
+        assertEquals("https://chatgpt.com", defaultSubscriptionUrl("chatgpt"))
+        assertEquals("https://grok.com", defaultSubscriptionUrl("grok"))
+        assertEquals("", defaultSubscriptionUrl("other"))
+        assertEquals("Claude Max", defaultSubscriptionTitle("claude", "Max"))
+        assertEquals("\$12.50", formatVaultMoney("USD", "12.50"))
+        assertEquals("¥8", formatVaultMoney("CNY", "8"))
+        assertEquals("EUR12.50", formatVaultMoney("EUR", "12.50"))
+    }
+
+    @Test
+    fun subscriptionPasswordChangeStampsAndRemindsLikeLogin() {
+        val now = Instant.parse("2026-10-16T00:00:00Z")
+        val before = VaultItemData(kind = VAULT_KIND_SUBSCRIPTION, title = "Claude", password = "old")
+        assertEquals(now.toString(), stampSecretChange(before, before.copy(password = "new"), now).changedAt)
+        assertEquals("", stampSecretChange(before, before.copy(notes = "x"), now).changedAt)
+
+        val today = LocalDate.of(2026, 10, 16)
+        fun entry(id: String, data: VaultItemData) = VaultEntry(id, 1, "2026-10-10T00:00:00Z", data)
+        val entries = listOf(
+            entry(
+                "sub",
+                VaultItemData(
+                    VAULT_KIND_SUBSCRIPTION,
+                    "Claude Max",
+                    password = "abc123",
+                    expiresOn = "2026-10-13",
+                    rotateDays = 90,
+                    changedAt = "2026-03-30T00:00:00Z",
+                ),
+            ),
+            entry("login", VaultItemData(VAULT_KIND_LOGIN, "同密码", password = "abc123")),
+        )
+        val reminders = collectVaultReminders(entries, today, ZoneOffset.UTC)
+        val types = reminders.filter { it.entryId == "sub" }.map { it.type }.toSet()
+        assertTrue(types.contains(VaultReminderType.EXPIRED))
+        assertTrue(types.contains(VaultReminderType.ROTATE))
+        assertTrue(types.contains(VaultReminderType.WEAK))
+        assertTrue(types.contains(VaultReminderType.REUSED))
+        assertTrue(reminders.any { it.entryId == "login" && it.type == VaultReminderType.REUSED })
+        assertEquals(
+            "已于 2026-10-13 到期（3 天前），请续费或更新到期日。",
+            reminders.first { it.entryId == "sub" && it.type == VaultReminderType.EXPIRED }.message,
+        )
+    }
+
+    @Test
+    fun subscriptionExpiryRemindersDoNotRequirePassword() {
+        val today = LocalDate.of(2026, 10, 16)
+        fun entry(id: String, data: VaultItemData) = VaultEntry(id, 1, "2026-10-10T00:00:00Z", data)
+        val entries = listOf(
+            entry("expired", VaultItemData(VAULT_KIND_SUBSCRIPTION, "过期订阅", expiresOn = "2026-10-13")),
+            entry("today", VaultItemData(VAULT_KIND_SUBSCRIPTION, "当天订阅", expiresOn = "2026-10-16")),
+            entry("soon", VaultItemData(VAULT_KIND_SUBSCRIPTION, "即将续费", expiresOn = "2026-10-26")),
+            entry("far", VaultItemData(VAULT_KIND_SUBSCRIPTION, "远期订阅", expiresOn = "2026-12-15")),
+            entry(
+                "rotateNoPw",
+                VaultItemData(
+                    VAULT_KIND_SUBSCRIPTION,
+                    "无密码更换",
+                    rotateDays = 90,
+                    changedAt = "2026-03-30T00:00:00Z",
+                ),
+            ),
+            entry(
+                "rotatePw",
+                VaultItemData(
+                    VAULT_KIND_SUBSCRIPTION,
+                    "有密码更换",
+                    password = "Str0ng!Pass-word-xyz",
+                    rotateDays = 90,
+                    changedAt = "2026-03-30T00:00:00Z",
+                ),
+            ),
+        )
+        val reminders = collectVaultReminders(entries, today, ZoneOffset.UTC)
+        val byEntry = reminders.groupBy({ it.entryId }, { it.type })
+        assertEquals(listOf(VaultReminderType.EXPIRED), byEntry["expired"])
+        assertEquals(listOf(VaultReminderType.EXPIRED), byEntry["today"])
+        assertEquals(listOf(VaultReminderType.EXPIRING), byEntry["soon"])
+        assertFalse(byEntry.containsKey("far"))
+        assertFalse(byEntry.containsKey("rotateNoPw"))
+        assertEquals(listOf(VaultReminderType.ROTATE), byEntry["rotatePw"])
+        assertEquals("已于 2026-10-13 到期（3 天前），请续费或更新到期日。", reminders.first { it.entryId == "expired" }.message)
+        assertEquals("今天到期，请确认续费。", reminders.first { it.entryId == "today" }.message)
+        assertEquals("10 天后到期续费（2026-10-26）。", reminders.first { it.entryId == "soon" }.message)
+        assertEquals("一次性 / 按量", VAULT_BILLING_LABELS.getValue(VAULT_BILLING_NONE))
     }
 }

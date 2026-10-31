@@ -51,7 +51,7 @@ export function daysUntilDate(isoDate: string, now = new Date()): number {
 
 export function lastChangedAt(entry: Pick<VaultEntry, "createdAt" | "data">): string {
   const { data } = entry;
-  return (data.kind === "login" || data.kind === "secret" || data.kind === "server")
+  return (data.kind === "login" || data.kind === "secret" || data.kind === "server" || data.kind === "subscription")
     && data.changedAt
     ? data.changedAt
     : entry.createdAt;
@@ -77,7 +77,7 @@ export function isWeakPassword(password: string): boolean {
 }
 
 function hasSecretValue(data: VaultItemData): boolean {
-  if (data.kind === "login") return Boolean(data.password);
+  if (data.kind === "login" || data.kind === "subscription") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
   if (data.kind === "server") {
     // 私钥和密码任一存在就算有凭据，用于到期与定期更换提醒。
@@ -100,7 +100,7 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
   const byPassword = new Map<string, VaultEntry[]>();
   for (const entry of entries) {
     const { data } = entry;
-    if (data.kind === "login" && data.password && !data.skipChecks) {
+    if ((data.kind === "subscription" || (data.kind === "login" && !data.skipChecks)) && data.password) {
       byPassword.set(data.password, [...(byPassword.get(data.password) ?? []), entry]);
     }
   }
@@ -119,30 +119,36 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
       continue;
     }
 
-    // 到期和定期更换只对已经填了密码或密钥的条目有意义。
-    if (hasSecretValue(data)) {
-      if (data.expiresOn) {
-        const days = daysUntilDate(data.expiresOn, now);
-        if (days < 0) {
-          add(entry, "expired", "danger", `已于 ${data.expiresOn} 过期（${-days} 天前），请更换。`);
-        } else if (days === 0) {
-          add(entry, "expired", "danger", "今天到期，请尽快更换。");
-        } else if (days <= EXPIRY_WARN_DAYS) {
-          add(entry, "expiring", "warn", `${days} 天后到期（${data.expiresOn}）。`);
-        }
+    const hasSecret = hasSecretValue(data);
+    // 订阅即使没有保存密码，也需要按到期日提醒续费。
+    if (data.expiresOn && (data.kind === "subscription" || hasSecret)) {
+      const days = daysUntilDate(data.expiresOn, now);
+      if (days < 0) {
+        add(entry, "expired", "danger", data.kind === "subscription"
+          ? `已于 ${data.expiresOn} 到期（${-days} 天前），请续费或更新到期日。`
+          : `已于 ${data.expiresOn} 过期（${-days} 天前），请更换。`);
+      } else if (days === 0) {
+        add(entry, "expired", "danger", data.kind === "subscription"
+          ? "今天到期，请确认续费。"
+          : "今天到期，请尽快更换。");
+      } else if (days <= EXPIRY_WARN_DAYS) {
+        add(entry, "expiring", "warn", data.kind === "subscription"
+          ? `${days} 天后到期续费（${data.expiresOn}）。`
+          : `${days} 天后到期（${data.expiresOn}）。`);
       }
-      if (data.rotateDays > 0) {
-        const age = daysSince(lastChangedAt(entry), now);
-        const left = data.rotateDays - age;
-        if (left <= 0) {
-          add(entry, "rotate", "danger", `已 ${age} 天没有更换，设定为每 ${data.rotateDays} 天换一次。`);
-        } else if (left <= ROTATE_WARN_DAYS) {
-          add(entry, "rotate-soon", "warn", `${left} 天后到了更换周期（每 ${data.rotateDays} 天）。`);
-        }
+    }
+    // 定期更换仍然只检查已经填写的密码或密钥。
+    if (hasSecret && data.rotateDays > 0) {
+      const age = daysSince(lastChangedAt(entry), now);
+      const left = data.rotateDays - age;
+      if (left <= 0) {
+        add(entry, "rotate", "danger", `已 ${age} 天没有更换，设定为每 ${data.rotateDays} 天换一次。`);
+      } else if (left <= ROTATE_WARN_DAYS) {
+        add(entry, "rotate-soon", "warn", `${left} 天后到了更换周期（每 ${data.rotateDays} 天）。`);
       }
     }
 
-    if (data.kind === "login" && data.password && !data.skipChecks) {
+    if ((data.kind === "subscription" || (data.kind === "login" && !data.skipChecks)) && data.password) {
       const others = (byPassword.get(data.password) ?? []).filter((item) => item.id !== entry.id);
       if (others.length > 0) {
         add(entry, "reused", "danger", `和${quoteTitles(others.map((item) => item.data.title))}用的是同一个密码。`);
