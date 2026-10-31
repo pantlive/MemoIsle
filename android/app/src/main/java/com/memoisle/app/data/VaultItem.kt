@@ -13,16 +13,99 @@ const val VAULT_KIND_LOGIN = "login"
 const val VAULT_KIND_SECRET = "secret"
 const val VAULT_KIND_RECOVERY = "recovery"
 const val VAULT_KIND_SERVER = "server"
+const val VAULT_KIND_SUBSCRIPTION = "subscription"
 
 const val VAULT_AUTH_PASSWORD = "password"
 const val VAULT_AUTH_KEY = "key"
+
+const val VAULT_PROVIDER_CLAUDE = "claude"
+const val VAULT_PROVIDER_CHATGPT = "chatgpt"
+const val VAULT_PROVIDER_GROK = "grok"
+const val VAULT_PROVIDER_OTHER = "other"
+
+const val VAULT_BILLING_MONTHLY = "monthly"
+const val VAULT_BILLING_YEARLY = "yearly"
+const val VAULT_BILLING_NONE = "none"
+
+const val VAULT_CURRENCY_USD = "USD"
+const val VAULT_CURRENCY_CNY = "CNY"
 
 val VAULT_KIND_LABELS = mapOf(
     VAULT_KIND_LOGIN to "账号密码",
     VAULT_KIND_SECRET to "密钥",
     VAULT_KIND_RECOVERY to "恢复码",
     VAULT_KIND_SERVER to "云服务器",
+    VAULT_KIND_SUBSCRIPTION to "AI 订阅",
 )
+
+val VAULT_PROVIDER_OPTIONS = listOf(
+    VAULT_PROVIDER_CLAUDE,
+    VAULT_PROVIDER_CHATGPT,
+    VAULT_PROVIDER_GROK,
+    VAULT_PROVIDER_OTHER,
+)
+
+val VAULT_PROVIDER_LABELS = mapOf(
+    VAULT_PROVIDER_CLAUDE to "Claude",
+    VAULT_PROVIDER_CHATGPT to "ChatGPT",
+    VAULT_PROVIDER_GROK to "Grok",
+    VAULT_PROVIDER_OTHER to "其他",
+)
+
+val VAULT_BILLING_OPTIONS = listOf(
+    VAULT_BILLING_MONTHLY,
+    VAULT_BILLING_YEARLY,
+    VAULT_BILLING_NONE,
+)
+
+val VAULT_BILLING_LABELS = mapOf(
+    VAULT_BILLING_MONTHLY to "每月",
+    VAULT_BILLING_YEARLY to "每年",
+    VAULT_BILLING_NONE to "一次性 / 按量",
+)
+
+private val VAULT_MONEY_PATTERN = Regex("""^\d{1,9}(\.\d{1,2})?$""")
+private val VAULT_CURRENCY_PATTERN = Regex("""^[A-Z]{3}$""")
+
+fun normalizeVaultProvider(value: String): String =
+    if (value in VAULT_PROVIDER_OPTIONS) value else VAULT_PROVIDER_OTHER
+
+fun normalizeVaultBillingCycle(value: String): String =
+    if (value in VAULT_BILLING_OPTIONS) value else VAULT_BILLING_MONTHLY
+
+/** 只接受日历上存在的 YYYY-MM-DD，否则空字符串。 */
+fun normalizeVaultDate(value: String): String {
+    return value.takeIf { runCatching { LocalDate.parse(it) }.isSuccess }.orEmpty()
+}
+
+fun normalizeVaultMoney(value: String): String =
+    value.takeIf { VAULT_MONEY_PATTERN.matches(it) }.orEmpty()
+
+fun normalizeVaultCurrency(value: String): String =
+    value.takeIf { VAULT_CURRENCY_PATTERN.matches(it) } ?: VAULT_CURRENCY_USD
+
+fun defaultSubscriptionUrl(provider: String): String = when (normalizeVaultProvider(provider)) {
+    VAULT_PROVIDER_CLAUDE -> "https://claude.ai"
+    VAULT_PROVIDER_CHATGPT -> "https://chatgpt.com"
+    VAULT_PROVIDER_GROK -> "https://grok.com"
+    else -> ""
+}
+
+fun defaultSubscriptionTitle(provider: String, plan: String): String {
+    val name = VAULT_PROVIDER_LABELS.getValue(normalizeVaultProvider(provider))
+    val trimmedPlan = plan.trim()
+    return if (trimmedPlan.isNotEmpty()) "$name $trimmedPlan" else name
+}
+
+/** 列表副标题里的金额：USD→$，CNY→¥，其余用币种代码做前缀。 */
+fun formatVaultMoney(currency: String, amount: String): String {
+    val code = normalizeVaultCurrency(currency)
+    return when (code) {
+        VAULT_CURRENCY_USD -> "$$amount"
+        VAULT_CURRENCY_CNY -> "¥$amount"
+        else -> "$code$amount"
+    }
+}
 
 val VAULT_ROTATE_OPTIONS = listOf(0, 30, 90, 180, 365)
 private const val MAX_RECOVERY_CODES = 100
@@ -53,10 +136,18 @@ data class VaultItemData(
     val authMethod: String = VAULT_AUTH_PASSWORD,
     val privateKey: String = "",
     val keyPassphrase: String = "",
+    // AI 订阅：服务商、套餐、开始日、计费周期、费用、余额和币种。
+    val provider: String = "",
+    val plan: String = "",
+    val startedOn: String = "",
+    val billingCycle: String = "",
+    val price: String = "",
+    val balance: String = "",
+    val currency: String = "",
 ) {
     val secretValue: String
         get() = when (kind) {
-            VAULT_KIND_LOGIN -> password
+            VAULT_KIND_LOGIN, VAULT_KIND_SUBSCRIPTION -> password
             VAULT_KIND_SECRET -> secret
             // 服务器按当前认证方式取对应凭据，提醒与「上次更换」都依赖它。
             VAULT_KIND_SERVER -> if (authMethod == VAULT_AUTH_KEY) privateKey else password
@@ -87,6 +178,22 @@ data class VaultItemData(
                 .put("keyPassphrase", keyPassphrase)
                 .put("notes", notes)
                 .putReminderSettings(this)
+            VAULT_KIND_SUBSCRIPTION -> {
+                val item = normalizedSubscription()
+                json
+                    .put("provider", item.provider)
+                    .put("plan", item.plan)
+                    .put("account", item.account)
+                    .put("password", item.password)
+                    .put("url", item.url)
+                    .put("startedOn", item.startedOn)
+                    .put("billingCycle", item.billingCycle)
+                    .put("price", item.price)
+                    .put("balance", item.balance)
+                    .put("currency", item.currency)
+                    .put("notes", item.notes)
+                    .putReminderSettings(item)
+            }
             else -> json
                 .put("account", account)
                 .put(
@@ -101,7 +208,17 @@ data class VaultItemData(
     }
 
     companion object {
-        fun empty(kind: String): VaultItemData = VaultItemData(kind = kind)
+        fun empty(kind: String): VaultItemData = when (kind) {
+            VAULT_KIND_SUBSCRIPTION -> VaultItemData(
+                kind = kind,
+                title = defaultSubscriptionTitle(VAULT_PROVIDER_CLAUDE, ""),
+                provider = VAULT_PROVIDER_CLAUDE,
+                url = defaultSubscriptionUrl(VAULT_PROVIDER_CLAUDE),
+                billingCycle = VAULT_BILLING_MONTHLY,
+                currency = VAULT_CURRENCY_USD,
+            )
+            else -> VaultItemData(kind = kind)
+        }
 
         /** 解密后按类型补齐字段，旧版本或缺字段的数据也能正常显示。 */
         fun fromJson(text: String): VaultItemData {
@@ -171,6 +288,24 @@ data class VaultItemData(
                         notes = notes,
                     )
                 }
+                VAULT_KIND_SUBSCRIPTION -> VaultItemData(
+                    kind = VAULT_KIND_SUBSCRIPTION,
+                    title = title,
+                    provider = raw.optString("provider"),
+                    plan = raw.optString("plan"),
+                    account = raw.optString("account"),
+                    password = raw.optString("password"),
+                    url = raw.optString("url"),
+                    startedOn = raw.optString("startedOn"),
+                    expiresOn = raw.optString("expiresOn"),
+                    billingCycle = raw.optString("billingCycle"),
+                    price = raw.optString("price"),
+                    balance = raw.optString("balance"),
+                    currency = raw.optString("currency"),
+                    notes = notes,
+                    changedAt = changedAt,
+                    rotateDays = rotateDays,
+                ).normalizedSubscription()
                 else -> VaultItemData(
                     kind = VAULT_KIND_LOGIN,
                     title = title,
@@ -191,6 +326,16 @@ data class VaultItemData(
 private fun JSONObject.putReminderSettings(data: VaultItemData): JSONObject {
     return put("changedAt", data.changedAt).put("rotateDays", data.rotateDays).put("expiresOn", data.expiresOn)
 }
+
+private fun VaultItemData.normalizedSubscription(): VaultItemData = copy(
+    provider = normalizeVaultProvider(provider),
+    startedOn = normalizeVaultDate(startedOn),
+    expiresOn = normalizeVaultDate(expiresOn),
+    billingCycle = normalizeVaultBillingCycle(billingCycle),
+    price = normalizeVaultMoney(price),
+    balance = normalizeVaultMoney(balance),
+    currency = normalizeVaultCurrency(currency),
+)
 
 data class VaultEntry(
     val id: String,
@@ -296,7 +441,7 @@ fun collectVaultReminders(
         reminders += VaultReminder(entry.id, entry.data.title, type, danger, message)
     }
     val byPassword = entries
-        .filter { it.data.kind == VAULT_KIND_LOGIN && it.data.password.isNotEmpty() && !it.data.skipChecks }
+        .filter { it.data.participatesInPasswordChecks() }
         .groupBy { it.data.password }
 
     for (entry in entries) {
@@ -311,31 +456,55 @@ fun collectVaultReminders(
             }
             continue
         }
-        if (data.secretValue.isNotEmpty()) {
-            if (data.expiresOn.isNotEmpty()) {
-                val days = try {
-                    ChronoUnit.DAYS.between(today, LocalDate.parse(data.expiresOn))
-                } catch (error: DateTimeParseException) {
-                    null
-                }
-                when {
-                    days == null -> Unit
-                    days < 0 -> add(entry, VaultReminderType.EXPIRED, true, "已于 ${data.expiresOn} 过期（${-days} 天前），请更换。")
-                    days == 0L -> add(entry, VaultReminderType.EXPIRED, true, "今天到期，请尽快更换。")
-                    days <= EXPIRY_WARN_DAYS -> add(entry, VaultReminderType.EXPIRING, false, "$days 天后到期（${data.expiresOn}）。")
-                }
+        // 订阅的到期提醒看续费日，不要求已填密码；密码更换提醒仍只在有密码时生效。
+        val checkExpiry = data.kind == VAULT_KIND_SUBSCRIPTION || data.secretValue.isNotEmpty()
+        if (checkExpiry && data.expiresOn.isNotEmpty()) {
+            val days = try {
+                ChronoUnit.DAYS.between(today, LocalDate.parse(data.expiresOn))
+            } catch (error: DateTimeParseException) {
+                null
             }
-            if (data.rotateDays > 0) {
-                val age = daysSince(lastChangedAt(entry), today, zone)
-                val left = data.rotateDays - age
-                if (left <= 0) {
-                    add(entry, VaultReminderType.ROTATE, true, "已 $age 天没有更换，设定为每 ${data.rotateDays} 天换一次。")
-                } else if (left <= ROTATE_WARN_DAYS) {
-                    add(entry, VaultReminderType.ROTATE_SOON, false, "$left 天后到了更换周期（每 ${data.rotateDays} 天）。")
-                }
+            val subscription = data.kind == VAULT_KIND_SUBSCRIPTION
+            when {
+                days == null -> Unit
+                days < 0 -> add(
+                    entry,
+                    VaultReminderType.EXPIRED,
+                    true,
+                    if (subscription) {
+                        "已于 ${data.expiresOn} 到期（${-days} 天前），请续费或更新到期日。"
+                    } else {
+                        "已于 ${data.expiresOn} 过期（${-days} 天前），请更换。"
+                    },
+                )
+                days == 0L -> add(
+                    entry,
+                    VaultReminderType.EXPIRED,
+                    true,
+                    if (subscription) "今天到期，请确认续费。" else "今天到期，请尽快更换。",
+                )
+                days <= EXPIRY_WARN_DAYS -> add(
+                    entry,
+                    VaultReminderType.EXPIRING,
+                    false,
+                    if (subscription) {
+                        "$days 天后到期续费（${data.expiresOn}）。"
+                    } else {
+                        "$days 天后到期（${data.expiresOn}）。"
+                    },
+                )
             }
         }
-        if (data.kind == VAULT_KIND_LOGIN && data.password.isNotEmpty() && !data.skipChecks) {
+        if (data.secretValue.isNotEmpty() && data.rotateDays > 0) {
+            val age = daysSince(lastChangedAt(entry), today, zone)
+            val left = data.rotateDays - age
+            if (left <= 0) {
+                add(entry, VaultReminderType.ROTATE, true, "已 $age 天没有更换，设定为每 ${data.rotateDays} 天换一次。")
+            } else if (left <= ROTATE_WARN_DAYS) {
+                add(entry, VaultReminderType.ROTATE_SOON, false, "$left 天后到了更换周期（每 ${data.rotateDays} 天）。")
+            }
+        }
+        if (data.participatesInPasswordChecks()) {
             val others = byPassword[data.password].orEmpty().filter { it.id != entry.id }
             if (others.isNotEmpty()) {
                 val titles = others.map { it.data.title }
@@ -349,4 +518,13 @@ fun collectVaultReminders(
         }
     }
     return reminders.sortedWith(compareBy<VaultReminder> { !it.danger }.thenBy { it.title })
+}
+
+private fun VaultItemData.participatesInPasswordChecks(): Boolean {
+    if (password.isEmpty()) return false
+    return when (kind) {
+        VAULT_KIND_LOGIN -> !skipChecks
+        VAULT_KIND_SUBSCRIPTION -> true
+        else -> false
+    }
 }

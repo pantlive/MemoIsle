@@ -25,6 +25,7 @@ import {
   parseVaultBackup,
   rewrapVaultKey,
   stampSecretChange,
+  subscriptionProviderLabels,
   unlockVault,
   vaultItemFingerprint,
   vaultKindLabels,
@@ -59,6 +60,7 @@ const kindIcons: Record<VaultKind, string> = {
   secret: "钥",
   recovery: "码",
   server: "云",
+  subscription: "AI",
 };
 
 type Phase = "loading" | "error" | "insecure" | "setup" | "locked" | "unlocked";
@@ -88,6 +90,14 @@ function describe(error: unknown): string {
 }
 
 function entrySubtitle(data: VaultItemData): string {
+  if (data.kind === "subscription") {
+    const currency = data.currency === "USD" ? "$" : data.currency === "CNY" ? "¥" : data.currency;
+    return [
+      `${subscriptionProviderLabels[data.provider]}${data.plan ? ` ${data.plan}` : ""}`,
+      data.balance ? `余额 ${currency}${data.balance}` : "",
+      data.expiresOn ? `${data.expiresOn} 到期` : "",
+    ].filter(Boolean).join(" · ");
+  }
   if (data.kind === "login") return data.username || data.url || "未填写用户名";
   if (data.kind === "secret") return data.secret ? `${data.secret.length} 个字符` : "未填写密钥";
   if (data.kind === "server") {
@@ -102,7 +112,7 @@ function entrySubtitle(data: VaultItemData): string {
 }
 
 function entryHasSecret(data: VaultItemData): boolean {
-  if (data.kind === "login") return Boolean(data.password);
+  if (data.kind === "login" || data.kind === "subscription") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
   if (data.kind === "server") {
     return data.authMethod === "key"
@@ -120,12 +130,25 @@ function matchesQuery(data: VaultItemData, query: string): boolean {
     data.notes,
     data.kind === "login" ? `${data.username} ${data.url}` : "",
     data.kind === "recovery" ? data.account : "",
+    data.kind === "subscription"
+      ? `${subscriptionProviderLabels[data.provider]} ${data.plan} ${data.account} ${data.url}`
+      : "",
     // 服务器可以按主机名、IP、用户名、端口搜到。
     data.kind === "server"
       ? `${data.host} ${data.username} ${data.port}`
       : "",
   ].join(" ").toLowerCase();
   return haystack.includes(query.toLowerCase());
+}
+
+// 自定义登录地址只允许打开网页协议，避免执行粘贴进来的脚本地址。
+function subscriptionWebUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFocus }: {
@@ -567,6 +590,7 @@ export default function VaultPanel() {
       secret: 0,
       recovery: 0,
       server: 0,
+      subscription: 0,
       reminders: remindersByEntry.size,
     };
     for (const entry of entries) result[entry.data.kind] += 1;
@@ -738,12 +762,12 @@ export default function VaultPanel() {
                 aria-label="搜索密码库"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="按名称、用户名、网址或备注搜索"
+                placeholder="按名称、账号、服务商、套餐、网址或备注搜索"
                 autoComplete="off"
               />
             </div>
             <div className="vault-new-actions" aria-label="新建">
-              {(["login", "secret", "server", "recovery"] as VaultKind[]).map((kind) => (
+              {(["login", "secret", "server", "recovery", "subscription"] as VaultKind[]).map((kind) => (
                 <button key={kind} type="button" onClick={() => openNew(kind)}>
                   ＋ {vaultKindLabels[kind]}
                 </button>
@@ -751,7 +775,7 @@ export default function VaultPanel() {
             </div>
           </div>
           <div className="category-filter vault-kind-filter" role="group" aria-label="按类型筛选">
-            {(["all", "login", "secret", "server", "recovery", "reminders"] as KindFilter[])
+            {(["all", "login", "secret", "server", "recovery", "subscription", "reminders"] as KindFilter[])
               // 「需处理」没有提醒时不显示，正在看这一栏时保留，避免按钮突然消失。
               .filter((kind) => kind !== "reminders" || counts.reminders > 0 || kindFilter === "reminders")
               .map((kind) => (
@@ -807,7 +831,7 @@ export default function VaultPanel() {
           {entries.length === 0 && (
             <div className="state-panel empty-state">
               <h3>密码库还是空的</h3>
-              <p>可以保存网站账号密码、API Key 或 SSH 私钥，以及两步验证的恢复码。已有加密备份可以点右上角「导入备份」恢复。</p>
+              <p>可以保存网站账号密码、AI 订阅、API Key 或 SSH 私钥，以及两步验证的恢复码。已有加密备份可以点右上角「导入备份」恢复。</p>
             </div>
           )}
           {entries.length > 0 && visibleEntries.length === 0 && (
@@ -820,6 +844,7 @@ export default function VaultPanel() {
               const { data } = entry;
               const nextCode = data.kind === "recovery" ? data.codes.find((item) => !item.used) : undefined;
               const entryReminders = remindersByEntry.get(entry.id) ?? [];
+              const webUrl = data.kind === "subscription" ? subscriptionWebUrl(data.url) : null;
               return (
                 <li key={entry.id} className="vault-row">
                   <button type="button" className="vault-row-main" onClick={() => openEntry(entry)}>
@@ -845,6 +870,17 @@ export default function VaultPanel() {
                     </span>
                   </button>
                   <span className="vault-row-actions">
+                    {data.kind === "subscription" && (
+                      <>
+                        <button type="button" disabled={!data.account} onClick={() => void copyValue(data.account, "账号")}>复制账号</button>
+                        <button type="button" disabled={!data.password} onClick={() => void copyValue(data.password, "密码")}>复制密码</button>
+                        <button
+                          type="button"
+                          disabled={!webUrl}
+                          onClick={() => webUrl && window.open(webUrl, "_blank", "noopener,noreferrer")}
+                        >打开网址</button>
+                      </>
+                    )}
                     {data.kind === "login" && (
                       <>
                         <button type="button" disabled={!data.username} onClick={() => void copyValue(data.username, "用户名")}>复制用户名</button>

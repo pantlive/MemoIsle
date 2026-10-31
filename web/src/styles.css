@@ -6945,6 +6945,24 @@ button.template-node-copy {
   color: var(--info);
 }
 
+/* AI 订阅沿用主题色，双列字段在窄屏下改为单列。 */
+.vault-kind-icon.subscription {
+  background: var(--violet-soft);
+  color: var(--violet);
+  font-size: 12px;
+}
+
+.vault-subscription-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.vault-subscription-hint {
+  grid-column: 1 / -1;
+  align-self: center;
+}
+
 .vault-server-address {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 110px;
@@ -7324,7 +7342,8 @@ button.template-node-copy {
 }
 
 @media (max-width: 640px) {
-  .vault-reminder-grid {
+  .vault-reminder-grid,
+  .vault-subscription-grid {
     grid-template-columns: 1fr;
   }
 

@@ -5,6 +5,8 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.PersistableBundle
 import android.view.WindowManager
@@ -38,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Close
@@ -111,20 +114,34 @@ import com.memoisle.app.VaultViewModel
 import com.memoisle.app.data.RecoveryCode
 import com.memoisle.app.data.VAULT_AUTH_KEY
 import com.memoisle.app.data.VAULT_AUTH_PASSWORD
+import com.memoisle.app.data.VAULT_BILLING_LABELS
+import com.memoisle.app.data.VAULT_BILLING_OPTIONS
+import com.memoisle.app.data.VAULT_CURRENCY_CNY
+import com.memoisle.app.data.VAULT_CURRENCY_USD
 import com.memoisle.app.data.VAULT_KIND_LABELS
 import com.memoisle.app.data.VAULT_KIND_LOGIN
 import com.memoisle.app.data.VAULT_KIND_RECOVERY
 import com.memoisle.app.data.VAULT_KIND_SECRET
 import com.memoisle.app.data.VAULT_KIND_SERVER
+import com.memoisle.app.data.VAULT_KIND_SUBSCRIPTION
+import com.memoisle.app.data.VAULT_PROVIDER_LABELS
+import com.memoisle.app.data.VAULT_PROVIDER_OPTIONS
+import com.memoisle.app.data.VAULT_PROVIDER_OTHER
 import com.memoisle.app.data.VAULT_ROTATE_OPTIONS
 import com.memoisle.app.data.VaultEntry
 import com.memoisle.app.data.VaultItemData
 import com.memoisle.app.data.VaultReminder
 import com.memoisle.app.data.collectVaultReminders
 import com.memoisle.app.data.daysSince
+import com.memoisle.app.data.defaultSubscriptionTitle
+import com.memoisle.app.data.defaultSubscriptionUrl
+import com.memoisle.app.data.formatVaultMoney
 import com.memoisle.app.data.generateVaultPassword
 import com.memoisle.app.data.isWeakVaultPassword
 import com.memoisle.app.data.lastChangedAt
+import com.memoisle.app.data.normalizeVaultDate
+import com.memoisle.app.data.normalizeVaultMoney
+import com.memoisle.app.data.normalizeVaultProvider
 import com.memoisle.app.data.parseRecoveryCodes
 import java.time.LocalDate
 import java.time.ZoneId
@@ -152,16 +169,30 @@ private fun subtitle(data: VaultItemData): String = when (data.kind) {
             "$target$port · ${if (data.authMethod == VAULT_AUTH_KEY) "私钥" else "密码"}"
         }
     }
+    VAULT_KIND_SUBSCRIPTION -> {
+        val providerLabel = VAULT_PROVIDER_LABELS[normalizeVaultProvider(data.provider)].orEmpty()
+        val name = if (data.plan.isNotBlank()) "$providerLabel ${data.plan}" else providerLabel
+        buildList {
+            add(name)
+            if (data.balance.isNotBlank()) add("余额 ${formatVaultMoney(data.currency, data.balance)}")
+            if (data.expiresOn.isNotBlank()) add("${data.expiresOn} 到期")
+        }.joinToString(" · ")
+    }
     else -> {
         val remaining = data.codes.count { !it.used }
         (if (data.account.isNotBlank()) "${data.account} · " else "") + "剩余 $remaining / ${data.codes.size} 个可用"
     }
 }
 
-// 只按名称、用户名、网址、账号和备注搜索，不匹配密码和密钥本身。
+// 只按名称、用户名、网址、账号、套餐和备注搜索，不匹配密码和密钥本身。
 private fun VaultItemData.matches(query: String): Boolean {
     if (query.isBlank()) return true
-    val haystack = listOf(title, notes, username, url, account, host, port).joinToString(" ")
+    val subscriptionBits = if (kind == VAULT_KIND_SUBSCRIPTION) {
+        listOf(plan, provider, VAULT_PROVIDER_LABELS[provider].orEmpty())
+    } else {
+        emptyList()
+    }
+    val haystack = (listOf(title, notes, username, url, account, host, port) + subscriptionBits).joinToString(" ")
     return haystack.contains(query.trim(), ignoreCase = true)
 }
 
@@ -220,6 +251,24 @@ fun VaultScreen(
         coroutineScope.launch {
             delay(CLIPBOARD_CLEAR_MS)
             clearClipboardIfUnchanged(context, value)
+        }
+    }
+
+    fun openUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return
+        val href = if (trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        ) {
+            trimmed
+        } else {
+            "https://$trimmed"
+        }
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(href)))
+            viewModel.touch()
+        } catch (_: Exception) {
+            viewModel.showMessage("无法打开网址")
         }
     }
 
@@ -451,6 +500,7 @@ fun VaultScreen(
                                 editor = entry to entry.data
                             },
                             onCopy = ::copy,
+                            onOpenUrl = ::openUrl,
                         )
                     }
                 }
@@ -464,7 +514,13 @@ fun VaultScreen(
             title = { Text("新建条目") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_SERVER, VAULT_KIND_RECOVERY).forEach { kind ->
+                    listOf(
+                        VAULT_KIND_LOGIN,
+                        VAULT_KIND_SUBSCRIPTION,
+                        VAULT_KIND_SECRET,
+                        VAULT_KIND_SERVER,
+                        VAULT_KIND_RECOVERY,
+                    ).forEach { kind ->
                         val style = vaultKindStyle(kind)
                         Row(
                             modifier = Modifier
@@ -502,6 +558,7 @@ fun VaultScreen(
             busy = state.busy,
             onTouch = viewModel::touch,
             onCopy = ::copy,
+            onOpenUrl = ::openUrl,
             onDismiss = { editor = null },
             onSave = { data -> viewModel.save(entry, data) { editor = null } },
             onDelete = { entry?.let { viewModel.delete(it) { editor = null } } },
@@ -523,11 +580,17 @@ private fun clearClipboardIfUnchanged(context: Context, value: String) {
     }
 }
 
-/** 密码库四种条目的图标和配色，列表、新建选择和编辑页共用。 */
+/** 密码库条目的图标和配色，列表、新建选择和编辑页共用。 */
 internal fun vaultKindStyle(kind: String): MemoKindStyle = when (kind) {
     VAULT_KIND_SECRET -> MemoKindStyle(Icons.Outlined.Key, VAULT_KIND_LABELS.getValue(kind), WordAccent, WordSoft)
     VAULT_KIND_SERVER -> MemoKindStyle(Icons.Outlined.Dns, VAULT_KIND_LABELS.getValue(kind), IdeaAccent, IdeaSoft)
     VAULT_KIND_RECOVERY -> MemoKindStyle(Icons.Outlined.Pin, VAULT_KIND_LABELS.getValue(kind), ImageAccent, ImageSoft)
+    VAULT_KIND_SUBSCRIPTION -> MemoKindStyle(
+        Icons.Outlined.AutoAwesome,
+        VAULT_KIND_LABELS.getValue(kind),
+        Color(0xFF5B4B8A),
+        Color(0xFFEEEAF6),
+    )
     else -> MemoKindStyle(Icons.Outlined.Password, VAULT_KIND_LABELS.getValue(VAULT_KIND_LOGIN), DeepTeal, TealSoft)
 }
 
@@ -535,6 +598,7 @@ private fun vaultKindHint(kind: String): String = when (kind) {
     VAULT_KIND_SECRET -> "API Key、SSH 私钥、令牌"
     VAULT_KIND_SERVER -> "主机、端口和登录方式"
     VAULT_KIND_RECOVERY -> "两步验证的备用恢复码"
+    VAULT_KIND_SUBSCRIPTION -> "Claude、ChatGPT、Grok 订阅"
     else -> "网站或应用的用户名和密码"
 }
 
@@ -642,7 +706,13 @@ private fun KindFilters(
 ) {
     val options = buildList {
         add(FILTER_ALL to "全部 ${entries.size}")
-        listOf(VAULT_KIND_LOGIN, VAULT_KIND_SECRET, VAULT_KIND_SERVER, VAULT_KIND_RECOVERY).forEach { kind ->
+        listOf(
+            VAULT_KIND_LOGIN,
+            VAULT_KIND_SUBSCRIPTION,
+            VAULT_KIND_SECRET,
+            VAULT_KIND_SERVER,
+            VAULT_KIND_RECOVERY,
+        ).forEach { kind ->
             add(kind to "${VAULT_KIND_LABELS.getValue(kind)} ${entries.count { it.data.kind == kind }}")
         }
         // 没有提醒时不显示；正在看这一栏时保留，避免按钮突然消失。
@@ -683,6 +753,21 @@ private fun CopyButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     }
 }
 
+@Composable
+private fun OpenUrlButton(enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.height(36.dp),
+    ) {
+        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("打开网址", style = MaterialTheme.typography.labelLarge)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VaultRow(
@@ -691,6 +776,7 @@ private fun VaultRow(
     showReminderText: Boolean,
     onOpen: () -> Unit,
     onCopy: (String, String) -> Unit,
+    onOpenUrl: (String) -> Unit,
 ) {
     val data = entry.data
     val nextCode = data.codes.firstOrNull { !it.used }
@@ -708,7 +794,23 @@ private fun VaultRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                KindAvatar(style)
+                if (data.kind == VAULT_KIND_SUBSCRIPTION) {
+                    val letter = if (normalizeVaultProvider(data.provider) == VAULT_PROVIDER_OTHER) {
+                        "AI"
+                    } else {
+                        VAULT_PROVIDER_LABELS.getValue(normalizeVaultProvider(data.provider)).take(1)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(style.soft, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(letter, color = style.accent, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    KindAvatar(style)
+                }
                 Column(Modifier.weight(1f)) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -752,6 +854,11 @@ private fun VaultRow(
                             onCopy("ssh$port $user${data.host}", "ssh 命令")
                         }
                     }
+                    VAULT_KIND_SUBSCRIPTION -> {
+                        CopyButton("账号", data.account.isNotEmpty()) { onCopy(data.account, "账号") }
+                        CopyButton("密码", data.password.isNotEmpty()) { onCopy(data.password, "密码") }
+                        OpenUrlButton(enabled = data.url.isNotEmpty()) { onOpenUrl(data.url) }
+                    }
                     else -> CopyButton(
                         if (nextCode != null) "未用的恢复码" else "恢复码已用完",
                         nextCode != null,
@@ -777,6 +884,7 @@ private fun VaultItemEditor(
     busy: Boolean,
     onTouch: () -> Unit,
     onCopy: (String, String) -> Unit,
+    onOpenUrl: (String) -> Unit,
     onDismiss: () -> Unit,
     onSave: (VaultItemData) -> Unit,
     onDelete: () -> Unit,
@@ -803,6 +911,18 @@ private fun VaultItemEditor(
         }
     }
     val expiryInvalid = draft.expiresOn.isNotBlank() && expiresIn == null
+    val startedInvalid = draft.kind == VAULT_KIND_SUBSCRIPTION &&
+        draft.startedOn.isNotBlank() &&
+        normalizeVaultDate(draft.startedOn).isEmpty()
+    val priceInvalid = draft.kind == VAULT_KIND_SUBSCRIPTION &&
+        draft.price.isNotBlank() &&
+        normalizeVaultMoney(draft.price).isEmpty()
+    val balanceInvalid = draft.kind == VAULT_KIND_SUBSCRIPTION &&
+        draft.balance.isNotBlank() &&
+        normalizeVaultMoney(draft.balance).isEmpty()
+    val currencyInvalid = draft.kind == VAULT_KIND_SUBSCRIPTION &&
+        draft.currency.isNotBlank() &&
+        !Regex("^[A-Z]{3}$").matches(draft.currency)
     val secretChanged = draft.secretValue.isNotEmpty() && draft.secretValue != initial.secretValue
     val changedLabel = when {
         secretChanged -> "保存后记为今天"
@@ -833,8 +953,33 @@ private fun VaultItemEditor(
             }
             Spacer(Modifier.weight(1f))
             Button(
-                onClick = { onSave(draft.copy(title = draft.title.trim())) },
-                enabled = !busy && draft.title.isNotBlank() && !expiryInvalid && (dirty || isNew),
+                onClick = {
+                    val title = draft.title.trim().ifBlank {
+                        if (draft.kind == VAULT_KIND_SUBSCRIPTION) {
+                            defaultSubscriptionTitle(draft.provider, draft.plan)
+                        } else {
+                            draft.title.trim()
+                        }
+                    }
+                    onSave(
+                        draft.copy(
+                            title = title,
+                            currency = if (draft.kind == VAULT_KIND_SUBSCRIPTION && draft.currency.isBlank()) {
+                                VAULT_CURRENCY_USD
+                            } else {
+                                draft.currency
+                            },
+                        ),
+                    )
+                },
+                enabled = !busy &&
+                    (draft.title.isNotBlank() || draft.kind == VAULT_KIND_SUBSCRIPTION) &&
+                    !expiryInvalid &&
+                    !startedInvalid &&
+                    !priceInvalid &&
+                    !balanceInvalid &&
+                    !currencyInvalid &&
+                    (dirty || isNew),
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
@@ -861,6 +1006,48 @@ private fun VaultItemEditor(
                             Text(reminder.message, color = tone, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                }
+                if (draft.kind == VAULT_KIND_SUBSCRIPTION) {
+                    Text("服务商", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        VAULT_PROVIDER_OPTIONS.forEach { provider ->
+                            MemoFilterChip(
+                                label = VAULT_PROVIDER_LABELS.getValue(provider),
+                                selected = draft.provider == provider,
+                                onClick = {
+                                    val previousUrl = defaultSubscriptionUrl(draft.provider)
+                                    val previousTitle = defaultSubscriptionTitle(draft.provider, draft.plan)
+                                    val url = if (draft.url.isBlank() || draft.url == previousUrl) {
+                                        defaultSubscriptionUrl(provider)
+                                    } else {
+                                        draft.url
+                                    }
+                                    val title = if (draft.title.isBlank() || draft.title == previousTitle) {
+                                        defaultSubscriptionTitle(provider, draft.plan)
+                                    } else {
+                                        draft.title
+                                    }
+                                    update(draft.copy(provider = provider, url = url, title = title))
+                                },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = draft.plan,
+                        onValueChange = { plan ->
+                            val previousTitle = defaultSubscriptionTitle(draft.provider, draft.plan)
+                            val title = if (draft.title.isBlank() || draft.title == previousTitle) {
+                                defaultSubscriptionTitle(draft.provider, plan)
+                            } else {
+                                draft.title
+                            }
+                            update(draft.copy(plan = plan.take(80), title = title))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("套餐") },
+                        placeholder = { Text("如 Pro、Max、Plus、SuperGrok") },
+                    )
                 }
                 OutlinedTextField(
                     value = draft.title,
@@ -1013,6 +1200,153 @@ private fun VaultItemEditor(
                             }
                         }
                     }
+                    VAULT_KIND_SUBSCRIPTION -> {
+                        OutlinedTextField(
+                            value = draft.account,
+                            onValueChange = { update(draft.copy(account = it)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("订阅账号") },
+                            trailingIcon = {
+                                IconButton(onClick = { onCopy(draft.account, "账号") }, enabled = draft.account.isNotEmpty()) {
+                                    Icon(Icons.Outlined.ContentCopy, contentDescription = "复制账号", modifier = Modifier.size(18.dp))
+                                }
+                            },
+                        )
+                        OutlinedTextField(
+                            value = draft.password,
+                            onValueChange = { update(draft.copy(password = it)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("密码") },
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                            visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
+                            FieldAction(Icons.Outlined.AutoAwesome, "生成") { update(draft.copy(password = generateVaultPassword())) }
+                            FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.password.isNotEmpty()) { onCopy(draft.password, "密码") }
+                        }
+                        if (isWeakVaultPassword(draft.password)) {
+                            Text("密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。", color = DangerRed, style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedTextField(
+                            value = draft.url,
+                            onValueChange = { update(draft.copy(url = it)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("登录地址") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            trailingIcon = {
+                                IconButton(onClick = { onOpenUrl(draft.url) }, enabled = draft.url.isNotEmpty()) {
+                                    Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = "打开网址", modifier = Modifier.size(18.dp))
+                                }
+                            },
+                        )
+                        OutlinedTextField(
+                            value = draft.startedOn,
+                            onValueChange = { update(draft.copy(startedOn = it.trim().take(10))) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("订阅开始日期") },
+                            placeholder = { Text("例如 2026-01-15") },
+                            isError = startedInvalid,
+                            supportingText = {
+                                Text(if (startedInvalid) "请按 年-月-日 填写，例如 2026-01-15" else "留空表示不记录开始日期")
+                            },
+                        )
+                        OutlinedTextField(
+                            value = draft.expiresOn,
+                            onValueChange = { update(draft.copy(expiresOn = it.trim().take(10))) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("到期 / 续费日期") },
+                            placeholder = { Text("例如 2026-11-30") },
+                            isError = expiryInvalid,
+                            supportingText = {
+                                Text(
+                                    when {
+                                        expiryInvalid -> "请按 年-月-日 填写，例如 2026-11-30"
+                                        expiresIn == null -> "留空表示不提醒到期"
+                                        expiresIn < 0 -> "已过期 ${-expiresIn} 天"
+                                        expiresIn == 0L -> "今天到期"
+                                        else -> "还有 $expiresIn 天到期，到期前 14 天开始提醒"
+                                    },
+                                )
+                            },
+                        )
+                        Text("计费周期", style = MaterialTheme.typography.labelMedium)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            VAULT_BILLING_OPTIONS.forEach { cycle ->
+                                MemoFilterChip(
+                                    label = VAULT_BILLING_LABELS.getValue(cycle),
+                                    selected = draft.billingCycle == cycle,
+                                    onClick = { update(draft.copy(billingCycle = cycle)) },
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = draft.price,
+                            onValueChange = { update(draft.copy(price = it.trim().take(12))) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("每期费用") },
+                            placeholder = { Text("如 20 或 20.00") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = priceInvalid,
+                            supportingText = {
+                                if (priceInvalid) Text("只接受最多 9 位整数、2 位小数的非负数")
+                            },
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                            OutlinedTextField(
+                                value = draft.balance,
+                                onValueChange = { update(draft.copy(balance = it.trim().take(12))) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                label = { Text("账户余额") },
+                                placeholder = { Text("如 12.50") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                isError = balanceInvalid,
+                                supportingText = {
+                                    if (balanceInvalid) Text("只接受最多 9 位整数、2 位小数的非负数")
+                                },
+                            )
+                            OutlinedTextField(
+                                value = draft.currency,
+                                onValueChange = { value ->
+                                    update(draft.copy(currency = value.filter { it.isLetter() }.uppercase().take(3)))
+                                },
+                                modifier = Modifier.width(110.dp),
+                                singleLine = true,
+                                label = { Text("币种") },
+                                placeholder = { Text("USD") },
+                                isError = currencyInvalid,
+                                supportingText = {
+                                    Text(
+                                        when {
+                                            currencyInvalid -> "须为 3 位字母，例如 USD"
+                                            draft.currency.isBlank() -> "留空则保存为 USD"
+                                            else -> ""
+                                        },
+                                    )
+                                },
+                            )
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MemoFilterChip(
+                                label = "USD $",
+                                selected = draft.currency == VAULT_CURRENCY_USD,
+                                onClick = { update(draft.copy(currency = VAULT_CURRENCY_USD)) },
+                            )
+                            MemoFilterChip(
+                                label = "CNY ¥",
+                                selected = draft.currency == VAULT_CURRENCY_CNY,
+                                onClick = { update(draft.copy(currency = VAULT_CURRENCY_CNY)) },
+                            )
+                        }
+                    }
                     else -> {
                         OutlinedTextField(
                             value = draft.account,
@@ -1050,7 +1384,11 @@ private fun VaultItemEditor(
                         }
                     }
                 }
-                if (draft.kind == VAULT_KIND_LOGIN || draft.kind == VAULT_KIND_SECRET || draft.kind == VAULT_KIND_SERVER) {
+                if (draft.kind == VAULT_KIND_LOGIN ||
+                    draft.kind == VAULT_KIND_SECRET ||
+                    draft.kind == VAULT_KIND_SERVER ||
+                    draft.kind == VAULT_KIND_SUBSCRIPTION
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1062,7 +1400,7 @@ private fun VaultItemEditor(
                         Text(
                             "${
                                 when (draft.kind) {
-                                    VAULT_KIND_LOGIN -> "密码"
+                                    VAULT_KIND_LOGIN, VAULT_KIND_SUBSCRIPTION -> "密码"
                                     VAULT_KIND_SERVER -> "登录凭据"
                                     else -> "密钥"
                                 }
@@ -1080,26 +1418,28 @@ private fun VaultItemEditor(
                                 )
                             }
                         }
-                        OutlinedTextField(
-                            value = draft.expiresOn,
-                            onValueChange = { update(draft.copy(expiresOn = it.trim().take(10))) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("到期日（可选）") },
-                            placeholder = { Text("例如 2027-01-31") },
-                            isError = expiryInvalid,
-                            supportingText = {
-                                Text(
-                                    when {
-                                        expiryInvalid -> "请按 年-月-日 填写，例如 2027-01-31"
-                                        expiresIn == null -> "留空表示不会过期"
-                                        expiresIn < 0 -> "已过期 ${-expiresIn} 天"
-                                        expiresIn == 0L -> "今天到期"
-                                        else -> "还有 $expiresIn 天到期，到期前 14 天开始提醒"
-                                    },
-                                )
-                            },
-                        )
+                        if (draft.kind != VAULT_KIND_SUBSCRIPTION) {
+                            OutlinedTextField(
+                                value = draft.expiresOn,
+                                onValueChange = { update(draft.copy(expiresOn = it.trim().take(10))) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("到期日（可选）") },
+                                placeholder = { Text("例如 2027-01-31") },
+                                isError = expiryInvalid,
+                                supportingText = {
+                                    Text(
+                                        when {
+                                            expiryInvalid -> "请按 年-月-日 填写，例如 2027-01-31"
+                                            expiresIn == null -> "留空表示不会过期"
+                                            expiresIn < 0 -> "已过期 ${-expiresIn} 天"
+                                            expiresIn == 0L -> "今天到期"
+                                            else -> "还有 $expiresIn 天到期，到期前 14 天开始提醒"
+                                        },
+                                    )
+                                },
+                            )
+                        }
                         if (draft.kind == VAULT_KIND_LOGIN) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked = draft.skipChecks, onCheckedChange = { update(draft.copy(skipChecks = it)) })

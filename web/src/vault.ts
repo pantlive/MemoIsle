@@ -12,7 +12,40 @@ const KEY_WRAP_AAD = "memoisle-vault-key:v1";
 const ITEM_AAD_PREFIX = "memoisle-vault-item:v1:";
 const MAX_RECOVERY_CODES = 100;
 
-export type VaultKind = "login" | "secret" | "recovery" | "server";
+export type VaultKind = "login" | "secret" | "recovery" | "server" | "subscription";
+
+export const subscriptionProviderLabels = {
+  claude: "Claude",
+  chatgpt: "ChatGPT",
+  grok: "Grok",
+  other: "其他",
+} as const;
+
+export type SubscriptionProvider = keyof typeof subscriptionProviderLabels;
+
+export const subscriptionProviderUrls: Record<SubscriptionProvider, string> = {
+  claude: "https://claude.ai",
+  chatgpt: "https://chatgpt.com",
+  grok: "https://grok.com",
+  other: "",
+};
+
+// 订阅信息全部放在加密 JSON 中，账号和金额也不进入明文 API 字段。
+export interface VaultSubscriptionData extends VaultReminderSettings {
+  kind: "subscription";
+  title: string;
+  provider: SubscriptionProvider;
+  plan: string;
+  account: string;
+  password: string;
+  url: string;
+  startedOn: string;
+  billingCycle: "monthly" | "yearly" | "none";
+  price: string;
+  balance: string;
+  currency: string;
+  notes: string;
+}
 
 export interface RecoveryCode {
   code: string;
@@ -82,7 +115,8 @@ export type VaultItemData =
   | VaultLoginData
   | VaultSecretData
   | VaultRecoveryData
-  | VaultServerData;
+  | VaultServerData
+  | VaultSubscriptionData;
 
 export interface VaultEntry {
   id: string;
@@ -259,7 +293,9 @@ export async function encryptVaultItem(
   data: VaultItemData,
 ): Promise<{ ciphertext: string; iv: string }> {
   const iv = randomBytes(12);
-  const plaintext = utf8(JSON.stringify({ v: 1, ...data }));
+  // 写入和读取都校验订阅字段，避免将非法日期或金额存入密文。
+  const normalized = data.kind === "subscription" ? normalizeItemData({ ...data }) : data;
+  const plaintext = utf8(JSON.stringify({ v: 1, ...normalized }));
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv, additionalData: itemAad(id) },
     key,
@@ -270,6 +306,19 @@ export async function encryptVaultItem(
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function subscriptionDate(value: unknown): string {
+  const date = text(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const parsed = new Date(`${date}T00:00:00Z`);
+  // 日期必须真实存在，不能让 2 月 30 日自动滚动成 3 月。
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : "";
+}
+
+function subscriptionAmount(value: unknown): string {
+  const amount = text(value);
+  return /^\d{1,9}(\.\d{1,2})?$/.test(amount) ? amount : "";
 }
 
 function reminderSettings(raw: Record<string, unknown>): VaultReminderSettings {
@@ -288,6 +337,28 @@ function reminderSettings(raw: Record<string, unknown>): VaultReminderSettings {
 function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
   const title = text(raw.title) || "未命名";
   const notes = text(raw.notes);
+  if (raw.kind === "subscription") {
+    const provider = raw.provider;
+    return {
+      kind: "subscription",
+      title,
+      provider: provider === "claude" || provider === "chatgpt" || provider === "grok"
+        ? provider : "other",
+      plan: text(raw.plan),
+      account: text(raw.account),
+      password: text(raw.password),
+      url: text(raw.url),
+      startedOn: subscriptionDate(raw.startedOn),
+      billingCycle: raw.billingCycle === "yearly" || raw.billingCycle === "none"
+        ? raw.billingCycle : "monthly",
+      price: subscriptionAmount(raw.price),
+      balance: subscriptionAmount(raw.balance),
+      currency: /^[A-Z]{3}$/.test(text(raw.currency)) ? text(raw.currency) : "USD",
+      notes,
+      ...reminderSettings(raw),
+      expiresOn: subscriptionDate(raw.expiresOn),
+    };
+  }
   if (raw.kind === "secret") {
     return { kind: "secret", title, secret: text(raw.secret), notes, ...reminderSettings(raw) };
   }
@@ -404,6 +475,24 @@ export function parseRecoveryCodes(input: string, existing: RecoveryCode[] = [])
 
 export function emptyVaultItem(kind: VaultKind): VaultItemData {
   const reminders: VaultReminderSettings = { changedAt: "", rotateDays: 0, expiresOn: "" };
+  if (kind === "subscription") {
+    return {
+      kind,
+      title: "",
+      provider: "claude",
+      plan: "",
+      account: "",
+      password: "",
+      url: subscriptionProviderUrls.claude,
+      startedOn: "",
+      billingCycle: "monthly",
+      price: "",
+      balance: "",
+      currency: "USD",
+      notes: "",
+      ...reminders,
+    };
+  }
   if (kind === "secret") return { kind, title: "", secret: "", notes: "", ...reminders };
   if (kind === "recovery") return { kind, title: "", account: "", codes: [], notes: "" };
   if (kind === "server") {
@@ -439,8 +528,8 @@ export function stampSecretChange(
   next: VaultItemData,
   now = new Date().toISOString(),
 ): VaultItemData {
-  if (next.kind === "login") {
-    const before = previous?.kind === "login" ? previous.password : "";
+  if (next.kind === "login" || next.kind === "subscription") {
+    const before = previous?.kind === next.kind ? previous.password : "";
     if (next.password && next.password !== before) return { ...next, changedAt: now };
   }
   if (next.kind === "secret") {
@@ -466,6 +555,7 @@ export const vaultKindLabels: Record<VaultKind, string> = {
   secret: "密钥",
   recovery: "恢复码",
   server: "云服务器",
+  subscription: "AI 订阅",
 };
 
 // 加密备份：直接保存服务器上的密文和导出时的包裹参数，文件里没有任何明文。

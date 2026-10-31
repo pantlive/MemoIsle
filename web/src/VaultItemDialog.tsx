@@ -5,12 +5,16 @@ import {
   VAULT_ROTATE_OPTIONS,
   generatePassword,
   parseRecoveryCodes,
+  subscriptionProviderLabels,
+  subscriptionProviderUrls,
   vaultKindLabels,
   type RecoveryCode,
+  type SubscriptionProvider,
   type VaultItemData,
   type VaultLoginData,
   type VaultSecretData,
   type VaultServerData,
+  type VaultSubscriptionData,
 } from "./vault";
 import { daysSince, daysUntilDate, isWeakPassword, reminderLabels, type VaultReminder } from "./vaultReminders";
 
@@ -85,9 +89,15 @@ function describeAge(iso: string): string {
   return `${date}（${days === 0 ? "今天" : `${days} 天前`}）`;
 }
 
-// 账号密码和密钥共用的提醒设置。
+function subscriptionAmountError(value: string): string {
+  return value && !/^\d{1,9}(\.\d{1,2})?$/.test(value)
+    ? "请输入非负数字，整数最多 9 位，小数最多 2 位。"
+    : "";
+}
+
+// 账号密码、订阅和密钥共用的提醒设置。
 function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
-  draft: VaultLoginData | VaultSecretData | VaultServerData;
+  draft: VaultLoginData | VaultSecretData | VaultServerData | VaultSubscriptionData;
   changedLabel: string;
   secretChanged: boolean;
   onChange: (field: "rotateDays" | "expiresOn" | "skipChecks", value: number | string | boolean) => void;
@@ -97,7 +107,7 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
     <fieldset className="vault-reminder-fields">
       <legend>提醒</legend>
       <p className="vault-hint">
-        {draft.kind === "login"
+        {draft.kind === "login" || draft.kind === "subscription"
           ? "密码"
           : draft.kind === "server"
             ? "登录凭据"
@@ -118,7 +128,7 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
         </label>
         <label className="vault-field">
           <span className="vault-field-label">
-            <span>到期日</span>
+            <span>{draft.kind === "subscription" ? "到期 / 下次续费日期" : "到期日"}</span>
             {draft.expiresOn && (
               <button type="button" onClick={() => onChange("expiresOn", "")}>清除</button>
             )}
@@ -234,6 +244,15 @@ export default function VaultItemDialog({
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
 
+  // 保留用户正在编辑的内容，校验失败时直接提示并阻止保存。
+  const priceError = draft.kind === "subscription" ? subscriptionAmountError(draft.price) : "";
+  const balanceError = draft.kind === "subscription" ? subscriptionAmountError(draft.balance) : "";
+  const currencyError = draft.kind === "subscription" && draft.currency
+    && (draft.currency.length !== 3 || !/^[A-Z]{3}$/.test(draft.currency))
+    ? "请输入 3 位英文字母，例如 USD 或 CNY；留空使用 USD。"
+    : "";
+  const hasSubscriptionErrors = Boolean(priceError || balanceError || currencyError);
+
   // 保存冲突时外部会换成最新内容。
   useEffect(() => setDraft(initial), [initial]);
 
@@ -253,10 +272,27 @@ export default function VaultItemDialog({
 
   // 各类型字段不同，按字段名写入当前类型的草稿。
   const update = (field: string, value: string | number | boolean | RecoveryCode[]) => {
-    setDraft((current) => ({ ...current, [field]: value }) as VaultItemData);
+    setDraft((current) => {
+      // 跳过密码检查只属于登录条目，订阅草稿不能写入此字段。
+      if (field === "skipChecks" && current.kind !== "login") return current;
+      return { ...current, [field]: value } as VaultItemData;
+    });
   };
 
-  const secretChanged = (draft.kind === "login" && initial.kind === "login" && draft.password !== initial.password && Boolean(draft.password))
+  const updateProvider = (provider: SubscriptionProvider): void => {
+    setDraft((current) => {
+      if (current.kind !== "subscription") return current;
+      // 新建时跟随服务商预填网址，用户已填的自定义地址保留。
+      const useDefaultUrl = isNew && (!current.url || current.url === subscriptionProviderUrls[current.provider]);
+      return {
+        ...current,
+        provider,
+        url: useDefaultUrl ? subscriptionProviderUrls[provider] : current.url,
+      };
+    });
+  };
+
+  const secretChanged = ((draft.kind === "login" || draft.kind === "subscription") && draft.kind === initial.kind && draft.password !== initial.password && Boolean(draft.password))
     || (draft.kind === "secret" && initial.kind === "secret" && draft.secret !== initial.secret && Boolean(draft.secret))
     || (draft.kind === "server" && initial.kind === "server" && (
       draft.authMethod === "key"
@@ -267,9 +303,16 @@ export default function VaultItemDialog({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!draft.title.trim()) return;
+    if (hasSubscriptionErrors) return;
+    if (!draft.title.trim() && draft.kind !== "subscription") return;
     if (draft.kind === "server" && !draft.host.trim()) return;
-    onSave({ ...draft, title: draft.title.trim() });
+    // 订阅名称可留空，新建时按服务商和套餐生成，编辑时回落为「未命名」。
+    const title = draft.title.trim() || (draft.kind === "subscription" && isNew
+      ? `${subscriptionProviderLabels[draft.provider]} ${draft.plan.trim()}`.trim()
+      : "未命名");
+    onSave(draft.kind === "subscription"
+      ? { ...draft, title, currency: draft.currency || "USD" }
+      : { ...draft, title });
   };
 
   return (
@@ -308,14 +351,35 @@ export default function VaultItemDialog({
               ))}
             </ul>
           )}
+          {draft.kind === "subscription" && (
+            <div className="vault-subscription-grid">
+              <label className="vault-field">
+                <span className="vault-field-label"><span>服务商</span></span>
+                <select
+                  value={draft.provider}
+                  onChange={(event) => updateProvider(event.target.value as SubscriptionProvider)}
+                >
+                  {(Object.keys(subscriptionProviderLabels) as SubscriptionProvider[]).map((provider) => (
+                    <option key={provider} value={provider}>{subscriptionProviderLabels[provider]}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="vault-field">
+                <span className="vault-field-label"><span>套餐</span></span>
+                <input value={draft.plan} onChange={(event) => update("plan", event.target.value)} placeholder="例如：Pro / Max / Plus / SuperGrok" />
+              </label>
+            </div>
+          )}
           <label className="vault-field">
-            <span className="vault-field-label"><span>名称</span></span>
+            <span className="vault-field-label"><span>{draft.kind === "subscription" ? "标题" : "名称"}</span></span>
             <input
               ref={titleRef}
               value={draft.title}
               onChange={(event) => update("title", event.target.value)}
               placeholder={
-                draft.kind === "login"
+                draft.kind === "subscription"
+                  ? `${subscriptionProviderLabels[draft.provider]} ${draft.plan.trim()}`.trim()
+                  : draft.kind === "login"
                   ? "例如：GitHub"
                   : draft.kind === "secret"
                     ? "例如：OpenAI API Key"
@@ -324,20 +388,24 @@ export default function VaultItemDialog({
                       : "例如：GitHub 两步验证"
               }
               maxLength={200}
-              required
+              required={draft.kind !== "subscription"}
             />
           </label>
 
-          {draft.kind === "login" && (
+          {(draft.kind === "login" || draft.kind === "subscription") && (
             <>
               <label className="vault-field">
                 <span className="vault-field-label">
-                  <span>用户名或邮箱</span>
-                  <button type="button" onClick={() => onCopy(draft.username, "用户名")} disabled={!draft.username}>复制</button>
+                  <span>{draft.kind === "subscription" ? "订阅账号（邮箱或用户名）" : "用户名或邮箱"}</span>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(draft.kind === "subscription" ? draft.account : draft.username, draft.kind === "subscription" ? "账号" : "用户名")}
+                    disabled={!(draft.kind === "subscription" ? draft.account : draft.username)}
+                  >复制</button>
                 </span>
                 <input
-                  value={draft.username}
-                  onChange={(event) => update("username", event.target.value)}
+                  value={draft.kind === "subscription" ? draft.account : draft.username}
+                  onChange={(event) => update(draft.kind === "subscription" ? "account" : "username", event.target.value)}
                   autoComplete="off"
                   spellCheck={false}
                 />
@@ -349,13 +417,13 @@ export default function VaultItemDialog({
                 onCopy={() => onCopy(draft.password, "密码")}
                 onGenerate={() => update("password", generatePassword())}
               />
-              {!draft.skipChecks && isWeakPassword(draft.password) && (
+              {(draft.kind === "subscription" || !draft.skipChecks) && isWeakPassword(draft.password) && (
                 <small className="vault-hint warn vault-weak-hint">
                   密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。
                 </small>
               )}
               <label className="vault-field">
-                <span className="vault-field-label"><span>网址</span></span>
+                <span className="vault-field-label"><span>{draft.kind === "subscription" ? "登录 / 管理地址" : "网址"}</span></span>
                 <input
                   value={draft.url}
                   onChange={(event) => update("url", event.target.value)}
@@ -365,6 +433,58 @@ export default function VaultItemDialog({
                 />
               </label>
             </>
+          )}
+
+          {draft.kind === "subscription" && (
+            <div className="vault-subscription-grid">
+              <label className="vault-field">
+                <span className="vault-field-label"><span>订阅开始日期</span></span>
+                <input type="date" value={draft.startedOn} onChange={(event) => update("startedOn", event.target.value)} />
+              </label>
+              <label className="vault-field">
+                <span className="vault-field-label"><span>计费周期</span></span>
+                <select value={draft.billingCycle} onChange={(event) => update("billingCycle", event.target.value)}>
+                  <option value="monthly">每月</option>
+                  <option value="yearly">每年</option>
+                  <option value="none">一次性 / 按量</option>
+                </select>
+              </label>
+              <label className="vault-field">
+                <span className="vault-field-label"><span>每期费用</span></span>
+                <input
+                  value={draft.price}
+                  onChange={(event) => update("price", event.target.value)}
+                  inputMode="decimal"
+                  placeholder="例如：20.00"
+                  aria-invalid={Boolean(priceError)}
+                  aria-describedby={priceError ? "vault-price-error" : undefined}
+                />
+                {priceError && <small id="vault-price-error" className="vault-hint warn" role="alert">{priceError}</small>}
+              </label>
+              <label className="vault-field">
+                <span className="vault-field-label"><span>账户余额</span></span>
+                <input
+                  value={draft.balance}
+                  onChange={(event) => update("balance", event.target.value)}
+                  inputMode="decimal"
+                  placeholder="例如：12.50"
+                  aria-invalid={Boolean(balanceError)}
+                  aria-describedby={balanceError ? "vault-balance-error" : undefined}
+                />
+                {balanceError && <small id="vault-balance-error" className="vault-hint warn" role="alert">{balanceError}</small>}
+              </label>
+              <label className="vault-field">
+                <span className="vault-field-label"><span>币种</span></span>
+                <input
+                  value={draft.currency}
+                  onChange={(event) => update("currency", event.target.value.toUpperCase())}
+                  placeholder="USD / CNY（留空使用 USD）"
+                  aria-invalid={Boolean(currencyError)}
+                  aria-describedby={currencyError ? "vault-currency-error" : undefined}
+                />
+                {currencyError && <small id="vault-currency-error" className="vault-hint warn" role="alert">{currencyError}</small>}
+              </label>
+            </div>
           )}
 
           {draft.kind === "secret" && (
@@ -460,7 +580,7 @@ export default function VaultItemDialog({
             </>
           )}
 
-          {(draft.kind === "login" || draft.kind === "secret" || draft.kind === "server") && (
+          {(draft.kind === "login" || draft.kind === "secret" || draft.kind === "server" || draft.kind === "subscription") && (
             <ReminderFields
               draft={draft}
               changedLabel={changedLabel}
@@ -506,7 +626,7 @@ export default function VaultItemDialog({
             </button>
           )}
           <span className="vault-dialog-spacer" />
-          <button type="submit" className="primary" disabled={busy || !draft.title.trim() || (!dirty && !isNew)}>
+          <button type="submit" className="primary" disabled={busy || hasSubscriptionErrors || (draft.kind !== "subscription" && !draft.title.trim()) || (!dirty && !isNew)}>
             {busy ? "加密保存中…" : "保存"}
           </button>
         </div>
