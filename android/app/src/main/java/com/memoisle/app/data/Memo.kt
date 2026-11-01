@@ -138,6 +138,7 @@ fun Memo.trashDaysRemaining(
 }
 
 private val irregularLemmas = mapOf(
+    "used" to "use",
     "am" to "be",
     "are" to "be",
     "being" to "be",
@@ -270,6 +271,21 @@ private val comparativeSilentEStems = mapOf(
     "wid" to "wide",
 )
 
+// 单音节「辅音 + 单元音 + 辅音」词干：hop、bas、dat。与服务端 _verb_stem 保持一致。
+private val singleSyllableCvc = Regex("^[^aeiou]*[aeiou][^aeiouwxy]$")
+
+/**
+ * 去掉 -ed / -ing 后还原动词原形：双写辅音还原（stopped → stop），但原词本身
+ * 双写时保持（added → add）；没有双写的单音节 CVC 词干补回 e（hoped → hope）。
+ */
+private fun verbStem(stem: String): String = when {
+    stem.endsWith("e") -> stem
+    stem.length > 1 && stem.last() == stem[stem.lastIndex - 1] && stem.last() !in "lsz" ->
+        if (stem.length > 3) stem.dropLast(1) else stem
+    singleSyllableCvc.matches(stem) -> stem + "e"
+    else -> stem
+}
+
 fun normalizeLemma(value: String): String {
     val normalized = value.trim().lowercase(Locale.ROOT)
         .split(Regex("\\s+"))
@@ -298,27 +314,13 @@ fun normalizeLemma(value: String): String {
             !normalized.endsWith("is") -> normalized.dropLast(1)
         normalized.endsWith("ing") && normalized.length > 5 -> {
             val stem = normalized.dropLast(3)
-            when {
-                silentEStems.containsKey(stem) -> silentEStems.getValue(stem)
-                stem.endsWith("e") -> stem
-                stem.length > 1 &&
-                    stem.last() == stem[stem.lastIndex - 1] &&
-                    stem.last() !in "lsz" -> stem.dropLast(1)
-                else -> stem
-            }
+            silentEStems[stem] ?: verbStem(stem)
         }
         normalized.endsWith("ied") && normalized.length > 4 ->
             normalized.dropLast(3) + "y"
         normalized.endsWith("ed") && normalized.length > 4 -> {
             val stem = normalized.dropLast(2)
-            when {
-                silentEStems.containsKey(stem) -> silentEStems.getValue(stem)
-                stem.endsWith("e") -> stem
-                stem.length > 1 &&
-                    stem.last() == stem[stem.lastIndex - 1] &&
-                    stem.last() !in "lsz" -> stem.dropLast(1)
-                else -> stem
-            }
+            silentEStems[stem] ?: verbStem(stem)
         }
         normalized.endsWith("iest") && normalized.length > 5 -> {
             val candidate = normalized.dropLast(4) + "y"
