@@ -1,8 +1,6 @@
 import {
   Fragment,
-  type CSSProperties,
   type FormEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -10,7 +8,6 @@ import {
   useState,
 } from "react";
 
-import BookmarkImportDialog from "./BookmarkImportDialog";
 import BrandLogo from "./BrandLogo";
 import Icon, { type IconName } from "./Icon";
 import CategoryGenerator from "./CategoryGenerator";
@@ -18,9 +15,8 @@ import ResourceClassificationPanel from "./ResourceClassificationPanel";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
 import DataMenu from "./DataMenu";
 import MemoBatchToolbar from "./MemoBatchToolbar";
-import ResourceMonogram, { ResourceLinkGlyph } from "./ResourceIcon";
-import { normalizeWebUrl, siteHue, sourceHost } from "./webUrl";
-import { resourceSummary } from "./resourceSummary";
+import { ResourceLinkGlyph } from "./ResourceIcon";
+import { normalizeWebUrl, sourceHost } from "./webUrl";
 import {
   MeetingAudioUnavailableError,
   startMeetingCapture,
@@ -28,11 +24,7 @@ import {
   type MeetingCapture,
 } from "./meetingAudio";
 import ResourcePreviewDialog, { type ResourceEditChanges } from "./ResourcePreviewDialog";
-import CategoryTemplatePanel from "./CategoryTemplatePanel";
 import { categoryDepth } from "./categoryTree";
-import ImageOrganizationPanel from "./ImageOrganizationPanel";
-import CloudAccountDialog from "./CloudAccountDialog";
-import ModelSettingsDialog from "./ModelSettingsDialog";
 import {
   applyTheme,
   readThemePreference,
@@ -40,15 +32,10 @@ import {
   themeOptions,
   type ThemePreference,
 } from "./theme";
-import EbookCollectDialog from "./EbookCollectDialog";
 import { parseClipboardWord } from "./clipboardWord";
-import LinkHealthDialog from "./LinkHealthDialog";
-import BrowserHistoryDialog from "./BrowserHistoryDialog";
 import { pendingHealthIssueCount } from "./linkHealth";
 import ReviewPanel, { type ReviewQueueFilter } from "./ReviewPanel";
 import QuickAccess from "./QuickAccess";
-import ShortcutHelpDialog from "./ShortcutHelpDialog";
-import VaultPanel from "./VaultPanel";
 import { lockVaultSession } from "./vaultSession";
 import { saveVaultReminderCount, useVaultReminderCount } from "./vaultReminderBadge";
 import SpeechPronunciation from "./SpeechPronunciation";
@@ -114,6 +101,55 @@ import {
 } from "./api";
 import type { DataExportFormat } from "./api";
 import {
+  defaultResourceCategories,
+  MAX_MEMO_CATEGORIES,
+  memoCategoryCodes,
+  memoCategoryLabels,
+  memoMatchesCategoryFilter,
+} from "./memoCategories";
+import {
+  describeError,
+  effectiveSort,
+  TRASH_RETENTION_DAYS,
+} from "./memoListHelpers";
+import {
+  highlightMentionMatch,
+  isMemoIslePageUrl,
+  readWebMentionQuery,
+  tabMatchesMentionQuery,
+} from "./webMention";
+import {
+  formatImageBytes,
+  imageFileExtension,
+  imageFileTitle,
+  imageInfoLabel,
+  imageMimeFromFile,
+  imageOcrSourceLabel,
+  isImageFile,
+} from "./imageFiles";
+import { thumbnailCache } from "./MemoImageThumb";
+import { ImageCard, MemoListRow, type MemoRowActions } from "./MemoListRow";
+import {
+  type ActiveType,
+  type ActiveView,
+  greetingForHour,
+  headingDateFormatter,
+  isCaptureType,
+  navigation,
+  type ResourceViewMode,
+  timeFormatter,
+  viewCopy,
+} from "./workspaceViews";
+import { visibleInterval } from "./visibleInterval";
+import { createLevelStore } from "./levelStore";
+import VoiceLevelMeter from "./VoiceLevelMeter";
+import {
+  type AppRoute,
+  keepLinkedMemo,
+  readAppRoute,
+  writeAppRoute,
+} from "./appRoute";
+import {
   compressImageIfNeeded,
   describeImageCompression,
 } from "./imageCompression";
@@ -121,20 +157,32 @@ import type {
   AuthUser,
   BrowserCaptureContext,
   BrowserOpenTab,
-  ImageOcrSource,
   ImageOcrStatus,
   Memo,
   MemoCounts,
   MemoSort,
   MemoType,
   ResourceCategory,
-  ResourceCategoryOption,
   ResourceCategoryRule,
   ReviewFeedback,
   ReviewQueueResponse,
   ReviewSettings,
   WordLookupResponse,
 } from "./types";
+import { lazyComponent } from "./lazyComponent";
+
+// 点开才用的对话框与面板按需加载，不进首屏包。
+const BookmarkImportDialog = lazyComponent(() => import("./BookmarkImportDialog"));
+const CloudAccountDialog = lazyComponent(() => import("./CloudAccountDialog"));
+const ModelSettingsDialog = lazyComponent(() => import("./ModelSettingsDialog"));
+const EbookCollectDialog = lazyComponent(() => import("./EbookCollectDialog"));
+const LinkHealthDialog = lazyComponent(() => import("./LinkHealthDialog"));
+const BrowserHistoryDialog = lazyComponent(() => import("./BrowserHistoryDialog"));
+const ShortcutHelpDialog = lazyComponent(() => import("./ShortcutHelpDialog"));
+const VaultPanel = lazyComponent(() => import("./VaultPanel"), <p className="vault-loading" role="status">正在打开密码库…</p>);
+const CategoryTemplatePanel = lazyComponent(() => import("./CategoryTemplatePanel"));
+const ImageOrganizationPanel = lazyComponent(() => import("./ImageOrganizationPanel"));
+const WeeklyDigest = lazyComponent(() => import("./WeeklyDigest"));
 
 type LoadState = "loading" | "ready" | "error";
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -145,14 +193,6 @@ type VoiceState =
   | "paused"
   | "ready"
   | "saving";
-type ActiveType = Extract<MemoType, "idea" | "resource" | "word" | "image">;
-type ActiveView = ActiveType | "all" | "review" | "inbox" | "trash";
-type ResourceViewMode = "list" | "cards";
-
-function isCaptureType(view: ActiveView): view is OfflineDraftMemoType {
-  return view === "idea" || view === "resource" || view === "word";
-}
-
 const RESOURCE_PAGE_SIZE = 10;
 // 会议录音用较低码率换更长时长，与服务端 20 MB 上限配合。
 const MEETING_AUDIO_BITRATE = 48_000;
@@ -175,16 +215,6 @@ interface AppProps {
   onPasswordChanged: () => void;
 }
 
-interface NavigationItem {
-  label: string;
-  /** 导航统一使用内联 SVG 图标。 */
-  icon: IconName;
-  view?: ActiveView;
-  action?: "health" | "settings" | "vault" | "history";
-  /** 分组的第一项带上组名，侧栏在它上方显示小标题。 */
-  group?: string;
-}
-
 interface PendingResource {
   clientId: string;
   url: string;
@@ -199,379 +229,6 @@ interface ImageUploadTask {
   error?: string;
   /** 自动压缩提示（原大小 → 新大小、尺寸/格式变化）。 */
   note?: string;
-}
-
-const navigation: NavigationItem[] = [
-  { label: "首页", icon: "home", view: "all" },
-  { label: "收件箱", icon: "inbox", view: "inbox" },
-  { label: "回顾", icon: "review", view: "review" },
-  { label: "网页资料", icon: "link", view: "resource", group: "收藏" },
-  { label: "英语单词", icon: "word", view: "word" },
-  { label: "灵感", icon: "idea", view: "idea" },
-  { label: "图片收藏", icon: "image", view: "image" },
-  { label: "网页巡检", icon: "health", action: "health", group: "工具" },
-  { label: "浏览历史", icon: "history", action: "history" },
-  { label: "密码库", icon: "vault", action: "vault" },
-  { label: "回收站", icon: "trash", view: "trash" },
-  { label: "设置", icon: "settings", action: "settings" },
-];
-
-const headingDateFormatter = new Intl.DateTimeFormat("zh-CN", {
-  month: "long",
-  day: "numeric",
-  weekday: "long",
-});
-
-/** 首页标题按当前时段问候。 */
-function greetingForHour(hour: number): string {
-  if (hour < 5) return "夜深了";
-  if (hour < 11) return "早上好";
-  if (hour < 13) return "中午好";
-  if (hour < 18) return "下午好";
-  return "晚上好";
-}
-
-const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-const MAX_MEMO_CATEGORIES = 8;
-
-const defaultResourceCategories: ResourceCategoryOption[] = [
-  ["learning", "学习资料"],
-  ["article", "文章阅读"],
-  ["media", "视频与音频"],
-  ["tool", "工具与服务"],
-  ["book_paper", "书籍与论文"],
-  ["product", "商品与好物"],
-  ["other", "其他"],
-].map(([code, name]) => ({
-  id: null,
-  code,
-  name,
-  description: null,
-  is_system: true,
-  is_active: true,
-  version: 1,
-  parent_code: null,
-  depth: 1,
-  path: name,
-}));
-
-function memoCategoryCodes(memo: Memo): string[] {
-  if (memo.resource_categories && memo.resource_categories.length > 0) {
-    return memo.resource_categories;
-  }
-  return memo.resource_category ? [memo.resource_category] : [];
-}
-
-function descendantCategoryCodes(
-  code: string,
-  categories: ResourceCategoryOption[],
-): string[] {
-  const children = categories.filter((category) => category.parent_code === code);
-  return [
-    code,
-    ...children.flatMap((child) => descendantCategoryCodes(child.code, categories)),
-  ];
-}
-
-function memoMatchesCategoryFilter(
-  memo: Memo,
-  filter: string,
-  categories: ResourceCategoryOption[],
-): boolean {
-  if (!filter) {
-    return true;
-  }
-  const allowed = new Set(descendantCategoryCodes(filter, categories));
-  return memoCategoryCodes(memo).some((code) => allowed.has(code));
-}
-
-function memoCategoryLabels(
-  memo: Memo,
-  categories: ResourceCategoryOption[],
-): string[] {
-  return memoCategoryCodes(memo).map((code) => {
-    const option = categories.find((category) => category.code === code);
-    return option?.path || option?.name || memo.resource_category_label || code;
-  });
-}
-
-const viewCopy = {
-  all: {
-    title: "最近内容",
-    eyebrow: "一个入口，找回所有收藏",
-    icon: "collection",
-    itemLabel: "内容",
-    emptyTitle: "资料库还是空的",
-    emptyBody: "从灵感、英语单词或网页资料开始收藏第一条内容。",
-  },
-  idea: {
-    title: "灵感",
-    eyebrow: "捕捉此刻的想法",
-    icon: "idea",
-    itemLabel: "灵感",
-    emptyTitle: "第一条灵感正在等你",
-    emptyBody: "从上方快速记录开始，内容会同步到你的 Android 设备。",
-  },
-  resource: {
-    title: "网页资料",
-    eyebrow: "保存值得再次打开的内容",
-    icon: "link",
-    itemLabel: "资料",
-    emptyTitle: "还没有收藏网页资料",
-    emptyBody: "粘贴文章、课程、工具或视频链接，稍后继续阅读。",
-  },
-  word: {
-    title: "英语单词",
-    eyebrow: "收藏语境，按计划再次遇见",
-    icon: "word",
-    itemLabel: "单词",
-    emptyTitle: "从第一个英语单词开始",
-    emptyBody: "保存词形、释义和例句，稍后使用三档反馈进行复习。",
-  },
-  image: {
-    title: "图片收藏",
-    eyebrow: "收藏画面，随时再看一眼",
-    icon: "image",
-    itemLabel: "图片",
-    emptyTitle: "还没有收藏图片",
-    emptyBody: "选择、拖入或直接粘贴图片，就能开始图片收藏。",
-  },
-  review: {
-    title: "今日回顾",
-    eyebrow: "用几分钟再次遇见值得留下的内容",
-    icon: "review",
-    itemLabel: "回顾",
-    emptyTitle: "今天没有需要回顾的内容",
-    emptyBody: "到期单词、未读资料和待整理灵感会显示在这里。",
-  },
-  inbox: {
-    title: "收件箱",
-    eyebrow: "先记下的内容，在这里补完再放进资料库",
-    icon: "inbox",
-    itemLabel: "待整理条目",
-    emptyTitle: "收件箱是空的",
-    emptyBody: "快速记下的灵感会先到这里。补上标题或整理完成后，就会离开收件箱。",
-  },
-  trash: {
-    title: "回收站",
-    eyebrow: "删除的内容默认保留 30 天",
-    icon: "trash",
-    itemLabel: "回收站条目",
-    emptyTitle: "回收站是空的",
-    emptyBody: "移入回收站的内容会在这里保留 30 天，之后永久删除。",
-  },
-} as const;
-
-const TRASH_RETENTION_DAYS = 30;
-
-function trashDaysRemaining(memo: Memo): number {
-  const start = Date.parse(memo.deleted_at ?? memo.updated_at);
-  if (Number.isNaN(start)) {
-    return 0;
-  }
-  const remainingMs =
-    TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000 - (Date.now() - start);
-  return Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) {
-    return "内容已在其他设备更新，请处理编辑冲突后再保存。";
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "操作失败，请稍后重试。";
-}
-
-function readWebMentionQuery(value: string): string | null {
-  const match = value.match(/(^|\s)@([^\s]*)$/);
-  return match ? match[2] : null;
-}
-
-function tabMatchesMentionQuery(tab: BrowserOpenTab, query: string): boolean {
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return true;
-  }
-  return (
-    tab.page_title.toLowerCase().includes(needle) ||
-    tab.page_url.toLowerCase().includes(needle) ||
-    sourceHost(tab.page_url).toLowerCase().includes(needle)
-  );
-}
-
-function highlightMentionMatch(text: string, query: string): ReactNode {
-  const needle = query.trim();
-  if (!needle) {
-    return text;
-  }
-  const index = text.toLowerCase().indexOf(needle.toLowerCase());
-  if (index < 0) {
-    return text;
-  }
-  return (
-    <>
-      {text.slice(0, index)}
-      <mark className="capture-command-mark">
-        {text.slice(index, index + needle.length)}
-      </mark>
-      {text.slice(index + needle.length)}
-    </>
-  );
-}
-
-// 判断地址是否为 MemoIsle 本站页面，一键收藏时需跳过自身标签页。
-function isMemoIslePageUrl(rawUrl: string): boolean {
-  try {
-    return new URL(rawUrl).origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
-function formatImageBytes(bytes: number | null): string {
-  if (!bytes || bytes <= 0) {
-    return "";
-  }
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function imageDimensionLabel(memo: Memo): string {
-  if (memo.image_width && memo.image_height) {
-    return `${memo.image_width} × ${memo.image_height}`;
-  }
-  return "尺寸未知";
-}
-
-function imageInfoLabel(memo: Memo): string {
-  if (!memo.image_mime_type) {
-    return "尚未上传图片文件";
-  }
-  const parts = [
-    imageDimensionLabel(memo),
-    formatImageBytes(memo.image_size_bytes),
-    memo.image_mime_type.replace("image/", "").toUpperCase(),
-  ].filter((part) => part.length > 0);
-  return parts.join(" · ");
-}
-
-function imageOcrSourceLabel(source: ImageOcrSource | null): string {
-  if (source === "local") {
-    return "本地识别";
-  }
-  if (source === "llm") {
-    return "视觉模型";
-  }
-  return "";
-}
-
-function imageFileTitle(file: File | Blob): string {
-  const rawName = file instanceof File ? file.name : "";
-  const base = rawName.replace(/\.[^.]+$/, "").trim();
-  return base || "粘贴的图片";
-}
-
-function imageMimeFromFile(file: File): string {
-  if (file.type.startsWith("image/")) {
-    return file.type;
-  }
-  const extension = file.name.toLowerCase().split(".").pop() ?? "";
-  switch (extension) {
-    case "png":
-      return "image/png";
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "webp":
-      return "image/webp";
-    case "gif":
-      return "image/gif";
-    default:
-      return "";
-  }
-}
-
-function imageFileExtension(mimeType: string | null): string {
-  switch (mimeType) {
-    case "image/png":
-      return "png";
-    case "image/jpeg":
-      return "jpg";
-    case "image/webp":
-      return "webp";
-    case "image/gif":
-      return "gif";
-    default:
-      return "image";
-  }
-}
-
-function isImageFile(file: File): boolean {
-  return file.type.startsWith("image/") || imageMimeFromFile(file) !== "";
-}
-
-// 图片接口需要 Bearer 头，缩略图通过组件内的对象 URL 读取，卸载时释放。
-function MemoImageThumb({
-  memoId,
-  version,
-  alt,
-  className,
-}: {
-  memoId: string;
-  version: number;
-  alt: string;
-  className?: string;
-}) {
-  const [url, setUrl] = useState("");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    let objectUrl: string | null = null;
-    setUrl("");
-    setFailed(false);
-    void loadMemoImageUrl(memoId, "thumbnail")
-      .then((next) => {
-        if (!active) {
-          URL.revokeObjectURL(next);
-          return;
-        }
-        objectUrl = next;
-        setUrl(next);
-      })
-      .catch(() => {
-        if (active) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      active = false;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [memoId, version]);
-
-  if (failed) {
-    return <span className="image-thumb-fallback" aria-hidden="true"><Icon name="image" size={20} /></span>;
-  }
-  if (!url) {
-    return <span className="image-thumb-loading" aria-hidden="true" />;
-  }
-  return <img className={className ?? "image-thumb"} src={url} alt={alt} />;
 }
 
 function resourceRowElements(): HTMLElement[] {
@@ -592,7 +249,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setThemePreference(saved);
   }
 
-  const [activeType, setActiveType] = useState<ActiveView>("all");
+  // 刷新、深链接与浏览器后退都从地址栏恢复视图和选中条目。
+  const initialRouteRef = useRef<AppRoute | null>(null);
+  if (initialRouteRef.current === null) {
+    initialRouteRef.current = readAppRoute(window.location.search);
+  }
+  const initialRoute = initialRouteRef.current;
+  const [activeType, setActiveType] = useState<ActiveView>(
+    initialRoute.view === "vault" ? "all" : initialRoute.view,
+  );
   const [memos, setMemos] = useState<Memo[]>([]);
   const [currentResultCount, setCurrentResultCount] = useState(0);
   const [trashTotalCount, setTrashTotalCount] = useState(0);
@@ -616,10 +281,16 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const [batchSelection, setBatchSelection] = useState<Map<string, Memo>>(new Map());
   const [batchBusy, setBatchBusy] = useState(false);
   const [memoSort, setMemoSort] = useState<MemoSort>("updated_desc");
+  // 搜索时单独记一套排序，默认按相关度；清空搜索后恢复原来的排序。
+  const [searchSort, setSearchSort] = useState<MemoSort>("relevance");
   const [quickAccessItems, setQuickAccessItems] = useState<Memo[]>([]);
   const [quickAccessLoaded, setQuickAccessLoaded] = useState(false);
   // 撤销按钮只跟随对应的那条提示，提示被替换后自动失效。
   const [quickAccessUndo, setQuickAccessUndo] = useState<{ memo: Memo; message: string } | null>(null);
+  // 替换图片时发现与已有收藏相同，提示里带「查看」按钮；提示被替换后自动失效。
+  const [imageDuplicateNotice, setImageDuplicateNotice] = useState<
+    { memoId: string; message: string } | null
+  >(null);
   const [resourceViewMode, setResourceViewMode] =
     useState<ResourceViewMode>("list");
   const [resourceCategories, setResourceCategories] = useState(
@@ -675,17 +346,20 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const [isImporting, setIsImporting] = useState(false);
   const [updatingResourceId, setUpdatingResourceId] = useState<string | null>(null);
   const [typeChangingId, setTypeChangingId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialRoute.item);
+  // 深链接打开的条目可能不在当前页，列表刷新时把它留在最前面。
+  const linkedMemoIdRef = useRef<string | null>(initialRoute.item);
   const [resourcePreviewMemo, setResourcePreviewMemo] = useState<Memo | null>(null);
   const [resourcePreviewEditing, setResourcePreviewEditing] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   // 密码库是独立页面，不属于任何内容类型；切换到任何内容视图都会离开它。
-  const [vaultOpen, setVaultOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(initialRoute.view === "vault");
   const vaultReminderCount = useVaultReminderCount();
   const vaultOpenRef = useRef(vaultOpen);
   vaultOpenRef.current = vaultOpen;
   // 登录失效或切换账号时整个工作台卸载，库密钥不能留给下一个账号。
   useEffect(() => () => lockVaultSession(), []);
+  useEffect(() => () => thumbnailCache.clear(), []);
   // 列表在数据刷新或弹窗关闭后要恢复焦点的行；"first" 表示新页面的第一行。
   const pendingRowFocusRef = useRef<string[] | "first" | null>(null);
   const previewReturnIdRef = useRef<string[] | null>(null);
@@ -703,14 +377,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceSeconds, setVoiceSeconds] = useState(0);
-  const [voiceVolume, setVoiceVolume] = useState(0);
+  // 电平每帧都在变，放在外部 store 里，只让音量条重绘。
+  const [voiceLevel] = useState(() => createLevelStore());
   const [voiceText, setVoiceText] = useState("");
   const [voiceTranscriptionMessage, setVoiceTranscriptionMessage] = useState("");
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const [voiceDraftMemo, setVoiceDraftMemo] = useState<Memo | null>(null);
   const [voiceDiscardConfirmOpen, setVoiceDiscardConfirmOpen] = useState(false);
   const [meetingMode, setMeetingMode] = useState(false);
-  const [meetingRemoteVolume, setMeetingRemoteVolume] = useState(0);
+  const [meetingRemoteLevel] = useState(() => createLevelStore());
   const [meetingRemoteMissing, setMeetingRemoteMissing] = useState(false);
   const [audioUrl, setAudioUrl] = useState("");
   const [imageUploadTasks, setImageUploadTasks] = useState<ImageUploadTask[]>([]);
@@ -821,7 +496,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       capture.onSystemAudioEnded = undefined;
       capture.stop();
     }
-    setMeetingRemoteVolume(0);
+    meetingRemoteLevel.set(0);
     setMeetingRemoteMissing(false);
   };
 
@@ -835,7 +510,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       if (!active) {
         return;
       }
-      setMeetingRemoteVolume(active.readRemoteLevel());
+      meetingRemoteLevel.set(active.readRemoteLevel());
     }, 120);
   };
 
@@ -850,7 +525,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     if (audioContext) {
       void audioContext.close().catch(() => undefined);
     }
-    setVoiceVolume(0);
+    voiceLevel.set(0);
   };
 
   const startVoiceVolumeMonitor = (stream: MediaStream) => {
@@ -879,7 +554,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         }
         const rms = Math.sqrt(sumSquares / samples.length);
         // 放大低音量输入，保留 0-100 的简单、易懂反馈。
-        setVoiceVolume(Math.min(100, Math.round(rms * 180)));
+        voiceLevel.set(Math.min(100, Math.round(rms * 180)));
         volumeAnimationRef.current = window.requestAnimationFrame(updateVolume);
       };
       if (audioContext.state === "suspended") {
@@ -916,6 +591,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   );
   // 网页收藏使用视图内搜索框，其他视图沿用顶部搜索框。
   const viewQuery = activeType === "resource" ? resourceQuery : searchQuery;
+  const searchActive = Boolean(
+    (activeType === "resource" ? debouncedResourceQuery : debouncedQuery).trim(),
+  );
   const resourcePageCount = Math.max(
     1,
     Math.ceil(currentResultCount / pageSize),
@@ -1668,8 +1346,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   useEffect(() => {
     void refreshHealthSummary();
-    const timer = window.setInterval(() => void refreshHealthSummary(), 60_000);
-    return () => window.clearInterval(timer);
+    return visibleInterval(() => void refreshHealthSummary(), 60_000);
   }, [refreshHealthSummary]);
 
   useEffect(() => {
@@ -1697,11 +1374,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       return;
     }
     void refreshOpenBrowserTabs();
-    const timer = window.setInterval(
-      () => void refreshOpenBrowserTabs(false),
-      5_000,
-    );
-    return () => window.clearInterval(timer);
+    return visibleInterval(() => void refreshOpenBrowserTabs(false), 5_000);
   }, [webCommandOpen, refreshOpenBrowserTabs]);
 
   useEffect(() => {
@@ -1796,7 +1469,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           starred: resourceView && resourceStarredOnly ? true : undefined,
           status: trashView ? "trashed" : inboxView ? "inbox" : undefined,
           // 「最常打开」只对网页资料有意义，其他视图沿用默认排序。
-          sort: memoSort === "opened_desc" && !resourceView ? "updated_desc" : memoSort,
+          sort: effectiveSort(
+            (resourceView ? debouncedResourceQuery : debouncedQuery).trim()
+              ? searchSort
+              : memoSort,
+            resourceView,
+          ),
           limit: pageSize,
           offset: (resourcePage - 1) * pageSize,
         }),
@@ -1808,7 +1486,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       if (requestId !== loadRequestRef.current) {
         return;
       }
-      setMemos(response.items);
+      setMemos((current) =>
+        keepLinkedMemo(response.items, current, linkedMemoIdRef.current),
+      );
       setCurrentResultCount(response.total_count);
       if (trashView) setTrashTotalCount(allTrash?.total_count ?? response.total_count);
       setLoadState("ready");
@@ -1827,6 +1507,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     debouncedQuery,
     debouncedResourceQuery,
     memoSort,
+    searchSort,
     resourceCategoryFilter,
     imageCategoryFilter,
     resourcePage,
@@ -1852,7 +1533,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   });
 
   useEffect(() => {
-    setSelectedId(null);
+    // 换视图/筛选时清空选中；但深链接、后退或随机漫游刚打开的条目要保留。
+    setSelectedId((current) =>
+      current !== null && current === linkedMemoIdRef.current ? current : null,
+    );
     setMessage("");
     void loadCurrentMemos();
   }, [loadCurrentMemos]);
@@ -1926,10 +1610,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     if (!hasPendingResource) {
       return;
     }
-    const timer = window.setTimeout(
-      () => void loadCurrentMemos(false),
-      5_000,
-    );
+    // 后台标签页跳过这一轮；回到页面时 refreshOnReturn 会重新加载并续上轮询。
+    const timer = window.setTimeout(() => {
+      if (!document.hidden) void loadCurrentMemos(false);
+    }, 5_000);
     return () => window.clearTimeout(timer);
   }, [loadCurrentMemos, memos]);
 
@@ -2016,6 +1700,93 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setResourceStarredOnly(false);
     }
   };
+
+  // 视图、选中条目变化时写回地址栏；与地址一致时 writeAppRoute 不做任何事，
+  // 所以后退/前进恢复出的状态不会再压一条历史。
+  useEffect(() => {
+    writeAppRoute({
+      view: vaultOpen ? "vault" : activeType,
+      item: vaultOpen ? null : selectedId,
+    });
+  }, [activeType, selectedId, vaultOpen]);
+
+  useEffect(() => {
+    if (selectedId !== linkedMemoIdRef.current) {
+      linkedMemoIdRef.current = null;
+    }
+  }, [selectedId]);
+
+  const openLinkedMemo = (memoId: string) => {
+    linkedMemoIdRef.current = memoId;
+    setSelectedId(memoId);
+    void getMemo(memoId)
+      .then((memo) => {
+        if (linkedMemoIdRef.current !== memoId) {
+          return;
+        }
+        setMemos((current) =>
+          current.some((item) => item.id === memo.id) ? current : [memo, ...current],
+        );
+      })
+      .catch(() => {
+        if (linkedMemoIdRef.current === memoId) {
+          linkedMemoIdRef.current = null;
+          setSelectedId(null);
+          setMessage("链接里的条目不存在或已被删除。");
+        }
+      });
+  };
+
+  /** 打开一条已拿到完整数据的条目（本周摘要、随机漫游）：资料走预览，其余切到对应视图选中。 */
+  const showMemo = (memo: Memo) => {
+    if (memo.type === "resource") {
+      openResourcePreview(memo);
+      return;
+    }
+    if (memo.type !== activeType || vaultOpen) {
+      switchType(memo.type);
+    }
+    linkedMemoIdRef.current = memo.id;
+    setSelectedId(memo.id);
+    setMemos((current) =>
+      current.some((item) => item.id === memo.id) ? current : [memo, ...current],
+    );
+  };
+
+  const applyRouteRef = useRef<(route: AppRoute) => void>(() => undefined);
+  applyRouteRef.current = (route) => {
+    if (route.view === "vault") {
+      setSelectedId(null);
+      setVaultOpen(true);
+      return;
+    }
+    if (route.view !== activeType || vaultOpen) {
+      switchType(route.view);
+    }
+    if (route.item && route.item !== selectedId) {
+      if (memos.some((memo) => memo.id === route.item)) {
+        setSelectedId(route.item);
+      } else {
+        openLinkedMemo(route.item);
+      }
+    } else if (!route.item) {
+      setSelectedId(null);
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      applyRouteRef.current(readAppRoute(window.location.search));
+    };
+    window.addEventListener("popstate", handlePopState);
+    // 深链接首次打开：条目不一定在第一页，单独取一次。
+    const linkedId = linkedMemoIdRef.current;
+    if (linkedId) {
+      openLinkedMemo(linkedId);
+    }
+    return () => window.removeEventListener("popstate", handlePopState);
+    // 只在挂载时注册；最新状态经 applyRouteRef 读取。
+  }, []);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -2155,10 +1926,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setWebAttachmentHelp(false);
   };
 
+  // 编辑器当前内容对应的条目；不经点击选中（深链接、后退、随机漫游）时据此补做初始化。
+  const editorMemoIdRef = useRef<string | null>(null);
+
   const selectMemo = (memo: Memo) => {
     if (memo.type === "resource") {
       return;
     }
+    editorMemoIdRef.current = memo.id;
     const savedDraft = loadEditorDraft(authUser.id, memo.id);
     const serverBody = memo.type === "word" ? memo.word_meaning ?? memo.body : memo.body;
     setSelectedId(memo.id);
@@ -2185,6 +1960,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         : "",
     );
   };
+
+  useEffect(() => {
+    if (!selectedMemo) {
+      editorMemoIdRef.current = null;
+      return;
+    }
+    if (selectedMemo.type !== "resource" && editorMemoIdRef.current !== selectedMemo.id) {
+      selectMemo(selectedMemo);
+    }
+    // 只在选中的条目变化（或其数据首次到位）时初始化编辑器。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMemo?.id]);
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -3415,7 +3202,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     voiceDiscardingRef.current = false;
     voicePausedAtRef.current = null;
     voicePausedTotalMsRef.current = 0;
-    setVoiceVolume(0);
+    voiceLevel.set(0);
     setVoiceState("requesting");
     setMessage("");
     try {
@@ -3461,7 +3248,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           }
           meetingCapture.onSystemAudioEnded = () => {
             setMeetingRemoteMissing(true);
-            setMeetingRemoteVolume(0);
+            meetingRemoteLevel.set(0);
             setMessage("系统声音共享已停止，对方的声音不再录入；重新开始可再次授权。");
           };
         }
@@ -3595,7 +3382,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     try {
       recorder.pause();
       voicePausedAtRef.current = Date.now();
-      setVoiceVolume(0);
+      voiceLevel.set(0);
       voiceTranscriptionActiveRef.current = false;
       try {
         speechRecognitionRef.current?.stop();
@@ -3708,6 +3495,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     let doneCount = 0;
     let errorCount = 0;
     let compressedCount = 0;
+    let duplicateCount = 0;
     const updateTask = (
       taskId: string,
       changes: Partial<ImageUploadTask>,
@@ -3749,13 +3537,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }
       try {
         const created = await createImageMemo(imageFileTitle(file));
-        const uploaded = await uploadMemoImage(
+        const { memo: uploaded, duplicateOf } = await uploadMemoImage(
           created.id,
           uploadFile,
           created.version,
         );
         doneCount += 1;
-        updateTask(task.id, { status: "done" });
+        if (duplicateOf) {
+          duplicateCount += 1;
+          updateTask(task.id, { status: "done", note: "之前已收藏过相同图片，已沿用识别结果" });
+        } else {
+          updateTask(task.id, { status: "done" });
+        }
         if (activeTypeRef.current === "image") {
           setMemos((current) => [
             uploaded,
@@ -3771,10 +3564,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     void loadCurrentMemos(false);
     const compressedNote =
       compressedCount > 0 ? `，其中 ${compressedCount} 张已自动压缩` : "";
+    const duplicateNote =
+      duplicateCount > 0
+        ? `；${duplicateCount} 张与已有收藏相同，可在「图片整理」里查看重复图片`
+        : "";
     setMessage(
       errorCount === 0
-        ? `已收藏 ${doneCount} 张图片${compressedNote}。`
-        : `已收藏 ${doneCount} 张图片${compressedNote}，${errorCount} 张失败。`,
+        ? `已收藏 ${doneCount} 张图片${compressedNote}${duplicateNote}。`
+        : `已收藏 ${doneCount} 张图片${compressedNote}，${errorCount} 张失败${duplicateNote}。`,
     );
   };
 
@@ -3868,7 +3665,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         prepared.blob.type === uploadMime
           ? prepared.blob
           : new File([prepared.blob], file.name || "image", { type: uploadMime });
-      const updated = await uploadMemoImage(
+      const { memo: updated, duplicateOf } = await uploadMemoImage(
         selectedMemo.id,
         uploadFile,
         selectedMemo.version,
@@ -3876,11 +3673,16 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setMemos((current) =>
         current.map((memo) => (memo.id === updated.id ? updated : memo)),
       );
-      setMessage(
-        prepared.compressed
-          ? `图片已替换，原图和缩略图都已更新。${describeImageCompression(prepared)}`
-          : "图片已替换，原图和缩略图都已更新。",
-      );
+      const replacedText = prepared.compressed
+        ? `图片已替换，原图和缩略图都已更新。${describeImageCompression(prepared)}`
+        : "图片已替换，原图和缩略图都已更新。";
+      if (duplicateOf) {
+        const text = `${replacedText}这张图片与另一条收藏相同。`;
+        setMessage(text);
+        setImageDuplicateNotice({ memoId: duplicateOf, message: text });
+      } else {
+        setMessage(replacedText);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 409 && error.current) {
         const serverMemo = error.current;
@@ -3950,6 +3752,38 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
   }, [activeType]);
+
+  // 列表行用 memo 包裹；这里给它们一份引用永不变化的回调，内部总是调用最新的处理函数。
+  const memoRowHandlersRef = useRef<MemoRowActions | null>(null);
+  memoRowHandlersRef.current = {
+    select: selectMemo,
+    openPreview: (memo) => openResourcePreview(memo),
+    opened: handleResourceOpened,
+    toggleBatch: toggleBatchMemo,
+    organizeInbox: (memo) => void handleOrganizeInboxItem(memo),
+    archiveInbox: (memo) => void handleArchiveInboxItem(memo),
+    restore: (memo) => void handleRestoreFromTrash(memo),
+    permanentDelete: (memo) => void handlePermanentDelete(memo),
+    toggleCategory: toggleMemoCategory,
+    toggleStar: (memo) => void updateResourceOrganization(memo, { starred: !memo.starred }),
+    moveToTrash: (memo) => void handleMoveToTrash(memo),
+  };
+  const memoRowActions = useMemo<MemoRowActions>(() => {
+    const latest = () => memoRowHandlersRef.current!;
+    return {
+      select: (memo) => latest().select(memo),
+      openPreview: (memo) => latest().openPreview(memo),
+      opened: (memo) => latest().opened(memo),
+      toggleBatch: (memo) => latest().toggleBatch(memo),
+      organizeInbox: (memo) => latest().organizeInbox(memo),
+      archiveInbox: (memo) => latest().archiveInbox(memo),
+      restore: (memo) => latest().restore(memo),
+      permanentDelete: (memo) => latest().permanentDelete(memo),
+      toggleCategory: (memo, code) => latest().toggleCategory(memo, code),
+      toggleStar: (memo) => latest().toggleStar(memo),
+      moveToTrash: (memo) => latest().moveToTrash(memo),
+    };
+  }, []);
 
   return (
     <div className="app-shell">
@@ -4243,6 +4077,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               </button>
             </section>
           )}
+
+          {activeType === "review" && <WeeklyDigest onOpen={showMemo} />}
 
           {activeType === "review" && (
             <ReviewPanel
@@ -4578,7 +4414,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                         onClick={() => chooseOpenBrowserTab(tab)}
                       >
                         {tab.favicon_url ? (
-                          <img src={tab.favicon_url} alt="" />
+                          <img src={tab.favicon_url} alt="" loading="lazy" decoding="async" />
                         ) : (
                           <span className="capture-command-icon"><ResourceLinkGlyph /></span>
                         )}
@@ -4770,6 +4606,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   onClick={() => void changeQuickAccessHidden(quickAccessUndo.memo, false)}
                 >撤销</button>
               )}
+              {imageDuplicateNotice?.message === message && (
+                <button
+                  type="button"
+                  onClick={() => openLinkedMemo(imageDuplicateNotice.memoId)}
+                >查看已有</button>
+              )}
               {duplicateWord && (
                 <span className="status-actions">
                   <button type="button" onClick={handleViewDuplicateWord}>查看</button>
@@ -4825,12 +4667,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 <label>
                   <span className="sr-only">排序方式</span>
                   <select
-                    value={memoSort === "opened_desc" && activeType !== "resource" ? "updated_desc" : memoSort}
+                    value={effectiveSort(searchActive ? searchSort : memoSort, activeType === "resource")}
                     onChange={(event) => {
-                      setMemoSort(event.target.value as MemoSort);
+                      const next = event.target.value as MemoSort;
+                      if (searchActive) setSearchSort(next);
+                      else setMemoSort(next);
                       setResourcePage(1);
                     }}
                   >
+                    {searchActive && <option value="relevance">最相关</option>}
                     <option value="updated_desc">最近更新</option>
                     <option value="updated_asc">最早更新</option>
                     <option value="created_desc">最近收藏</option>
@@ -4964,61 +4809,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             {loadState === "ready" && memos.length > 0 && activeType === "image" && (
               <div className={`image-grid${batchSelection.size > 0 ? " multiselect" : ""}`}>
                 {memos.map((memo) => (
-                  <article
-                    className={`image-card${memo.id === selectedId ? " selected" : ""}${batchSelection.has(memo.id) ? " batch-selected" : ""}`}
+                  <ImageCard
                     key={memo.id}
-                    tabIndex={0}
-                    onClick={() => selectMemo(memo)}
-                    onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) {
-                        return;
-                      }
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        selectMemo(memo);
-                      }
-                    }}
-                  >
-                    <div className="image-card-media">
-                      {memo.image_mime_type ? (
-                        <MemoImageThumb
-                          memoId={memo.id}
-                          version={memo.version}
-                          alt={memo.title}
-                          className="image-card-thumb"
-                        />
-                      ) : (
-                        <span className="image-card-empty">尚未上传图片</span>
-                      )}
-                    </div>
-                    <div className="image-card-body">
-                      <label className="memo-batch-check" onClick={(event) => event.stopPropagation()}>
-                        <input type="checkbox" aria-label={`选择 ${memo.title}`} disabled={batchBusy} checked={batchSelection.has(memo.id)} onChange={() => toggleBatchMemo(memo)} />
-                        <span>选择</span>
-                      </label>
-                      <strong>{memo.starred && <Icon name="star" size={16} className="is-filled" />}{memo.title}</strong>
-                      {memo.resource_category_label && <small>分类：{memo.resource_category_label}</small>}
-                      <small>
-                        {timeFormatter.format(new Date(memo.created_at))} ·{" "}
-                        {imageDimensionLabel(memo)}
-                      </small>
-                      <small>
-                        {formatImageBytes(memo.image_size_bytes) || "等待上传文件"}
-                      </small>
-                      {memo.image_ocr_status === "ready" &&
-                        (memo.image_auto_tags ?? []).length > 0 && (
-                          <small
-                            className="image-card-tags"
-                            title={memo.image_auto_tags.join(" ")}
-                          >
-                            {memo.image_auto_tags
-                              .slice(0, 2)
-                              .map((tag) => `#${tag}`)
-                              .join(" ")}
-                          </small>
-                        )}
-                    </div>
-                  </article>
+                    memo={memo}
+                    selected={memo.id === selectedId}
+                    batchSelected={batchSelection.has(memo.id)}
+                    batchBusy={batchBusy}
+                    actions={memoRowActions}
+                  />
                 ))}
               </div>
             )}
@@ -5032,268 +4830,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 }
               >
                 {memos.map((memo) => (
-                  <article
-                    className={
-                      `memo-row${memo.type === "resource" ? " resource-row" : ""}` +
-                      (memo.id === selectedId ? " selected" : "") +
-                      (batchSelection.has(memo.id) ? " batch-selected" : "")
-                    }
+                  <MemoListRow
                     key={memo.id}
-                    data-memo-id={memo.id}
-                    onClick={() => {
-                      if (activeType !== "trash" && memo.type === "resource") {
-                        openResourcePreview(memo);
-                      } else if (activeType !== "trash") {
-                        selectMemo(memo);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (activeType === "trash" || event.target !== event.currentTarget) {
-                        return;
-                      }
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        if (memo.type === "resource") {
-                          openResourcePreview(memo);
-                        } else {
-                          selectMemo(memo);
-                        }
-                      }
-                    }}
-                    tabIndex={
-                      activeType === "trash" ? undefined : 0
-                    }
-                    >
-                    <input className="memo-batch-check" type="checkbox" aria-label={`选择 ${memo.title}`}
-                      disabled={batchBusy} checked={batchSelection.has(memo.id)} onClick={(event) => event.stopPropagation()}
-                      onChange={() => toggleBatchMemo(memo)} />
-                    <span
-                      className={`memo-type-icon ${memo.type}`}
-                      style={memo.type === "resource"
-                        ? { "--avatar-hue": siteHue(sourceHost(memo.source_url) || memo.title) } as CSSProperties
-                        : undefined}
-                    >
-                      {memo.audio_mime_type ? (
-                        <Icon name="audio" size={18} />
-                      ) : memo.type === "image" && memo.image_mime_type ? (
-                        <MemoImageThumb
-                          memoId={memo.id}
-                          version={memo.version}
-                          alt={memo.title}
-                          className="memo-image-thumb"
-                        />
-                      ) : memo.type === "resource" ? (
-                        <ResourceMonogram
-                          sourceUrl={memo.source_url}
-                          siteName={memo.resource_site_name}
-                        />
-                      ) : (
-                        <Icon name={viewCopy[memo.type].icon} size={18} />
-                      )}
-                    </span>
-                    <span className="memo-copy">
-                      {memo.type === "resource" && memo.source_url ? (
-                        <a
-                          className="memo-title-link"
-                          href={memo.source_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleResourceOpened(memo);
-                          }}
-                          onAuxClick={(event) => {
-                            if (event.button === 1) handleResourceOpened(memo);
-                          }}
-                        >
-                          {memo.title}
-                        </a>
-                      ) : (
-                        <strong>{memo.starred && <Icon name="star" size={16} className="is-filled" />}{memo.title}</strong>
-                      )}
-                      <span>
-                        {memo.type === "resource"
-                          ? resourceSummary(memo) || sourceHost(memo.source_url)
-                          : memo.type === "word"
-                            ? memo.word_phonetic || memo.word_meaning || "等待补充释义"
-                            : memo.type === "image"
-                              ? memo.body || "图片收藏"
-                              : memo.body}
-                      </span>
-                      {memo.type === "resource" && <ResourceClassificationInsight memo={memo} compact />}
-                      <small className="memo-meta-line">
-                        {memo.type === "resource"
-                          ? (
-                            <>
-                              {/* 标题已是原网页链接；无标题时标题就是站点名，不再重复。 */}
-                              {memo.title !== sourceHost(memo.source_url) && (
-                                <span className="memo-source-host">{sourceHost(memo.source_url)}</span>
-                              )}
-                              {memo.resource_open_count > 0 && (
-                                <span className="memo-open-count">打开 {memo.resource_open_count} 次</span>
-                              )}
-                              {memo.tags.length > 0 && (
-                                <span className="memo-tags" aria-label="我的标签">
-                                  {memo.tags.map((tag) => (
-                                    <span key={tag} className="memo-tag">#{tag}</span>
-                                  ))}
-                                </span>
-                              )}
-                              {memo.ebook_path && (
-                                <span
-                                  className="memo-ebook-badge"
-                                  title={memo.ebook_path}
-                                >
-                                  云盘
-                                  {memo.ebook_format
-                                    ? ` · ${memo.ebook_format.toUpperCase()}`
-                                    : ""}
-                                  {memo.ebook_size_bytes
-                                    ? ` · ${formatImageBytes(memo.ebook_size_bytes)}`
-                                    : ""}
-                                </span>
-                              )}
-                            </>
-                          )
-                          : memo.type === "word"
-                            ? `熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.review_count} 次 · 下次 ${
-                              memo.next_review_at
-                                ? timeFormatter.format(new Date(memo.next_review_at))
-                                : "待安排"
-                            }`
-                            : memo.type === "image"
-                              ? memo.image_mime_type
-                                ? `图片 · ${imageDimensionLabel(memo)} · ${
-                                    formatImageBytes(memo.image_size_bytes) || "处理中"
-                                  }`
-                                : "尚未上传图片"
-                              : memo.audio_mime_type ? "语音灵感" : "灵感"}
-                        {memo.type !== "resource" && ` · 版本 ${memo.version}`}
-                        {activeType === "trash" &&
-                          ` · 还剩 ${trashDaysRemaining(memo)} 天`}
-                        {activeType === "inbox" && " · 待整理"}
-                      </small>
-                    </span>
-                    <span className="memo-row-side">
-                      <time dateTime={memo.updated_at}>
-                        {timeFormatter.format(new Date(memo.updated_at))}
-                      </time>
-                      {activeType === "inbox" && (
-                        <span
-                          className="trash-inline-actions"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => void handleOrganizeInboxItem(memo)}
-                          >
-                            整理完成
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleArchiveInboxItem(memo)}
-                          >
-                            归档
-                          </button>
-                        </span>
-                      )}
-                      {activeType === "trash" && (
-                        <span
-                          className="trash-inline-actions"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => void handleRestoreFromTrash(memo)}
-                            disabled={trashBulkAction !== null}
-                          >
-                            恢复
-                          </button>
-                          <button
-                            type="button"
-                            className="danger"
-                            onClick={() => void handlePermanentDelete(memo)}
-                            disabled={trashBulkAction !== null}
-                          >
-                            永久删除
-                          </button>
-                        </span>
-                      )}
-                      {activeType !== "trash" && memo.type === "resource" && (
-                        <span
-                          className="resource-inline-actions"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <details className="resource-category-picker">
-                            <summary
-                              title={memoCategoryLabels(memo, resourceCategories).join("、")}
-                            >
-                              {memoCategoryLabels(memo, resourceCategories).join("、")
-                                || "分类中"}
-                            </summary>
-                            <div className="resource-category-picker-menu">
-                              {resourceCategories
-                                .filter((category) => category.is_active)
-                                .map((category) => {
-                                  const selectedCodes = memoCategoryCodes(memo);
-                                  const selected = selectedCodes.includes(category.code);
-                                  return (
-                                    <label
-                                      key={category.code}
-                                      style={{
-                                        paddingLeft: `${8 + (categoryDepth(category) - 1) * 12}px`,
-                                      }}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={selected}
-                                        disabled={
-                                          updatingResourceId === memo.id
-                                          || (
-                                            !selected
-                                            && selectedCodes.length >= MAX_MEMO_CATEGORIES
-                                          )
-                                        }
-                                        onChange={() =>
-                                          toggleMemoCategory(memo, category.code)
-                                        }
-                                      />
-                                      {category.path || category.name}
-                                    </label>
-                                  );
-                                })}
-                              <small>最多 8 个分类</small>
-                            </div>
-                          </details>
-                          <button
-                            type="button"
-                            className={memo.starred ? "starred" : ""}
-                            aria-label={memo.starred ? "取消星标" : "添加星标"}
-                            aria-pressed={memo.starred}
-                            title={memo.starred ? "取消星标" : "添加星标"}
-                            disabled={updatingResourceId === memo.id}
-                            onClick={() =>
-                              void updateResourceOrganization(memo, {
-                                starred: !memo.starred,
-                              })
-                            }
-                          >
-                            <Icon name="star" size={16} className={memo.starred ? "is-filled" : undefined} />
-                          </button>
-                          <button
-                            type="button"
-                            className="resource-trash-button"
-                            aria-label={`将“${memo.title}”移入回收站`}
-                            title="移入回收站"
-                            disabled={updatingResourceId === memo.id}
-                            onClick={() => void handleMoveToTrash(memo)}
-                          >
-                            <Icon name="trash" size={16} />
-                          </button>
-                        </span>
-                      )}
-                    </span>
-                  </article>
+                    memo={memo}
+                    view={activeType}
+                    selected={memo.id === selectedId}
+                    batchSelected={batchSelection.has(memo.id)}
+                    batchBusy={batchBusy}
+                    updating={updatingResourceId === memo.id}
+                    trashBusy={trashBulkAction !== null}
+                    categories={resourceCategories}
+                    actions={memoRowActions}
+                  />
                 ))}
               </div>
             )}
@@ -5852,27 +5400,19 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 </small>
               </div>
 
-              <div className="voice-meter" aria-label={`我的麦克风音量 ${voiceVolume}%`}>
-                <span>{meetingMode ? "我的声音" : "输入音量"}</span>
-                <div className="voice-meter-track" aria-hidden="true">
-                  <span style={{ width: `${voiceVolume}%` }} />
-                </div>
-                <strong>{voiceVolume}%</strong>
-              </div>
+              <VoiceLevelMeter
+                store={voiceLevel}
+                label={meetingMode ? "我的声音" : "输入音量"}
+                ariaSubject="我的麦克风音量"
+              />
 
               {meetingMode && (
-                <div
-                  className={
-                    meetingRemoteMissing ? "voice-meter missing" : "voice-meter"
-                  }
-                  aria-label={`对方声音音量 ${meetingRemoteVolume}%`}
-                >
-                  <span>对方声音</span>
-                  <div className="voice-meter-track" aria-hidden="true">
-                    <span style={{ width: `${meetingRemoteVolume}%` }} />
-                  </div>
-                  <strong>{meetingRemoteMissing ? "未接入" : `${meetingRemoteVolume}%`}</strong>
-                </div>
+                <VoiceLevelMeter
+                  store={meetingRemoteLevel}
+                  label="对方声音"
+                  ariaSubject="对方声音音量"
+                  missing={meetingRemoteMissing}
+                />
               )}
 
               <label className="voice-note-label">

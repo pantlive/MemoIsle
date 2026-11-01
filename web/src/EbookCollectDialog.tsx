@@ -8,6 +8,7 @@ import {
   retryEbookJob,
 } from "./api";
 import type { CloudAccount, EbookJob, EbookJobStatus } from "./types";
+import { visibleInterval } from "./visibleInterval";
 
 interface EbookCollectDialogProps {
   onClose: () => void;
@@ -107,8 +108,7 @@ export default function EbookCollectDialog({
     if (!hasActiveJob) {
       return;
     }
-    const timer = window.setInterval(() => void refreshJobs(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    return visibleInterval(() => void refreshJobs(), POLL_INTERVAL_MS);
   }, [hasActiveJob, refreshJobs]);
 
   const handleSubmit = async () => {
