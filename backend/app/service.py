@@ -28,6 +28,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app import memo_search
 from app.category_service import assign_memo_categories, descendant_category_codes
 from app.config import Settings
 from app.database import (
@@ -533,9 +534,19 @@ def memo_query(
         query = query.where(Memo.created_at >= created_from)
     if created_to is not None:
         query = query.where(Memo.created_at < created_to)
-    if query_text and (search_tokens := split_search_tokens(query_text)):
-        # 逐词收窄：关键词之间是「与」关系，词序和分隔符不影响结果。
-        # 同时检索三种内容类型的用户可见文本。
+    search_tokens = split_search_tokens(query_text) if query_text else []
+    use_fts = bool(search_tokens) and memo_search.fts_enabled()
+    if use_fts:
+        # FTS 表经映射表关联到条目；关键词之间是「与」关系。
+        query = query.join(
+            memo_search.memo_search_doc,
+            memo_search.memo_search_doc.c.memo_id == Memo.id,
+        ).join(
+            memo_search.memo_search,
+            memo_search.memo_search.c.rowid == memo_search.memo_search_doc.c.rowid,
+        ).where(memo_search.search_condition(search_tokens, escape_like_pattern))
+    elif search_tokens:
+        # 非 SQLite 或旧版 SQLite 没有 trigram 索引时，逐词 ILIKE 收窄。
         for token in search_tokens:
             pattern = f"%{escape_like_pattern(token)}%"
             # 同时匹配 JSON 原文和 Unicode 转义形式，兼容已有 SQLite 数据。
@@ -563,6 +574,16 @@ def memo_query(
             Memo.id.desc(),
         ),
     }
+    if sort == MemoSort.RELEVANCE:
+        if not search_tokens:
+            return query.order_by(*sort_orders[MemoSort.UPDATED_DESC])
+        # ILIKE 回退路径没有 FTS 表可排序，退化为按更新时间。
+        relevance = (
+            memo_search.relevance_order(search_tokens, escape_like_pattern)
+            if use_fts
+            else []
+        )
+        return query.order_by(*relevance, *sort_orders[MemoSort.UPDATED_DESC])
     return query.order_by(*sort_orders[sort])
 
 
@@ -1647,6 +1668,14 @@ def attach_image(
     memo.image_ocr_source = None
     memo.image_auto_tags = []
     memo.image_ocr_updated_at = None
+    # 同一张图已经识别过时直接沿用结果，不再重复调用 OCR / 视觉模型。
+    duplicate = find_image_duplicate(session, user_id, memo)
+    if duplicate is not None and duplicate.image_ocr_status == "ready":
+        memo.image_ocr_text = duplicate.image_ocr_text
+        memo.image_ocr_status = "ready"
+        memo.image_ocr_source = duplicate.image_ocr_source
+        memo.image_auto_tags = list(duplicate.image_auto_tags or [])
+        memo.image_ocr_updated_at = duplicate.image_ocr_updated_at
     # 新图不能沿用旧图的模型判断，手动分类仍然保留。
     memo.resource_ai_classified_at = None
     memo.resource_ai_assessment = None
@@ -1664,6 +1693,35 @@ def attach_image(
     session.commit()
     session.refresh(memo)
     return memo
+
+
+# 上传图片的响应头：同账号已有相同内容的图片时，值为那条图片收藏的 ID。
+IMAGE_DUPLICATE_HEADER = "X-MemoIsle-Duplicate-Of"
+
+
+def find_image_duplicate(session: Session, user_id: str, memo: Memo) -> Memo | None:
+    """找出同一账号里内容完全相同（同 SHA-256）的另一条图片收藏。
+
+    优先返回已识别的那条，便于复用 OCR 结果；回收站里的条目不算。
+    """
+
+    if not memo.image_hash:
+        return None
+    return session.scalar(
+        select(Memo)
+        .where(
+            Memo.user_id == user_id,
+            Memo.id != memo.id,
+            Memo.type == MemoType.IMAGE,
+            Memo.status != MemoStatus.TRASHED,
+            Memo.image_hash == memo.image_hash,
+        )
+        .order_by(
+            (Memo.image_ocr_status == "ready").desc(),
+            Memo.created_at.asc(),
+        )
+        .limit(1)
+    )
 
 
 def get_image_path(

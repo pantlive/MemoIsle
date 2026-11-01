@@ -282,6 +282,12 @@ class Memo(Base):
         Index("ix_memo_user_updated", "user_id", "updated_at"),
         # 网页资料按规范化网址去重，查重和「历史里是否已收藏」都走这个索引。
         Index("ix_memo_user_canonical_url", "user_id", "canonical_url"),
+        # 列表几乎总按类型或状态（回收站、收件箱）筛选，再按更新时间分页；
+        # 末尾带上 id，排序的平局字段也能直接走索引，不必建临时 B-tree。
+        Index("ix_memo_user_type_updated", "user_id", "type", "updated_at", "id"),
+        Index("ix_memo_user_status_updated", "user_id", "status", "updated_at", "id"),
+        # 上传图片时按内容哈希查重。
+        Index("ix_memo_user_image_hash", "user_id", "image_hash"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

@@ -94,6 +94,16 @@ class Database:
 
         Base.metadata.create_all(self.engine)
         self._migrate_sqlite_schema()
+        if self.engine.dialect.name == "sqlite":
+            from app.memo_search import ensure_memo_search_index
+
+            # create_all 不会给已存在的表补索引，旧库在这里补齐。
+            with self.engine.begin() as connection:
+                for index in Base.metadata.tables["memo"].indexes:
+                    index.create(connection, checkfirst=True)
+
+            with self.engine.begin() as connection:
+                ensure_memo_search_index(connection)
 
     def _migrate_sqlite_schema(self) -> None:
         """为已有本地数据库补充可空字段，避免清空开发数据。"""

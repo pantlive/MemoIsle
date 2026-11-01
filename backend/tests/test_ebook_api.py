@@ -39,7 +39,7 @@ def test_ebooks_api_requires_bound_cloud_account(
     """没有绑定云盘时提交电子书链接会被拒绝。"""
 
     monkeypatch.setattr(
-        "app.api.process_ebook_job_in_background",
+        "app.routes.ebooks.process_ebook_job_in_background",
         lambda *args, **kwargs: None,
     )
     response = client.post(
@@ -59,7 +59,7 @@ def test_ebooks_api_submit_list_and_retry(
     account_id = _bind_aliyun(client, monkeypatch)
     assert account_id
     monkeypatch.setattr(
-        "app.api.process_ebook_job_in_background",
+        "app.routes.ebooks.process_ebook_job_in_background",
         lambda *args, **kwargs: None,
     )
 
@@ -106,7 +106,7 @@ def test_ebooks_api_classifies_share_link(
 
     _bind_aliyun(client, monkeypatch)
     monkeypatch.setattr(
-        "app.api.process_ebook_job_in_background",
+        "app.routes.ebooks.process_ebook_job_in_background",
         lambda *args, **kwargs: None,
     )
 

@@ -999,7 +999,7 @@ def test_generate_add_and_classify_with_jev(
                 model_client,
             )
 
-    monkeypatch.setattr("app.api.generate_category_suggestions", generate)
+    monkeypatch.setattr("app.routes.resources.generate_category_suggestions", generate)
     preview = client.post(
         "/api/v1/resource-categories/generate",
         json={"instructions": "按 AI 领域细分工具"},

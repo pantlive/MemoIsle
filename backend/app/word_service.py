@@ -18,6 +18,7 @@ from app.database import Database
 from app.models import Memo, MemoStatus, MemoType
 
 IRREGULAR_LEMMAS = {
+    "used": "use",
     "am": "be",
     "are": "be",
     "being": "be",
@@ -395,6 +396,28 @@ class WordDictionaryEntry:
     source_url: str | None = field(compare=False, default=None)
 
 
+# 单音节「辅音 + 单元音 + 辅音」词干：hop、bas、dat。
+_SINGLE_SYLLABLE_CVC = re.compile(r"^[^aeiou]*[aeiou][^aeiouwxy]$")
+
+
+def _verb_stem(stem: str) -> str:
+    """把去掉 -ed / -ing 后的词干还原成动词原形。
+
+    - 双写辅音还原：stopped → stop、planning → plan；但去掉后不足三个字母时
+      说明原词本身就是双写结尾（added → add），保持不变。
+    - 单音节 CVC 词干补回不发音的 e：英语拼写规则里 stop 这类词加词尾会双写
+      辅音，所以没有双写的 hoped / hoping / based 只能来自 hope / base。
+    """
+
+    if stem.endswith("e"):
+        return stem
+    if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "lsz":
+        return stem[:-1] if len(stem) > 3 else stem
+    if _SINGLE_SYLLABLE_CVC.match(stem):
+        return f"{stem}e"
+    return stem
+
+
 def normalize_word_lemma(value: str) -> str:
     """把英文词形归并为可比较的词元，覆盖常见屈折变化。"""
 
@@ -431,22 +454,14 @@ def normalize_word_lemma(value: str) -> str:
         stem = token[:-3]
         if stem in ING_E_STEMS:
             return ING_E_STEMS[stem]
-        if stem.endswith("e"):
-            return stem
-        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "lsz":
-            return stem[:-1]
-        return stem
+        return _verb_stem(stem)
     if token.endswith("ied") and len(token) > 4:
         return f"{token[:-3]}y"
     if token.endswith("ed") and len(token) > 4:
         stem = token[:-2]
         if stem in ED_E_STEMS:
             return ED_E_STEMS[stem]
-        if stem.endswith("e"):
-            return stem
-        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "lsz":
-            return stem[:-1]
-        return stem
+        return _verb_stem(stem)
     if token.endswith("iest") and len(token) > 5:
         candidate = f"{token[:-4]}y"
         if candidate in COMMON_ADJECTIVE_LEMMAS:
