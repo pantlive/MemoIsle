@@ -25,7 +25,7 @@ def test_tts_route_returns_private_wav(
         assert voice == "amy"
         return audio_path
 
-    monkeypatch.setattr("app.api.synthesize_speech", fake_synthesize_speech)
+    monkeypatch.setattr("app.routes.memos.synthesize_speech", fake_synthesize_speech)
     response = client.post(
         "/api/v1/speech/tts",
         json={"text": "hello world", "voice": "amy"},
@@ -49,7 +49,7 @@ def test_tts_route_maps_missing_runtime_to_503(
 
         raise SpeechServiceUnavailableError("服务端未安装 sanotts")
 
-    monkeypatch.setattr("app.api.synthesize_speech", unavailable)
+    monkeypatch.setattr("app.routes.memos.synthesize_speech", unavailable)
     response = client.post("/api/v1/speech/tts", json={"text": "hello"})
 
     assert response.status_code == 503

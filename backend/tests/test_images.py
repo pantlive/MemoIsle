@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from app.models import Memo
 from app.service import MAX_IMAGE_BYTES, ImageValidationError, _decode_image
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -297,3 +298,54 @@ def test_oversized_image_content_is_rejected() -> None:
     with pytest.raises(ImageValidationError):
         _decode_image(b"\x00" * (MAX_IMAGE_BYTES + 1), "image/png")
 
+
+
+def _upload_png(client: TestClient, memo_id: str, content: bytes):
+    return client.post(
+        f"/api/v1/memos/{memo_id}/image",
+        params={"expected_version": 1},
+        headers={"Content-Type": "image/png"},
+        content=content,
+    )
+
+
+def test_duplicate_image_is_flagged_and_reuses_ocr(client: TestClient) -> None:
+    """同账号重复上传同一张图：响应头指向已有条目，并沿用已有识别结果。"""
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 48), "#884422").save(buffer, format="PNG")
+    content = buffer.getvalue()
+
+    first = create_image_memo(client, title="第一张")
+    uploaded = _upload_png(client, str(first["id"]), content)
+    assert uploaded.status_code == 200
+    assert "x-memoisle-duplicate-of" not in uploaded.headers
+
+    # 模拟第一张已经识别完成。
+    database = client.app.state.database
+    with database.session_factory() as session:
+        memo = session.get(Memo, str(first["id"]))
+        assert memo is not None
+        memo.image_ocr_status = "ready"
+        memo.image_ocr_text = "重复图片里的文字"
+        memo.image_ocr_source = "local"
+        memo.image_auto_tags = ["海报"]
+        session.commit()
+
+    second = create_image_memo(client, title="第二张")
+    duplicate = _upload_png(client, str(second["id"]), content)
+    assert duplicate.status_code == 200
+    assert duplicate.headers["x-memoisle-duplicate-of"] == first["id"]
+    payload = duplicate.json()
+    assert payload["image_ocr_status"] == "ready"
+    assert payload["image_ocr_text"] == "重复图片里的文字"
+    assert payload["image_auto_tags"] == ["海报"]
+
+    # 不同内容不算重复。
+    other = io.BytesIO()
+    Image.new("RGB", (64, 48), "#112233").save(other, format="PNG")
+    third = create_image_memo(client, title="第三张")
+    distinct = _upload_png(client, str(third["id"]), other.getvalue())
+    assert distinct.status_code == 200
+    assert "x-memoisle-duplicate-of" not in distinct.headers
+    assert distinct.json()["image_ocr_status"] == "none"

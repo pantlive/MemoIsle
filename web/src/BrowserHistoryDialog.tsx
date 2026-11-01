@@ -655,7 +655,7 @@ export default function BrowserHistoryDialog({
                     <article className="history-row" key={entry.id}>
                       <span className="history-icon" aria-hidden="true">
                         {entry.favicon_url ? (
-                          <img src={entry.favicon_url} alt="" />
+                          <img src={entry.favicon_url} alt="" loading="lazy" decoding="async" />
                         ) : (
                           <ResourceMonogram sourceUrl={entry.page_url} size={16} />
                         )}

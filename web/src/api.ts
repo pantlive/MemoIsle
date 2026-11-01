@@ -59,6 +59,7 @@ import type {
   ReviewSettings,
   WordImportResponse,
   WordLookupResponse,
+  WeeklySummary,
 } from "./types";
 import extensionManifest from "../../extension/manifest.json";
 
@@ -1166,6 +1167,29 @@ export async function reviewWord(
   });
 }
 
+export async function getWeeklySummary(): Promise<WeeklySummary> {
+  return request<WeeklySummary>("/review/weekly-summary");
+}
+
+/** 随机漫游：随机抽一条条目；exclude 传最近看过的 ID，避免连着抽到同一条。 */
+export async function getRandomMemo(options: {
+  type?: MemoType;
+  exclude?: string[];
+} = {}): Promise<Memo | null> {
+  const searchParams = new URLSearchParams();
+  if (options.type) {
+    searchParams.set("type", options.type);
+  }
+  for (const id of options.exclude ?? []) {
+    searchParams.append("exclude", id);
+  }
+  const suffix = searchParams.toString();
+  const response = await request<{ item: Memo | null }>(
+    `/review/random${suffix ? `?${suffix}` : ""}`,
+  );
+  return response.item;
+}
+
 export async function getReviewQueue(options: {
   type?: MemoType;
   limit?: number;
@@ -1270,11 +1294,17 @@ export async function createImageMemo(
   );
 }
 
+export interface UploadedImage {
+  memo: Memo;
+  /** 同账号已有内容完全相同的图片时，为那条图片收藏的 ID。 */
+  duplicateOf: string | null;
+}
+
 export async function uploadMemoImage(
   memoId: string,
   file: File | Blob,
   expectedVersion: number,
-): Promise<Memo> {
+): Promise<UploadedImage> {
   // 图片接口接收原始二进制，不使用 multipart。
   const accessToken = getAccessToken();
   const response = await fetch(
@@ -1304,7 +1334,10 @@ export async function uploadMemoImage(
     const current = typeof detail === "object" ? detail?.current : undefined;
     throw new ApiError(message, response.status, code, current);
   }
-  return (await response.json()) as Memo;
+  return {
+    memo: (await response.json()) as Memo,
+    duplicateOf: response.headers.get("X-MemoIsle-Duplicate-Of"),
+  };
 }
 
 export async function loadMemoImageUrl(

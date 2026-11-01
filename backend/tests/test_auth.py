@@ -158,7 +158,10 @@ def test_third_party_login_issues_bearer_session(
                 email_verified=True,
             )
 
-        monkeypatch.setattr("app.api.exchange_authorization_code", fake_exchange)
+        monkeypatch.setattr(
+            "app.routes.auth.exchange_authorization_code",
+            fake_exchange,
+        )
         callback = client.get(
             "/api/v1/auth/google/callback",
             params={"code": "authorization-code", "state": state},

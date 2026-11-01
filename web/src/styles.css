@@ -9351,3 +9351,137 @@ summary:focus-visible {
     grid-template-columns: 18px 32px minmax(0, 1fr);
   }
 }
+
+/* 回顾页：本周摘要与随机漫游。 */
+.weekly-digest {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.weekly-digest-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weekly-digest-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.weekly-digest-heading strong {
+  color: var(--text);
+}
+
+.weekly-digest-heading span,
+.weekly-digest-note,
+.weekly-digest-breakdown {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.weekly-digest-heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-height);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--primary);
+  padding: 0 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.weekly-digest-heading button:hover:not(:disabled) {
+  background: var(--primary-soft);
+}
+
+.weekly-digest-heading button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.weekly-digest-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.weekly-digest-stats > div {
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  padding: 8px 10px;
+}
+
+.weekly-digest-stats dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.weekly-digest-stats dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.weekly-digest-breakdown,
+.weekly-digest-tags,
+.weekly-digest-note {
+  margin: 10px 0 0;
+}
+
+.weekly-digest-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weekly-digest-highlights {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weekly-digest-highlights button {
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 2px 0;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.weekly-digest-highlights button:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .weekly-digest-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.vault-loading {
+  padding: 32px 16px;
+  color: var(--muted);
+  text-align: center;
+}

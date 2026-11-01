@@ -40,7 +40,8 @@ export type MemoSort =
   | "created_asc"
   | "title_asc"
   | "title_desc"
-  | "opened_desc";
+  | "opened_desc"
+  | "relevance";
 export type ReviewFeedback = "forgot" | "fuzzy" | "remembered";
 export interface WordLookupSense {
   index: number;
@@ -750,4 +751,16 @@ export interface BookmarkFolderMappingList {
   pending_count: number;
   page_count: number;
   retry_count: number;
+}
+
+export interface WeeklySummary {
+  since: string;
+  until: string;
+  created_total: number;
+  created_by_type: Partial<Record<MemoType, number>>;
+  reviewed_words: number;
+  opened_resources: number;
+  inbox_remaining: number;
+  top_tags: { tag: string; count: number }[];
+  highlights: Memo[];
 }

@@ -362,6 +362,8 @@ class MemoSort(StrEnum):
     TITLE_ASC = "title_asc"
     TITLE_DESC = "title_desc"
     OPENED_DESC = "opened_desc"
+    # 有搜索词时按命中相关度排序（标题 > 标签 > 正文）；无搜索词等同 updated_desc。
+    RELEVANCE = "relevance"
 
 
 class ReviewFeedback(StrEnum):
@@ -1568,6 +1570,33 @@ class ReviewQueueResponse(BaseModel):
     idea_count: int = 0
     daily_limit: int = Field(default=10, ge=1, le=100)
     scheduled_count: int = Field(default=0, ge=0)
+
+
+class WeeklyTagCount(BaseModel):
+    """一周内最常用的标签。"""
+
+    tag: str
+    count: int = Field(ge=1)
+
+
+class WeeklySummaryResponse(BaseModel):
+    """最近七天的收藏、复习与阅读概览。"""
+
+    since: datetime
+    until: datetime
+    created_total: int = Field(ge=0)
+    created_by_type: dict[str, int]
+    reviewed_words: int = Field(ge=0)
+    opened_resources: int = Field(ge=0)
+    inbox_remaining: int = Field(ge=0)
+    top_tags: list[WeeklyTagCount]
+    highlights: list[MemoRead]
+
+
+class RandomMemoResponse(BaseModel):
+    """随机漫游抽到的条目；资料库为空时为 null。"""
+
+    item: MemoRead | None
 
 
 class ReviewSettingsResponse(BaseModel):

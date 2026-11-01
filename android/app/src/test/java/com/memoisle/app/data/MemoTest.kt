@@ -177,6 +177,25 @@ class MemoTest {
     }
 
     @Test
+    fun normalizeLemmaRestoresSilentEAndKeepsDoubleLetters() {
+        val cases = mapOf(
+            "hoped" to "hope",
+            "hoping" to "hope",
+            "based" to "base",
+            "used" to "use",
+            "added" to "add",
+            "hopping" to "hop",
+            "stopped" to "stop",
+            "visited" to "visit",
+            "opened" to "open",
+            "rained" to "rain",
+            "eating" to "eat",
+            "fixed" to "fix",
+        )
+        cases.forEach { (word, lemma) -> assertEquals(word, lemma, normalizeLemma(word)) }
+    }
+
+    @Test
     fun clipboardWordUsesLemmaPhoneticAndChineseMeaning() {
         val draft = parseClipboardWord("serendipity /ˌserənˈdɪpəti/ 机缘巧合")
         assertEquals("serendipity", draft?.lemma)

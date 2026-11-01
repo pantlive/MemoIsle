@@ -73,8 +73,8 @@ def test_browser_capture_is_single_use(
             url_validator=validate_tab_url,
         )
 
-    monkeypatch.setattr("app.api.create_browser_capture", create_without_dns)
-    monkeypatch.setattr("app.api.sync_open_browser_tabs", sync_without_dns)
+    monkeypatch.setattr("app.routes.browser.create_browser_capture", create_without_dns)
+    monkeypatch.setattr("app.routes.browser.sync_open_browser_tabs", sync_without_dns)
     created_response = client.post(
         "/api/v1/browser-captures",
         headers={"Origin": EXTENSION_ORIGIN},

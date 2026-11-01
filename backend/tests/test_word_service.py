@@ -447,3 +447,29 @@ def test_word_dictionary_does_not_append_to_manual_meaning(
     assert enriched.status_code == 200
     assert enriched.json()["word_meaning"] == "用户自己的理解"
     assert enriched.json()["word_example"] == "用户自己的例句"
+
+
+def test_normalize_word_lemma_restores_silent_e_and_keeps_double_letters() -> None:
+    """单音节 CVC 词干补回 e；原词本身双写时不误删字母。"""
+
+    cases = {
+        "hoped": "hope",
+        "hoping": "hope",
+        "based": "base",
+        "dated": "date",
+        "shaped": "shape",
+        "used": "use",
+        "added": "add",
+        # 双写辅音、多音节词与元音组合保持原有归并。
+        "hopping": "hop",
+        "stopped": "stop",
+        "planned": "plan",
+        "visited": "visit",
+        "opened": "open",
+        "rained": "rain",
+        "eating": "eat",
+        "showed": "show",
+        "fixed": "fix",
+    }
+    for word, lemma in cases.items():
+        assert normalize_word_lemma(word) == lemma, word

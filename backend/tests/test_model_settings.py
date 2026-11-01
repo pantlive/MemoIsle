@@ -703,7 +703,7 @@ def test_saved_settings_reach_generation_and_web_classification(
                 model_client,
             )
 
-    monkeypatch.setattr("app.api.generate_category_suggestions", generate)
+    monkeypatch.setattr("app.routes.resources.generate_category_suggestions", generate)
     generated = client.post(
         "/api/v1/resource-categories/generate",
         json={

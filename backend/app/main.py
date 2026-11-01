@@ -113,6 +113,8 @@ def create_app(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # 跨域部署时让 Web 读到图片查重结果。
+        expose_headers=["X-MemoIsle-Duplicate-Of"],
     )
     application.include_router(router, prefix="/api/v1")
     application.include_router(model_settings_router, prefix="/api/v1")
