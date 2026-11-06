@@ -5,6 +5,7 @@ import {
   VAULT_ROTATE_OPTIONS,
   generatePassword,
   parseRecoveryCodes,
+  serverCredentialIdentity,
   subscriptionProviderLabels,
   vaultKindLabels,
   type RecoveryCode,
@@ -227,13 +228,14 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
 }
 
 export default function VaultItemDialog({
-  initial, isNew, changedAt, reminders, busy, error, onSave, onDelete, onClose, onCopy,
+  initial, isNew, changedAt, reminders, secretEntries, busy, error, onSave, onDelete, onClose, onCopy,
 }: {
   initial: VaultItemData;
   isNew: boolean;
   // 已保存条目的上次更换时间；新建时为 null。
   changedAt: string | null;
   reminders: VaultReminder[];
+  secretEntries: { id: string; title: string; secret: string }[];
   busy: boolean;
   error: string;
   onSave: (data: VaultItemData) => void;
@@ -242,6 +244,8 @@ export default function VaultItemDialog({
   onCopy: (value: string, label: string) => void;
 }) {
   const [draft, setDraft] = useState<VaultItemData>(initial);
+  // 引用尚未选择目标时也保留来源模式，切换时不丢弃内联私钥草稿。
+  const [useKeyReference, setUseKeyReference] = useState(initial.kind === "server" && Boolean(initial.privateKeyRef));
   const titleRef = useRef<HTMLInputElement>(null);
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
   const dirtyRef = useRef(dirty);
@@ -257,7 +261,10 @@ export default function VaultItemDialog({
   const hasSubscriptionErrors = Boolean(priceError || balanceError || currencyError);
 
   // 保存冲突时外部会换成最新内容。
-  useEffect(() => setDraft(initial), [initial]);
+  useEffect(() => {
+    setDraft(initial);
+    setUseKeyReference(initial.kind === "server" && Boolean(initial.privateKeyRef));
+  }, [initial]);
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -294,16 +301,19 @@ export default function VaultItemDialog({
 
   const secretChanged = (draft.kind === "login" && initial.kind === "login" && draft.password !== initial.password && Boolean(draft.password))
     || (draft.kind === "secret" && initial.kind === "secret" && draft.secret !== initial.secret && Boolean(draft.secret))
-    || (draft.kind === "server" && initial.kind === "server" && (
-      draft.authMethod === "key"
-        ? draft.privateKey !== initial.privateKey && Boolean(draft.privateKey)
-        : draft.password !== initial.password && Boolean(draft.password)
-    ));
+    || (draft.kind === "server" && initial.kind === "server"
+      && Boolean(serverCredentialIdentity(draft))
+      && serverCredentialIdentity(draft) !== serverCredentialIdentity(initial));
   const changedLabel = changedAt ? describeAge(changedAt) : "还没有填写";
+  const referencedSecret = draft.kind === "server"
+    ? secretEntries.find((entry) => entry.id === draft.privateKeyRef)
+    : undefined;
+  const needsKeySelection = draft.kind === "server" && draft.authMethod === "key"
+    && useKeyReference && !draft.privateKeyRef;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (hasSubscriptionErrors) return;
+    if (hasSubscriptionErrors || needsKeySelection) return;
     if (!draft.title.trim() && draft.kind !== "subscription") return;
     if (draft.kind === "server" && !draft.host.trim()) return;
     // 订阅名称可留空，新建时按服务商和套餐生成，编辑时回落为「未命名」。
@@ -566,13 +576,74 @@ export default function VaultItemDialog({
                 />
               ) : (
                 <>
-                  <SecretInput
-                    label="SSH 私钥"
-                    value={draft.privateKey}
-                    onChange={(value) => update("privateKey", value)}
-                    onCopy={() => onCopy(draft.privateKey, "私钥")}
-                    multiline
-                  />
+                  <fieldset className="vault-auth-method">
+                    <legend>私钥来源</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="server-key-source"
+                        checked={!useKeyReference}
+                        onChange={() => {
+                          setUseKeyReference(false);
+                          update("privateKeyRef", "");
+                        }}
+                      />
+                      直接填写
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="server-key-source"
+                        checked={useKeyReference}
+                        onChange={() => setUseKeyReference(true)}
+                      />
+                      引用已保存的密钥
+                    </label>
+                  </fieldset>
+                  {useKeyReference ? (
+                    <div className="vault-field">
+                      <label className="vault-field">
+                        <span className="vault-field-label"><span>已保存的密钥</span></span>
+                        <select
+                          value={draft.privateKeyRef}
+                          disabled={secretEntries.length === 0}
+                          onChange={(event) => update("privateKeyRef", event.target.value)}
+                        >
+                          <option value="">请选择密钥</option>
+                          {draft.privateKeyRef && !referencedSecret && (
+                            <option value={draft.privateKeyRef}>引用的密钥已被删除</option>
+                          )}
+                          {[...secretEntries].sort((left, right) => left.title.localeCompare(right.title, "zh-CN"))
+                            .map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}
+                        </select>
+                      </label>
+                      {secretEntries.length === 0 && (
+                        <small className="vault-hint">还没有保存的密钥，请先新建一个「密钥」条目。</small>
+                      )}
+                      {draft.privateKeyRef && !referencedSecret && (
+                        <small className="vault-hint warn" role="alert">引用的密钥已被删除，请重新选择</small>
+                      )}
+                      {referencedSecret && (
+                        <div className="vault-field-label">
+                          <small className="vault-hint">原密钥更新后这里会自动使用新内容</small>
+                          <button
+                            type="button"
+                            aria-label="复制引用的私钥"
+                            disabled={!referencedSecret.secret}
+                            onClick={() => onCopy(referencedSecret.secret, "私钥")}
+                          >复制</button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <SecretInput
+                      label="SSH 私钥"
+                      value={draft.privateKey}
+                      onChange={(value) => update("privateKey", value)}
+                      onCopy={() => onCopy(draft.privateKey, "私钥")}
+                      multiline
+                    />
+                  )}
                   <SecretInput
                     label="私钥口令（可选）"
                     value={draft.keyPassphrase}
@@ -630,7 +701,7 @@ export default function VaultItemDialog({
             </button>
           )}
           <span className="vault-dialog-spacer" />
-          <button type="submit" className="primary" disabled={busy || hasSubscriptionErrors || (draft.kind !== "subscription" && !draft.title.trim()) || (!dirty && !isNew)}>
+          <button type="submit" className="primary" disabled={busy || hasSubscriptionErrors || needsKeySelection || (draft.kind !== "subscription" && !draft.title.trim()) || (!dirty && !isNew)}>
             {busy ? "加密保存中…" : "保存"}
           </button>
         </div>

@@ -23,11 +23,13 @@ import {
   encryptVaultItem,
   openVaultBackup,
   parseVaultBackup,
+  planVaultImport,
+  resolveServerPrivateKey,
   rewrapVaultKey,
+  serversReferencingKey,
   stampSecretChange,
   subscriptionProviderLabels,
   unlockVault,
-  vaultItemFingerprint,
   vaultKindLabels,
   type VaultBackupFile,
   type VaultEntry,
@@ -89,7 +91,7 @@ function describe(error: unknown): string {
   return "操作失败，请稍后重试。";
 }
 
-function entrySubtitle(data: VaultItemData): string {
+function entrySubtitle(data: VaultItemData, entries: VaultEntry[]): string {
   if (data.kind === "subscription") {
     const currency = data.currency === "USD" ? "$" : data.currency === "CNY" ? "¥" : data.currency;
     return [
@@ -105,18 +107,21 @@ function entrySubtitle(data: VaultItemData): string {
     if (!data.host) return "未填写主机";
     const target = `${data.username ? `${data.username}@` : ""}${data.host}`;
     const port = data.port && data.port !== "22" ? `:${data.port}` : "";
-    return `${target}${port} · ${data.authMethod === "key" ? "私钥" : "密码"}`;
+    const resolved = resolveServerPrivateKey(data, entries);
+    const keyLabel = !data.privateKeyRef ? "私钥" : resolved.missing
+      ? "私钥（引用的密钥已删除）" : `私钥（引用「${resolved.refTitle}」）`;
+    return `${target}${port} · ${data.authMethod === "key" ? keyLabel : "密码"}`;
   }
   const remaining = data.codes.filter((item) => !item.used).length;
   return `${data.account ? `${data.account} · ` : ""}剩余 ${remaining} / ${data.codes.length} 个可用`;
 }
 
-function entryHasSecret(data: VaultItemData): boolean {
+function entryHasSecret(data: VaultItemData, entries: VaultEntry[]): boolean {
   if (data.kind === "login") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
   if (data.kind === "server") {
     return data.authMethod === "key"
-      ? Boolean(data.privateKey)
+      ? Boolean(resolveServerPrivateKey(data, entries).value)
       : Boolean(data.password);
   }
   return false;
@@ -454,7 +459,12 @@ export default function VaultPanel() {
 
   const handleDelete = async () => {
     const entry = editor?.entry;
-    if (!entry || !window.confirm(`永久删除「${entry.data.title}」？删除后无法恢复。`)) return;
+    if (!entry) return;
+    const references = entry.data.kind === "secret" ? serversReferencingKey(entry.id, entries) : [];
+    const referenceWarning = references.length > 0
+      ? `\n有 ${references.length} 台云服务器引用了这把密钥（${references.slice(0, 3).map((item) => item.data.title).join("、")}${references.length > 3 ? "…" : ""}），删除后它们将无法取到私钥。`
+      : "";
+    if (!window.confirm(`永久删除「${entry.data.title}」？删除后无法恢复。${referenceWarning}`)) return;
     setBusy(true);
     try {
       await deleteVaultItem(entry.id, entry.version);
@@ -520,24 +530,17 @@ export default function VaultPanel() {
       setImportProgress("正在解密备份…");
       const { items, failed } = await openVaultBackup(importPassword, importState.backup);
       setImportPassword("");
-      const existing = new Set(entries.map((entry) => vaultItemFingerprint(entry.data)));
-      const fresh = items.filter((item) => {
-        const fingerprint = vaultItemFingerprint(item);
-        if (existing.has(fingerprint)) return false;
-        existing.add(fingerprint);
-        return true;
-      });
+      const { items: fresh, skipped } = planVaultImport(items, entries, () => crypto.randomUUID());
       const saved: VaultEntry[] = [];
       for (const [index, item] of fresh.entries()) {
         setImportProgress(`正在加密写入 ${index + 1} / ${fresh.length}…`);
         // 用新 ID 和当前库密钥重新加密，备份来自旧密码库或其他账号也不会冲突。
-        const id = crypto.randomUUID();
-        const record = await createVaultItem(id, await encryptVaultItem(key, id, item));
+        const { id, data } = item;
+        const record = await createVaultItem(id, await encryptVaultItem(key, id, data));
         saved.push(await decryptVaultItem(key, record));
       }
       setEntries((current) => [...saved, ...current]);
       setImportState(null);
-      const skipped = items.length - fresh.length;
       setNotice([
         `已导入 ${saved.length} 条`,
         skipped > 0 ? `跳过 ${skipped} 条重复` : "",
@@ -833,6 +836,9 @@ export default function VaultPanel() {
             {visibleEntries.map((entry) => {
               const { data } = entry;
               const nextCode = data.kind === "recovery" ? data.codes.find((item) => !item.used) : undefined;
+              const serverCredential = data.kind === "server"
+                ? data.authMethod === "key" ? resolveServerPrivateKey(data, entries).value : data.password
+                : "";
               const entryReminders = remindersByEntry.get(entry.id) ?? [];
               return (
                 <li key={entry.id} className="vault-row">
@@ -854,7 +860,7 @@ export default function VaultPanel() {
                       <small>
                         {kindFilter === "reminders" && entryReminders[0]
                           ? entryReminders.map((reminder) => reminder.message).join(" ")
-                          : `${vaultKindLabels[data.kind]} · ${entrySubtitle(data)}`}
+                          : `${vaultKindLabels[data.kind]} · ${entrySubtitle(data, entries)}`}
                       </small>
                     </span>
                   </button>
@@ -878,9 +884,9 @@ export default function VaultPanel() {
                         <button type="button" disabled={!data.host} onClick={() => void copyValue(data.host, "主机")}>复制主机</button>
                         <button
                           type="button"
-                          disabled={data.authMethod === "key" ? !data.privateKey : !data.password}
+                          disabled={!serverCredential}
                           onClick={() => void copyValue(
-                            data.authMethod === "key" ? data.privateKey : data.password,
+                            serverCredential,
                             data.authMethod === "key" ? "私钥" : "密码",
                           )}
                         >
@@ -922,7 +928,9 @@ export default function VaultPanel() {
         <VaultItemDialog
           initial={editor.data}
           isNew={editor.entry === null}
-          changedAt={editor.entry && entryHasSecret(editor.entry.data) ? lastChangedAt(editor.entry) : null}
+          changedAt={editor.entry && entryHasSecret(editor.entry.data, entries) ? lastChangedAt(editor.entry, entries) : null}
+          secretEntries={entries.flatMap((entry) => entry.data.kind === "secret"
+            ? [{ id: entry.id, title: entry.data.title, secret: entry.data.secret }] : [])}
           reminders={editor.entry ? remindersByEntry.get(editor.entry.id) ?? [] : []}
           busy={busy}
           error={dialogError}

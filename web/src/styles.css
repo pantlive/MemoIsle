@@ -6971,6 +6971,7 @@ button.template-node-copy {
 
 .vault-auth-method {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);

@@ -392,4 +392,245 @@ class VaultTest {
         assertEquals("10 天后到期续费（2026-10-26）。", reminders.first { it.entryId == "soon" }.message)
         assertEquals("一次性 / 按量", VAULT_BILLING_LABELS.getValue(VAULT_BILLING_NONE))
     }
+
+    @Test
+    fun serverJsonRoundTripKeepsPrivateKeyRef() {
+        val original = VaultItemData(
+            kind = VAULT_KIND_SERVER,
+            title = "vps.example.com",
+            host = "vps.example.com",
+            port = "22",
+            username = "root",
+            authMethod = VAULT_AUTH_KEY,
+            privateKey = "example-private-key-placeholder",
+            privateKeyRef = "secret-id-1",
+            keyPassphrase = "phrase",
+            notes = "备注",
+            rotateDays = 90,
+        )
+        val json = JSONObject(original.toJson())
+        assertEquals("secret-id-1", json.getString("privateKeyRef"))
+        // 引用模式下真正引用，不复制私钥内容。
+        assertEquals("", json.getString("privateKey"))
+        assertEquals("key", json.getString("authMethod"))
+        assertEquals("phrase", json.getString("keyPassphrase"))
+
+        val parsed = VaultItemData.fromJson(original.toJson())
+        assertEquals("secret-id-1", parsed.privateKeyRef)
+        assertEquals("", parsed.privateKey)
+        assertEquals("phrase", parsed.keyPassphrase)
+        assertEquals("vps.example.com", parsed.host)
+
+        val direct = original.copy(privateKeyRef = "")
+        val directJson = JSONObject(direct.toJson())
+        assertEquals("", directJson.getString("privateKeyRef"))
+        assertEquals(original.privateKey, directJson.getString("privateKey"))
+
+        val legacy = VaultItemData.fromJson(
+            """{"kind":"server","title":"旧条目","host":"vps.example.com","authMethod":"key","privateKey":"old-pem"}""",
+        )
+        assertEquals("", legacy.privateKeyRef)
+        assertEquals("old-pem", legacy.privateKey)
+
+        val nonString = VaultItemData.fromJson(
+            """{"kind":"server","title":"坏引用","host":"vps.example.com","authMethod":"key","privateKeyRef":123}""",
+        )
+        assertEquals("", nonString.privateKeyRef)
+    }
+
+    @Test
+    fun resolvePrivateKeyFollowsOrMarksMissingRef() {
+        fun entry(id: String, data: VaultItemData) = VaultEntry(id, 1, "2026-01-01T00:00:00Z", data)
+        val entries = listOf(
+            entry("key-1", VaultItemData(VAULT_KIND_SECRET, "办公密钥", secret = "ssh-key-example")),
+            entry(
+                "srv",
+                VaultItemData(
+                    VAULT_KIND_SERVER,
+                    "生产机",
+                    host = "vps.example.com",
+                    authMethod = VAULT_AUTH_KEY,
+                    privateKeyRef = "key-1",
+                    privateKey = "should-not-use",
+                ),
+            ),
+            entry(
+                "login-host",
+                VaultItemData(VAULT_KIND_LOGIN, "不是密钥", password = "x"),
+            ),
+        )
+        val resolved = entries[1].data.resolvePrivateKey(entries)
+        assertEquals("ssh-key-example", resolved.value)
+        assertEquals("办公密钥", resolved.refTitle)
+        assertFalse(resolved.missing)
+        assertEquals("ssh-key-example", entries[1].data.effectiveSecret(entries))
+
+        val missing = entries[1].data.copy(privateKeyRef = "deleted").resolvePrivateKey(entries)
+        assertEquals("", missing.value)
+        assertEquals("", missing.refTitle)
+        assertTrue(missing.missing)
+        assertEquals("", entries[1].data.copy(privateKeyRef = "deleted").effectiveSecret(entries))
+
+        val wrongKind = entries[1].data.copy(privateKeyRef = "login-host").resolvePrivateKey(entries)
+        assertTrue(wrongKind.missing)
+
+        val direct = VaultItemData(
+            kind = VAULT_KIND_SERVER,
+            authMethod = VAULT_AUTH_KEY,
+            privateKey = "direct-pem",
+        ).resolvePrivateKey(entries)
+        assertEquals("direct-pem", direct.value)
+        assertFalse(direct.missing)
+
+        val passwordAuth = VaultItemData(
+            kind = VAULT_KIND_SERVER,
+            authMethod = VAULT_AUTH_PASSWORD,
+            password = "s3cret",
+            privateKeyRef = "key-1",
+        )
+        assertEquals("s3cret", passwordAuth.effectiveSecret(entries))
+
+        assertEquals(listOf("srv"), serversReferencingKey("key-1", entries).map { it.id })
+        assertTrue(serversReferencingKey("missing", entries).isEmpty())
+    }
+
+    @Test
+    fun stampSecretChangeTracksPrivateKeyRef() {
+        val now = Instant.parse("2026-10-16T00:00:00Z")
+        val direct = VaultItemData(
+            kind = VAULT_KIND_SERVER,
+            title = "vps",
+            authMethod = VAULT_AUTH_KEY,
+            privateKey = "direct-pem",
+        )
+        val withRef = direct.copy(privateKeyRef = "key-1")
+        assertEquals(now.toString(), stampSecretChange(direct, withRef, now).changedAt)
+        assertEquals(now.toString(), stampSecretChange(withRef, withRef.copy(privateKeyRef = "key-2"), now).changedAt)
+        assertEquals("", stampSecretChange(withRef, withRef.copy(notes = "x"), now).changedAt)
+        assertEquals(now.toString(), stampSecretChange(null, withRef, now).changedAt)
+        // 仅改私钥草稿但已引用时，凭据标识仍是 ref:<id>，不记更换。
+        assertEquals("", stampSecretChange(withRef, withRef.copy(privateKey = "other-pem"), now).changedAt)
+    }
+
+    @Test
+    fun remindersUseReferencedSecretAndMissingKey() {
+        val today = LocalDate.of(2026, 10, 16)
+        fun entry(id: String, data: VaultItemData, created: String = "2026-10-01T00:00:00Z") =
+            VaultEntry(id, 1, created, data)
+        val entries = listOf(
+            entry(
+                "key-1",
+                VaultItemData(
+                    VAULT_KIND_SECRET,
+                    "办公密钥",
+                    secret = "ssh-key-example",
+                    changedAt = "2026-03-30T00:00:00Z",
+                ),
+            ),
+            entry(
+                "key-fresh",
+                VaultItemData(
+                    VAULT_KIND_SECRET,
+                    "刚换的密钥",
+                    secret = "ssh-key-fresh",
+                    changedAt = "2026-10-10T00:00:00Z",
+                ),
+            ),
+            entry(
+                "srv-old-key",
+                VaultItemData(
+                    VAULT_KIND_SERVER,
+                    "生产机",
+                    host = "vps.example.com",
+                    authMethod = VAULT_AUTH_KEY,
+                    privateKeyRef = "key-1",
+                    rotateDays = 90,
+                    // 服务器自己的更换时间很近，但应改用被引用密钥的时间。
+                    changedAt = "2026-10-15T00:00:00Z",
+                ),
+            ),
+            entry(
+                "srv-missing",
+                VaultItemData(
+                    VAULT_KIND_SERVER,
+                    "失效机",
+                    host = "old.example.com",
+                    authMethod = VAULT_AUTH_KEY,
+                    privateKeyRef = "deleted-key",
+                    rotateDays = 90,
+                    changedAt = "2026-03-30T00:00:00Z",
+                ),
+            ),
+            entry(
+                "srv-fresh",
+                VaultItemData(
+                    VAULT_KIND_SERVER,
+                    "新密钥机",
+                    host = "new.example.com",
+                    authMethod = VAULT_AUTH_KEY,
+                    privateKeyRef = "key-fresh",
+                    rotateDays = 90,
+                    changedAt = "2026-03-30T00:00:00Z",
+                ),
+            ),
+        )
+        val reminders = collectVaultReminders(entries, today, ZoneOffset.UTC)
+        val byEntry = reminders.groupBy({ it.entryId }, { it.type })
+        assertEquals(listOf(VaultReminderType.ROTATE), byEntry["srv-old-key"])
+        assertEquals("已 200 天没有更换，设定为每 90 天换一次。", reminders.first { it.entryId == "srv-old-key" }.message)
+        assertEquals(listOf(VaultReminderType.MISSING_KEY), byEntry["srv-missing"])
+        assertEquals("密钥缺失", VaultReminderType.MISSING_KEY.label)
+        assertTrue(reminders.first { it.entryId == "srv-missing" }.danger)
+        assertEquals(
+            "引用的密钥已被删除，请重新选择或直接填写私钥。",
+            reminders.first { it.entryId == "srv-missing" }.message,
+        )
+        assertFalse(byEntry.containsKey("srv-fresh"))
+        assertEquals("2026-03-30T00:00:00Z", lastChangedAt(entries.first { it.id == "srv-old-key" }, entries))
+        assertEquals("2026-10-10T00:00:00Z", lastChangedAt(entries.first { it.id == "srv-fresh" }, entries))
+    }
+
+    @Test
+    fun parsesWebServerJsonWithPrivateKeyRef() {
+        val fromWeb = VaultItemData.fromJson(
+            """
+            {
+              "v": 1,
+              "kind": "server",
+              "title": "prod-vps",
+              "host": "vps.example.com",
+              "port": "22",
+              "username": "root",
+              "authMethod": "key",
+              "password": "",
+              "privateKey": "",
+              "privateKeyRef": "7d1c5a52-3d3b-4c1e-9a43-2f1b8c0e5d11",
+              "keyPassphrase": "",
+              "notes": "web 写入",
+              "changedAt": "2026-10-01T08:00:00.000Z",
+              "rotateDays": 90,
+              "expiresOn": ""
+            }
+            """.trimIndent(),
+        )
+        assertEquals(VAULT_KIND_SERVER, fromWeb.kind)
+        assertEquals("prod-vps", fromWeb.title)
+        assertEquals("vps.example.com", fromWeb.host)
+        assertEquals("22", fromWeb.port)
+        assertEquals("root", fromWeb.username)
+        assertEquals(VAULT_AUTH_KEY, fromWeb.authMethod)
+        assertEquals("", fromWeb.privateKey)
+        assertEquals("7d1c5a52-3d3b-4c1e-9a43-2f1b8c0e5d11", fromWeb.privateKeyRef)
+        assertEquals("web 写入", fromWeb.notes)
+        assertEquals(90, fromWeb.rotateDays)
+        assertEquals("2026-10-01T08:00:00.000Z", fromWeb.changedAt)
+
+        val saved = JSONObject(fromWeb.toJson())
+        assertEquals("7d1c5a52-3d3b-4c1e-9a43-2f1b8c0e5d11", saved.getString("privateKeyRef"))
+        assertEquals("", saved.getString("privateKey"))
+        assertTrue(saved.has("privateKeyRef"))
+        val roundTrip = VaultItemData.fromJson(fromWeb.toJson())
+        assertEquals(fromWeb.privateKeyRef, roundTrip.privateKeyRef)
+        assertEquals(fromWeb.privateKey, roundTrip.privateKey)
+    }
 }

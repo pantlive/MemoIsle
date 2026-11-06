@@ -129,8 +129,10 @@ import com.memoisle.app.data.VaultEntry
 import com.memoisle.app.data.VaultItemData
 import com.memoisle.app.data.VaultReminder
 import com.memoisle.app.data.collectVaultReminders
+import com.memoisle.app.data.credentialIdentity
 import com.memoisle.app.data.daysSince
 import com.memoisle.app.data.defaultSubscriptionTitle
+import com.memoisle.app.data.effectiveSecret
 import com.memoisle.app.data.formatVaultMoney
 import com.memoisle.app.data.generateVaultPassword
 import com.memoisle.app.data.isWeakVaultPassword
@@ -139,6 +141,8 @@ import com.memoisle.app.data.normalizeVaultDate
 import com.memoisle.app.data.normalizeVaultMoney
 import com.memoisle.app.data.normalizeVaultProvider
 import com.memoisle.app.data.parseRecoveryCodes
+import com.memoisle.app.data.resolvePrivateKey
+import com.memoisle.app.data.serversReferencingKey
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
@@ -151,7 +155,7 @@ private const val REMINDER_PREVIEW_LIMIT = 4
 private const val FILTER_ALL = "all"
 private const val FILTER_REMINDERS = "reminders"
 
-private fun subtitle(data: VaultItemData): String = when (data.kind) {
+private fun subtitle(data: VaultItemData, entries: List<VaultEntry>): String = when (data.kind) {
     VAULT_KIND_LOGIN -> data.username.ifBlank { data.url.ifBlank { "未填写用户名" } }
     VAULT_KIND_SECRET -> if (data.secret.isNotEmpty()) "${data.secret.length} 个字符" else "未填写密钥"
     VAULT_KIND_SERVER -> {
@@ -162,7 +166,7 @@ private fun subtitle(data: VaultItemData): String = when (data.kind) {
             val port = if (data.port.isNotBlank() && data.port != "22") ":${
                 data.port
             }" else ""
-            "$target$port · ${if (data.authMethod == VAULT_AUTH_KEY) "私钥" else "密码"}"
+            "$target$port · ${serverCredentialLabel(data, entries)}"
         }
     }
     VAULT_KIND_SUBSCRIPTION -> {
@@ -178,6 +182,13 @@ private fun subtitle(data: VaultItemData): String = when (data.kind) {
         val remaining = data.codes.count { !it.used }
         (if (data.account.isNotBlank()) "${data.account} · " else "") + "剩余 $remaining / ${data.codes.size} 个可用"
     }
+}
+
+private fun serverCredentialLabel(data: VaultItemData, entries: List<VaultEntry>): String {
+    if (data.authMethod != VAULT_AUTH_KEY) return "密码"
+    if (data.privateKeyRef.isEmpty()) return "私钥"
+    val resolved = data.resolvePrivateKey(entries)
+    return if (resolved.missing) "私钥（引用的密钥已删除）" else "私钥（引用「${resolved.refTitle}」）"
 }
 
 // 只按名称、用户名、网址、账号、套餐和备注搜索，不匹配密码和密钥本身。
@@ -476,6 +487,7 @@ fun VaultScreen(
                     items(visible, key = { it.id }) { entry ->
                         VaultRow(
                             entry = entry,
+                            entries = state.entries,
                             reminders = remindersByEntry[entry.id].orEmpty(),
                             showReminderText = filter == FILTER_REMINDERS,
                             onOpen = {
@@ -536,6 +548,7 @@ fun VaultScreen(
         VaultItemEditor(
             entry = entry,
             initial = initial,
+            entries = state.entries,
             reminders = entry?.let { remindersByEntry[it.id] }.orEmpty(),
             busy = state.busy,
             onTouch = viewModel::touch,
@@ -738,6 +751,7 @@ private fun CopyButton(label: String, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun VaultRow(
     entry: VaultEntry,
+    entries: List<VaultEntry>,
     reminders: List<VaultReminder>,
     showReminderText: Boolean,
     onOpen: () -> Unit,
@@ -788,7 +802,7 @@ private fun VaultRow(
                         text = if (showReminderText && reminders.isNotEmpty()) {
                             reminders.joinToString(" ") { it.message }
                         } else {
-                            "${style.label} · ${subtitle(data)}"
+                            "${style.label} · ${subtitle(data, entries)}"
                         },
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
@@ -808,7 +822,7 @@ private fun VaultRow(
                     // 与 Web 端一致：主机、密码或私钥，以及可直接粘贴到终端的 ssh 命令。
                     VAULT_KIND_SERVER -> {
                         val useKey = data.authMethod == VAULT_AUTH_KEY
-                        val credential = if (useKey) data.privateKey else data.password
+                        val credential = if (useKey) data.resolvePrivateKey(entries).value else data.password
                         CopyButton("主机", data.host.isNotEmpty()) { onCopy(data.host, "主机") }
                         CopyButton(if (useKey) "私钥" else "密码", credential.isNotEmpty()) {
                             onCopy(credential, if (useKey) "私钥" else "密码")
@@ -843,6 +857,7 @@ private fun rotateLabel(days: Int): String = when (days) {
 private fun VaultItemEditor(
     entry: VaultEntry?,
     initial: VaultItemData,
+    entries: List<VaultEntry>,
     reminders: List<VaultReminder>,
     busy: Boolean,
     onTouch: () -> Unit,
@@ -856,6 +871,7 @@ private fun VaultItemEditor(
     var pastedCodes by remember { mutableStateOf("") }
     var confirmDiscard by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var useKeyRef by remember(initial) { mutableStateOf(initial.privateKeyRef.isNotEmpty()) }
     val dirty = draft != initial
     val isNew = entry == null
     fun update(next: VaultItemData) {
@@ -885,12 +901,16 @@ private fun VaultItemEditor(
     val currencyInvalid = draft.kind == VAULT_KIND_SUBSCRIPTION &&
         draft.currency.isNotBlank() &&
         !Regex("^[A-Z]{3}$").matches(draft.currency)
-    val secretChanged = draft.secretValue.isNotEmpty() && draft.secretValue != initial.secretValue
+    val needsKeySelection = draft.kind == VAULT_KIND_SERVER &&
+        draft.authMethod == VAULT_AUTH_KEY &&
+        useKeyRef &&
+        draft.privateKeyRef.isEmpty()
+    val secretChanged = draft.credentialIdentity().isNotEmpty() && draft.credentialIdentity() != initial.credentialIdentity()
     val changedLabel = when {
         secretChanged -> "保存后记为今天"
-        entry == null || entry.data.secretValue.isEmpty() -> "还没有填写"
+        entry == null || entry.data.effectiveSecret(entries).isEmpty() -> "还没有填写"
         else -> {
-            val iso = lastChangedAt(entry)
+            val iso = lastChangedAt(entry, entries)
             val days = daysSince(iso, LocalDate.now(), ZoneId.systemDefault())
             val date = iso.take(10)
             "$date（${if (days == 0L) "今天" else "$days 天前"}）"
@@ -916,6 +936,7 @@ private fun VaultItemEditor(
             Spacer(Modifier.weight(1f))
             Button(
                 onClick = {
+                    if (needsKeySelection) return@Button
                     val title = draft.title.trim().ifBlank {
                         if (draft.kind == VAULT_KIND_SUBSCRIPTION) {
                             defaultSubscriptionTitle(draft.provider, draft.plan)
@@ -941,6 +962,7 @@ private fun VaultItemEditor(
                     !priceInvalid &&
                     !balanceInvalid &&
                     !currencyInvalid &&
+                    !needsKeySelection &&
                     (dirty || isNew),
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(14.dp),
@@ -1116,18 +1138,87 @@ private fun VaultItemEditor(
                             )
                         }
                         if (draft.authMethod == VAULT_AUTH_KEY) {
-                            OutlinedTextField(
-                                value = draft.privateKey,
-                                onValueChange = { update(draft.copy(privateKey = it)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = if (secretVisible) 4 else 1,
-                                label = { Text("SSH 私钥") },
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                            )
+                            val secrets = entries
+                                .filter { it.data.kind == VAULT_KIND_SECRET }
+                                .sortedBy { it.data.title }
+                            val resolved = draft.resolvePrivateKey(entries)
+                            Text("私钥来源", style = MaterialTheme.typography.labelMedium)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
-                                FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.privateKey.isNotEmpty()) { onCopy(draft.privateKey, "私钥") }
+                                MemoFilterChip(
+                                    label = "直接填写",
+                                    selected = !useKeyRef,
+                                    onClick = {
+                                        useKeyRef = false
+                                        update(draft.copy(privateKeyRef = ""))
+                                    },
+                                )
+                                MemoFilterChip(
+                                    label = "引用已保存的密钥",
+                                    selected = useKeyRef,
+                                    onClick = {
+                                        useKeyRef = true
+                                        onTouch()
+                                    },
+                                )
+                            }
+                            if (useKeyRef) {
+                                if (secrets.isEmpty()) {
+                                    Text(
+                                        "还没有保存的密钥，请先新建一个「密钥」条目。",
+                                        color = TextMuted,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                } else {
+                                    Text("选择密钥", style = MaterialTheme.typography.labelMedium)
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        secrets.forEach { secret ->
+                                            MemoFilterChip(
+                                                label = secret.data.title.ifBlank { "未命名" },
+                                                selected = draft.privateKeyRef == secret.id,
+                                                onClick = { update(draft.copy(privateKeyRef = secret.id)) },
+                                            )
+                                        }
+                                    }
+                                    if (needsKeySelection) {
+                                        Text(
+                                            "请选择要引用的密钥",
+                                            color = TextMuted,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                                if (draft.privateKeyRef.isNotEmpty() && resolved.missing) {
+                                    Text(
+                                        "引用的密钥已被删除，请重新选择",
+                                        color = DangerRed,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                } else if (draft.privateKeyRef.isNotEmpty()) {
+                                    Text(
+                                        "原密钥更新后这里会自动使用新内容",
+                                        color = TextMuted,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    FieldAction(
+                                        Icons.Outlined.ContentCopy,
+                                        "复制",
+                                        enabled = resolved.value.isNotEmpty(),
+                                    ) { onCopy(resolved.value, "私钥") }
+                                }
+                            } else {
+                                OutlinedTextField(
+                                    value = draft.privateKey,
+                                    onValueChange = { update(draft.copy(privateKey = it)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    minLines = if (secretVisible) 4 else 1,
+                                    label = { Text("SSH 私钥") },
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                    visualTransformation = if (secretVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                )
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FieldAction(if (secretVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (secretVisible) "隐藏" else "显示") { secretVisible = !secretVisible }
+                                    FieldAction(Icons.Outlined.ContentCopy, "复制", enabled = draft.privateKey.isNotEmpty()) { onCopy(draft.privateKey, "私钥") }
+                                }
                             }
                             OutlinedTextField(
                                 value = draft.keyPassphrase,
@@ -1393,9 +1484,21 @@ private fun VaultItemEditor(
         )
     }
     if (confirmDelete) {
+        val referencing = if (initial.kind == VAULT_KIND_SECRET && entry != null) {
+            serversReferencingKey(entry.id, entries)
+        } else {
+            emptyList()
+        }
+        val deleteMessage = buildString {
+            append("永久删除「${initial.title}」？删除后无法恢复。")
+            if (referencing.isNotEmpty()) {
+                val names = referencing.joinToString("、") { it.data.title.ifBlank { "未命名" } }
+                append("有 ${referencing.size} 台云服务器引用了这把密钥（$names），删除后它们将无法取到私钥。")
+            }
+        }
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            text = { Text("永久删除「${initial.title}」？删除后无法恢复。") },
+            text = { Text(deleteMessage) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false

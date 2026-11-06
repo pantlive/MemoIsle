@@ -98,6 +98,8 @@ export interface VaultServerData extends VaultReminderSettings {
   password: string;
   /** authMethod === "key" 时使用的私钥内容（PEM / OpenSSH）。 */
   privateKey: string;
+  /** 引用的密钥条目 ID，空字符串表示直接填写。 */
+  privateKeyRef: string;
   /** 私钥的口令，可为空。 */
   keyPassphrase: string;
   notes: string;
@@ -116,6 +118,36 @@ export interface VaultEntry {
   createdAt: string;
   updatedAt: string;
   data: VaultItemData;
+}
+
+export function resolveServerPrivateKey(
+  data: VaultServerData,
+  entries: Pick<VaultEntry, "id" | "data">[],
+): { value: string; refTitle: string | null; missing: boolean } {
+  if (!data.privateKeyRef) return { value: data.privateKey, refTitle: null, missing: false };
+  const target = entries.find((entry) => entry.id === data.privateKeyRef && entry.data.kind === "secret");
+  if (!target || target.data.kind !== "secret") return { value: "", refTitle: null, missing: true };
+  return { value: target.data.secret, refTitle: target.data.title, missing: false };
+}
+
+export function serversReferencingKey(secretId: string, entries: VaultEntry[]): VaultEntry[] {
+  return entries.filter((entry) => entry.data.kind === "server" && entry.data.privateKeyRef === secretId);
+}
+
+// 引用目标就是凭据标识，原密钥内容在读取时解析。
+export function serverCredentialIdentity(data: VaultServerData): string {
+  if (data.authMethod === "password") return data.password;
+  return data.privateKeyRef ? `ref:${data.privateKeyRef}` : data.privateKey;
+}
+
+export function normalizeVaultItemForSave(data: VaultItemData): VaultItemData {
+  if (data.kind === "server") {
+    const normalized = normalizeItemData({ ...data }) as VaultServerData;
+    return normalized.authMethod === "key" && normalized.privateKeyRef
+      ? { ...normalized, privateKey: "" }
+      : normalized;
+  }
+  return data.kind === "subscription" ? normalizeItemData({ ...data }) : data;
 }
 
 const encoder = new TextEncoder();
@@ -285,8 +317,8 @@ export async function encryptVaultItem(
   data: VaultItemData,
 ): Promise<{ ciphertext: string; iv: string }> {
   const iv = randomBytes(12);
-  // 写入和读取都校验订阅字段，避免将非法日期或金额存入密文。
-  const normalized = data.kind === "subscription" ? normalizeItemData({ ...data }) : data;
+  // 保存引用时只存条目 ID；订阅字段也在这里统一校验。
+  const normalized = normalizeVaultItemForSave(data);
   const plaintext = utf8(JSON.stringify({ v: 1, ...normalized }));
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv, additionalData: itemAad(id) },
@@ -326,7 +358,7 @@ function reminderSettings(raw: Record<string, unknown>): VaultReminderSettings {
 }
 
 // 解密后按类型补齐字段，旧版本或缺字段的数据也能正常显示。
-function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
+export function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
   const title = text(raw.title) || "未命名";
   const notes = text(raw.notes);
   if (raw.kind === "subscription") {
@@ -369,6 +401,7 @@ function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
       authMethod: raw.authMethod === "key" ? "key" : "password",
       password: text(raw.password),
       privateKey: text(raw.privateKey),
+      privateKeyRef: text(raw.privateKeyRef),
       keyPassphrase: text(raw.keyPassphrase),
       notes,
       ...reminderSettings(raw),
@@ -493,6 +526,7 @@ export function emptyVaultItem(kind: VaultKind): VaultItemData {
       authMethod: "password",
       password: "",
       privateKey: "",
+      privateKeyRef: "",
       keyPassphrase: "",
       notes: "",
       ...reminders,
@@ -527,10 +561,8 @@ export function stampSecretChange(
   if (next.kind === "server") {
     // 密码或私钥任一变化都算「换过凭据」。
     const before = previous?.kind === "server" ? previous : null;
-    const credential = next.authMethod === "key" ? next.privateKey : next.password;
-    const previousCredential = before
-      ? before.authMethod === "key" ? before.privateKey : before.password
-      : "";
+    const credential = serverCredentialIdentity(next);
+    const previousCredential = before ? serverCredentialIdentity(before) : "";
     if (credential && credential !== previousCredential) {
       return { ...next, changedAt: now };
     }
@@ -622,7 +654,7 @@ export function parseVaultBackup(text: string): VaultBackupFile {
 export async function openVaultBackup(
   password: string,
   backup: VaultBackupFile,
-): Promise<{ items: VaultItemData[]; failed: number }> {
+): Promise<{ items: { id: string; data: VaultItemData }[]; failed: number }> {
   const key = await unlockVault(password, {
     configured: true,
     version: null,
@@ -641,11 +673,48 @@ export async function openVaultBackup(
   })));
   const items = results
     .filter((result): result is PromiseFulfilledResult<VaultEntry> => result.status === "fulfilled")
-    .map((result) => result.value.data);
+    .map((result) => ({ id: result.value.id, data: result.value.data }));
   return { items, failed: results.length - items.length };
 }
 
 // 用于导入去重：同类型、同内容的条目视为重复。
 export function vaultItemFingerprint(data: VaultItemData): string {
-  return JSON.stringify(data);
+  return JSON.stringify(normalizeVaultItemForSave(data));
+}
+
+export function planVaultImport(
+  backupItems: { id: string; data: VaultItemData }[],
+  existing: VaultEntry[],
+  newId: () => string,
+): { items: { id: string; data: VaultItemData }[]; skipped: number } {
+  const fingerprints = new Map(existing.map((entry) => [vaultItemFingerprint(entry.data), entry.id]));
+  const idMap = new Map<string, string>();
+  const items: { id: string; data: VaultItemData }[] = [];
+  let skipped = 0;
+  const add = (oldId: string, data: VaultItemData): void => {
+    const normalized = normalizeVaultItemForSave(data);
+    const fingerprint = vaultItemFingerprint(normalized);
+    const duplicateId = fingerprints.get(fingerprint);
+    if (duplicateId !== undefined) {
+      idMap.set(oldId, duplicateId);
+      skipped += 1;
+      return;
+    }
+    const id = newId();
+    idMap.set(oldId, id);
+    fingerprints.set(fingerprint, id);
+    items.push({ id, data: normalized });
+  };
+
+  // 先分配密钥等独立条目的 ID，重复条目映射到已有 ID。
+  for (const item of backupItems) {
+    if (item.data.kind !== "server" || !item.data.privateKeyRef) add(item.id, item.data);
+  }
+  // 引用改写后再去重，缺失目标保留旧 ID，让界面显示失效提醒。
+  for (const { id, data } of backupItems) {
+    if (data.kind === "server" && data.privateKeyRef) {
+      add(id, { ...data, privateKeyRef: idMap.get(data.privateKeyRef) ?? data.privateKeyRef });
+    }
+  }
+  return { items, skipped };
 }
