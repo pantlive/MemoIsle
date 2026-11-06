@@ -224,8 +224,13 @@ describe("私钥引用提醒", () => {
   it("空密钥引用有效但无凭据，密码模式不会产生密钥缺失提醒", () => {
     const host = entry("server", server({ privateKeyRef: "key", rotateDays: 30, expiresOn: "2026-01-01" }));
     expect(collectVaultReminders([host, entry("key", secret({ secret: "" }))], now)).toEqual([]);
-    const passwordHost = entry("server", server({ authMethod: "password", privateKeyRef: "gone",
-      password: "example-password-placeholder", changedAt: "2026-11-04T12:00:00Z", rotateDays: 30 }));
+    const passwordHost = entry("server", server({
+      authMethod: "password",
+      privateKeyRef: "gone",
+      changedAt: "2026-11-04T12:00:00Z",
+      rotateDays: 30,
+      password: "example-password-placeholder",
+    }));
     expect(collectVaultReminders([passwordHost], now)).toEqual([]);
   });
 });

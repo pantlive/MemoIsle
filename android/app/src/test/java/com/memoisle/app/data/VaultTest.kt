@@ -402,7 +402,7 @@ class VaultTest {
             port = "22",
             username = "root",
             authMethod = VAULT_AUTH_KEY,
-            privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nexample\n-----END OPENSSH PRIVATE KEY-----",
+            privateKey = "example-private-key-placeholder",
             privateKeyRef = "secret-id-1",
             keyPassphrase = "phrase",
             notes = "备注",
