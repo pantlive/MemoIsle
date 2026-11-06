@@ -128,6 +128,8 @@ data class VaultItemData(
     val port: String = "22",
     val authMethod: String = VAULT_AUTH_PASSWORD,
     val privateKey: String = "",
+    /** 引用的 secret 条目 ID；空字符串表示直接填写私钥。 */
+    val privateKeyRef: String = "",
     val keyPassphrase: String = "",
     // AI 订阅：服务商、套餐、开始日、计费周期、费用、余额和币种。
     val provider: String = "",
@@ -138,11 +140,11 @@ data class VaultItemData(
     val balance: String = "",
     val currency: String = "",
 ) {
+    /** 只看本条目字段，无法解析对其他密钥的引用；提醒与列表请用 effectiveSecret。 */
     val secretValue: String
         get() = when (kind) {
             VAULT_KIND_LOGIN -> password
             VAULT_KIND_SECRET -> secret
-            // 服务器按当前认证方式取对应凭据，提醒与「上次更换」都依赖它。
             VAULT_KIND_SERVER -> if (authMethod == VAULT_AUTH_KEY) privateKey else password
             else -> ""
         }
@@ -167,7 +169,9 @@ data class VaultItemData(
                 .put("username", username)
                 .put("authMethod", authMethod)
                 .put("password", password)
-                .put("privateKey", privateKey)
+                // 引用模式下不复制私钥内容，始终写出 privateKeyRef 以便跨端读取。
+                .put("privateKey", if (authMethod == VAULT_AUTH_KEY && privateKeyRef.isNotEmpty()) "" else privateKey)
+                .put("privateKeyRef", privateKeyRef)
                 .put("keyPassphrase", keyPassphrase)
                 .put("notes", notes)
                 .putReminderSettings(this)
@@ -254,6 +258,7 @@ data class VaultItemData(
                         },
                         password = raw.optString("password"),
                         privateKey = raw.optString("privateKey"),
+                        privateKeyRef = raw.optStrictString("privateKeyRef"),
                         keyPassphrase = raw.optString("keyPassphrase"),
                         notes = notes,
                         changedAt = changedAt,
@@ -314,6 +319,9 @@ private fun JSONObject.putReminderSettings(data: VaultItemData): JSONObject {
     return put("changedAt", data.changedAt).put("rotateDays", data.rotateDays).put("expiresOn", data.expiresOn)
 }
 
+/** 缺失或非字符串一律当作空，避免把数字等类型当成条目 ID。 */
+private fun JSONObject.optStrictString(name: String): String = opt(name) as? String ?: ""
+
 private fun VaultItemData.normalizedSubscription(): VaultItemData = copy(
     provider = normalizeVaultProvider(provider),
     startedOn = normalizeVaultDate(startedOn),
@@ -331,14 +339,59 @@ data class VaultEntry(
     val data: VaultItemData,
 )
 
-/** 保存时密码或密钥有变化，就把「上次更换」记为现在；截到毫秒，与网页端 toISOString 的格式一致。 */
+/** 解析后的服务器私钥：value 为有效内容，missing 表示引用已失效。 */
+data class ResolvedKey(
+    val value: String,
+    val refTitle: String = "",
+    val missing: Boolean = false,
+)
+
+/** 按当前条目列表解析服务器私钥：有引用则取对应密钥，找不到则标记 missing。 */
+fun VaultItemData.resolvePrivateKey(entries: List<VaultEntry>): ResolvedKey {
+    val ref = privateKeyRef
+    if (ref.isEmpty()) return ResolvedKey(value = privateKey)
+    val found = entries.firstOrNull { it.id == ref && it.data.kind == VAULT_KIND_SECRET }
+    return if (found != null) {
+        ResolvedKey(value = found.data.secret, refTitle = found.data.title, missing = false)
+    } else {
+        ResolvedKey(value = "", refTitle = "", missing = true)
+    }
+}
+
+/** 有效凭据：服务器在引用密钥时取被引用条目的 secret。 */
+fun VaultItemData.effectiveSecret(entries: List<VaultEntry>): String = when (kind) {
+    VAULT_KIND_LOGIN -> password
+    VAULT_KIND_SECRET -> secret
+    VAULT_KIND_SERVER -> if (authMethod == VAULT_AUTH_KEY) resolvePrivateKey(entries).value else password
+    else -> ""
+}
+
+/** 哪些云服务器引用了这把密钥。 */
+fun serversReferencingKey(secretId: String, entries: List<VaultEntry>): List<VaultEntry> {
+    if (secretId.isEmpty()) return emptyList()
+    return entries.filter { it.data.kind == VAULT_KIND_SERVER && it.data.privateKeyRef == secretId }
+}
+
+/** 用于判断凭据是否变化：直接填写用内容，引用密钥用 ref:<id>。 */
+fun VaultItemData.credentialIdentity(): String = when (kind) {
+    VAULT_KIND_LOGIN -> password
+    VAULT_KIND_SECRET -> secret
+    VAULT_KIND_SERVER -> when {
+        authMethod == VAULT_AUTH_KEY && privateKeyRef.isNotEmpty() -> "ref:$privateKeyRef"
+        authMethod == VAULT_AUTH_KEY -> privateKey
+        else -> password
+    }
+    else -> ""
+}
+
+/** 保存时密码、密钥或引用目标有变化，就把「上次更换」记为现在；截到毫秒，与网页端 toISOString 的格式一致。 */
 fun stampSecretChange(
     previous: VaultItemData?,
     next: VaultItemData,
     now: Instant = Instant.now(),
 ): VaultItemData {
-    val before = previous?.takeIf { it.kind == next.kind }?.secretValue.orEmpty()
-    val after = next.secretValue
+    val before = previous?.takeIf { it.kind == next.kind }?.credentialIdentity().orEmpty()
+    val after = next.credentialIdentity()
     return if (after.isNotEmpty() && after != before) next.copy(changedAt = now.truncatedTo(ChronoUnit.MILLIS).toString()) else next
 }
 
@@ -379,6 +432,7 @@ enum class VaultReminderType(val label: String) {
     WEAK("弱密码"),
     CODES_EMPTY("恢复码用完"),
     CODES_LOW("恢复码不足"),
+    MISSING_KEY("密钥缺失"),
 }
 
 data class VaultReminder(
@@ -408,8 +462,17 @@ fun isWeakVaultPassword(password: String): Boolean {
     return classes == 1 && length < 16
 }
 
-fun lastChangedAt(entry: VaultEntry): String {
-    return entry.data.changedAt.ifBlank { entry.createdAt }
+/** 条目的上次更换时间；服务器引用有效密钥时用被引用条目的时间。 */
+fun lastChangedAt(entry: VaultEntry, entries: List<VaultEntry> = emptyList()): String {
+    val data = entry.data
+    if (data.kind == VAULT_KIND_SERVER &&
+        data.authMethod == VAULT_AUTH_KEY &&
+        data.privateKeyRef.isNotEmpty()
+    ) {
+        val referenced = entries.firstOrNull { it.id == data.privateKeyRef && it.data.kind == VAULT_KIND_SECRET }
+        if (referenced != null) return lastChangedAt(referenced)
+    }
+    return data.changedAt.ifBlank { entry.createdAt }
 }
 
 fun daysSince(iso: String, today: LocalDate, zone: ZoneId): Long {
@@ -443,8 +506,16 @@ fun collectVaultReminders(
             }
             continue
         }
+        if (data.kind == VAULT_KIND_SERVER &&
+            data.authMethod == VAULT_AUTH_KEY &&
+            data.privateKeyRef.isNotEmpty() &&
+            data.resolvePrivateKey(entries).missing
+        ) {
+            add(entry, VaultReminderType.MISSING_KEY, true, "引用的密钥已被删除，请重新选择或直接填写私钥。")
+        }
+        val effective = data.effectiveSecret(entries)
         // 订阅的到期提醒只看续费日。
-        val checkExpiry = data.kind == VAULT_KIND_SUBSCRIPTION || data.secretValue.isNotEmpty()
+        val checkExpiry = data.kind == VAULT_KIND_SUBSCRIPTION || effective.isNotEmpty()
         if (checkExpiry && data.expiresOn.isNotEmpty()) {
             val days = try {
                 ChronoUnit.DAYS.between(today, LocalDate.parse(data.expiresOn))
@@ -482,8 +553,8 @@ fun collectVaultReminders(
                 )
             }
         }
-        if (data.secretValue.isNotEmpty() && data.rotateDays > 0) {
-            val age = daysSince(lastChangedAt(entry), today, zone)
+        if (effective.isNotEmpty() && data.rotateDays > 0) {
+            val age = daysSince(lastChangedAt(entry, entries), today, zone)
             val left = data.rotateDays - age
             if (left <= 0) {
                 add(entry, VaultReminderType.ROTATE, true, "已 $age 天没有更换，设定为每 ${data.rotateDays} 天换一次。")

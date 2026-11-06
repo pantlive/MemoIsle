@@ -1,6 +1,6 @@
 // 密码提醒：解锁后在浏览器里根据明文条目计算，不上传任何结果。
 
-import type { VaultEntry, VaultItemData } from "./vault";
+import { resolveServerPrivateKey, type VaultEntry, type VaultItemData } from "./vault";
 
 const DAY_MS = 86_400_000;
 // 到期前多少天开始提醒。
@@ -18,7 +18,8 @@ export type VaultReminderType =
   | "reused"
   | "weak"
   | "codes-empty"
-  | "codes-low";
+  | "codes-low"
+  | "missing-key";
 
 export interface VaultReminder {
   entryId: string;
@@ -37,6 +38,7 @@ export const reminderLabels: Record<VaultReminderType, string> = {
   weak: "弱密码",
   "codes-empty": "恢复码用完",
   "codes-low": "恢复码不足",
+  "missing-key": "密钥缺失",
 };
 
 function localMidnight(date: Date): number {
@@ -49,8 +51,16 @@ export function daysUntilDate(isoDate: string, now = new Date()): number {
   return Math.round((new Date(year, month - 1, day).getTime() - localMidnight(now)) / DAY_MS);
 }
 
-export function lastChangedAt(entry: Pick<VaultEntry, "createdAt" | "data">): string {
+export function lastChangedAt(
+  entry: Pick<VaultEntry, "createdAt" | "data">,
+  entries: VaultEntry[] = [],
+): string {
   const { data } = entry;
+  // 服务器跟随原密钥的轮换时间，旧密钥没有记录时按其创建时间算。
+  if (data.kind === "server" && data.authMethod === "key" && data.privateKeyRef) {
+    const target = entries.find((item) => item.id === data.privateKeyRef && item.data.kind === "secret");
+    if (target) return lastChangedAt(target);
+  }
   return (data.kind === "login" || data.kind === "secret" || data.kind === "server")
     && data.changedAt
     ? data.changedAt
@@ -76,12 +86,11 @@ export function isWeakPassword(password: string): boolean {
   return classes === 1 && length < 16;
 }
 
-function hasSecretValue(data: VaultItemData): boolean {
+function hasSecretValue(data: VaultItemData, entries: VaultEntry[]): boolean {
   if (data.kind === "login") return Boolean(data.password);
   if (data.kind === "secret") return Boolean(data.secret);
   if (data.kind === "server") {
-    // 私钥和密码任一存在就算有凭据，用于到期与定期更换提醒。
-    return Boolean(data.privateKey || data.password);
+    return Boolean(data.authMethod === "key" ? resolveServerPrivateKey(data, entries).value : data.password);
   }
   return false;
 }
@@ -119,7 +128,11 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
       continue;
     }
 
-    const hasSecret = hasSecretValue(data);
+    if (data.kind === "server" && data.authMethod === "key"
+      && resolveServerPrivateKey(data, entries).missing) {
+      add(entry, "missing-key", "danger", "引用的密钥已被删除，请重新选择或直接填写私钥。");
+    }
+    const hasSecret = hasSecretValue(data, entries);
     // 订阅按到期日提醒续费。
     if (data.expiresOn && (data.kind === "subscription" || hasSecret)) {
       const days = daysUntilDate(data.expiresOn, now);
@@ -139,7 +152,7 @@ export function collectVaultReminders(entries: VaultEntry[], now = new Date()): 
     }
     // 定期更换仍然只检查已经填写的密码或密钥。
     if (data.kind !== "subscription" && hasSecret && data.rotateDays > 0) {
-      const age = daysSince(lastChangedAt(entry), now);
+      const age = daysSince(lastChangedAt(entry, entries), now);
       const left = data.rotateDays - age;
       if (left <= 0) {
         add(entry, "rotate", "danger", `已 ${age} 天没有更换，设定为每 ${data.rotateDays} 天换一次。`);
