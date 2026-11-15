@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Sync
@@ -91,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.memoisle.app.MemoViewModel
 import com.memoisle.app.VaultViewModel
+import com.memoisle.app.LedgerViewModel
 import com.memoisle.app.audio.SherpaOnnxSpeechToText
 import com.memoisle.app.audio.VoiceRecorder
 import com.memoisle.app.audio.VoiceRecording
@@ -128,6 +130,7 @@ private val displayTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 fun MemoHomeScreen(
     viewModel: MemoViewModel,
     vaultViewModel: VaultViewModel,
+    ledgerViewModel: LedgerViewModel,
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -168,6 +171,7 @@ fun MemoHomeScreen(
     var showTrash by rememberSaveable { mutableStateOf(false) }
     var showInbox by rememberSaveable { mutableStateOf(false) }
     var showVault by rememberSaveable { mutableStateOf(false) }
+    var showLedger by rememberSaveable { mutableStateOf(false) }
     var pendingPermanentDelete by remember { mutableStateOf<Memo?>(null) }
     var pendingMoveToTrash by remember { mutableStateOf<Memo?>(null) }
     var showReviewAnswer by rememberSaveable { mutableStateOf(false) }
@@ -592,6 +596,10 @@ fun MemoHomeScreen(
         if (activeType == TYPE_RESOURCE) viewModel.loadQuickAccess()
     }
 
+    if (showLedger) {
+        LedgerScreen(viewModel = ledgerViewModel, onClose = { showLedger = false })
+        return
+    }
     if (showVault) {
         VaultScreen(viewModel = vaultViewModel, onClose = { showVault = false })
         return
@@ -692,7 +700,8 @@ fun MemoHomeScreen(
                     showReviewAnswer = false
                 },
                 vaultReminderCount = vaultViewModel.lastReminderCount,
-                onShowVault = { showVault = true },
+                onShowVault = { showLedger = false; showVault = true },
+                onShowLedger = { showVault = false; showLedger = true },
             )
         },
         floatingActionButton = {
@@ -1711,6 +1720,7 @@ private fun MemoBottomNavigation(
     onShowReview: () -> Unit,
     vaultReminderCount: Int,
     onShowVault: () -> Unit,
+    onShowLedger: () -> Unit,
 ) {
     val homeSelected = !showAllMemos && !showReview && !showTrash && !showInbox
     val librarySelected = showAllMemos && !showReview && !showTrash && !showInbox
@@ -1739,6 +1749,13 @@ private fun MemoBottomNavigation(
             onClick = onShowReview,
             icon = { Icon(Icons.Outlined.Autorenew, contentDescription = null) },
             label = { Text("回顾") },
+            colors = memoNavigationColors(),
+        )
+        NavigationBarItem(
+            selected = false,
+            onClick = onShowLedger,
+            icon = { Icon(Icons.Outlined.AccountBalanceWallet, contentDescription = null) },
+            label = { Text("记账") },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(

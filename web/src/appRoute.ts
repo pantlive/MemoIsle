@@ -15,9 +15,17 @@ export const ROUTE_VIEWS = [
   "image",
   "trash",
   "vault",
+  "ledger",
 ] as const;
 
 export type RouteView = (typeof ROUTE_VIEWS)[number];
+
+/** 密码库、记账是独立页面，不承载条目选择。 */
+export type StandaloneView = Extract<RouteView, "vault" | "ledger">;
+
+export function isStandaloneView(view: RouteView): view is StandaloneView {
+  return view === "vault" || view === "ledger";
+}
 
 export interface AppRoute {
   view: RouteView;
@@ -37,9 +45,8 @@ export function readAppRoute(search: string): AppRoute {
   const rawView = params.get("view");
   const view = isRouteView(rawView) ? rawView : DEFAULT_VIEW;
   const rawItem = params.get("item");
-  // 密码库是独立页面，不承载条目选择。
   const item =
-    view !== "vault" && rawItem && ITEM_ID_PATTERN.test(rawItem) ? rawItem : null;
+    !isStandaloneView(view) && rawItem && ITEM_ID_PATTERN.test(rawItem) ? rawItem : null;
   return { view, item };
 }
 
@@ -55,7 +62,7 @@ export function routeHref(currentHref: string, route: AppRoute): string {
   } else {
     url.searchParams.set("view", route.view);
   }
-  if (route.item && route.view !== "vault") {
+  if (route.item && !isStandaloneView(route.view)) {
     url.searchParams.set("item", route.item);
   } else {
     url.searchParams.delete("item");

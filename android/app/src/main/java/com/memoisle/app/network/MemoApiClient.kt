@@ -1,6 +1,10 @@
 package com.memoisle.app.network
 
 import com.memoisle.app.data.Memo
+import com.memoisle.app.data.LedgerEntry
+import com.memoisle.app.data.LedgerEntryInput
+import com.memoisle.app.data.LedgerSummary
+import com.memoisle.app.data.LedgerCategoryUsage
 import com.memoisle.app.data.MemoDeletion
 import com.memoisle.app.data.MemoSyncCursor
 import com.memoisle.app.data.SyncState
@@ -725,6 +729,34 @@ class MemoApiClient(baseUrl: String) {
 
     fun deleteVaultItem(id: String, expectedVersion: Int) {
         executeText("DELETE", "vault/items/$id?expected_version=$expectedVersion")
+    }
+
+    // 记账仅在线读写，不进入备忘录的离线数据库与同步队列。
+    fun listLedgerEntries(month: String, kind: String = "", category: String = "", offset: Int = 0): List<LedgerEntry> {
+        val query = "month=${URLEncoder.encode(month, "UTF-8")}&limit=500&offset=$offset" +
+            (if (kind.isNotBlank()) "&kind=${URLEncoder.encode(kind, "UTF-8")}" else "") +
+            (if (category.isNotBlank()) "&category=${URLEncoder.encode(category, "UTF-8")}" else "")
+        val rows = JSONArray(executeText("GET", "ledger/entries?$query"))
+        return List(rows.length()) { LedgerEntry.fromJson(rows.getJSONObject(it)) }
+    }
+
+    fun createLedgerEntry(data: LedgerEntryInput): LedgerEntry =
+        LedgerEntry.fromJson(execute("POST", "ledger/entries", data.toJson()))
+
+    fun updateLedgerEntry(id: String, data: LedgerEntryInput, expectedVersion: Int): LedgerEntry =
+        LedgerEntry.fromJson(execute("PUT", "ledger/entries/$id", data.toJson().put("expected_version", expectedVersion)))
+
+    fun deleteLedgerEntry(id: String, expectedVersion: Int) {
+        executeText("DELETE", "ledger/entries/$id?expected_version=$expectedVersion")
+    }
+
+    fun getLedgerSummary(month: String): LedgerSummary = LedgerSummary.fromJson(
+        execute("GET", "ledger/summary?month=${URLEncoder.encode(month, "UTF-8")}"),
+    )
+
+    fun listLedgerCategories(): List<LedgerCategoryUsage> {
+        val rows = JSONArray(executeText("GET", "ledger/categories"))
+        return List(rows.length()) { LedgerCategoryUsage.fromJson(rows.getJSONObject(it)) }
     }
 
     private fun execute(method: String, path: String, body: JSONObject? = null): JSONObject {

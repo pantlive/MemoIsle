@@ -764,3 +764,53 @@ export interface WeeklySummary {
   top_tags: { tag: string; count: number }[];
   highlights: Memo[];
 }
+
+export type LedgerKind = "income" | "expense";
+
+/** 记账流水的可编辑字段；金额以分为单位的正整数。 */
+export interface LedgerEntryInput {
+  kind: LedgerKind;
+  amount_cents: number;
+  currency: string;
+  /** 本地日期 YYYY-MM-DD。 */
+  occurred_on: string;
+  category: string;
+  account: string | null;
+  note: string | null;
+}
+
+export interface LedgerEntry extends LedgerEntryInput {
+  id: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LedgerCurrencyTotal {
+  currency: string;
+  income_cents: number;
+  expense_cents: number;
+  balance_cents: number;
+  entry_count: number;
+}
+
+export interface LedgerCategoryTotal {
+  currency: string;
+  kind: LedgerKind;
+  category: string;
+  amount_cents: number;
+  entry_count: number;
+}
+
+/** 月度汇总：不同币种分开统计，不做汇率折算。 */
+export interface LedgerSummary {
+  month: string;
+  totals: LedgerCurrencyTotal[];
+  categories: LedgerCategoryTotal[];
+}
+
+export interface LedgerCategoryUsage {
+  kind: LedgerKind;
+  category: string;
+  entry_count: number;
+}

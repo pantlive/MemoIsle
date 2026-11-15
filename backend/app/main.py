@@ -16,6 +16,7 @@ from app.database import Database
 from app.ebook_service import run_pending_ebook_jobs
 from app.image_ocr_service import run_pending_image_ocr
 from app.image_organization_service import image_organization_loop
+from app.ledger_api import router as ledger_router
 from app.link_health_service import link_health_monitor_loop
 from app.memo_tools_api import router as memo_tools_router
 from app.model_settings_api import router as model_settings_router
@@ -121,6 +122,7 @@ def create_app(
     application.include_router(memo_tools_router, prefix="/api/v1")
     application.include_router(resource_classification_router, prefix="/api/v1")
     application.include_router(vault_router, prefix="/api/v1")
+    application.include_router(ledger_router, prefix="/api/v1")
     return application
 
 
