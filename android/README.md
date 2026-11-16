@@ -112,8 +112,9 @@ Release 默认不打包约 229 MB 的模型权重，首次结束录音时从固�
 ```
 
 脚本将模型放到 `app/src/debug/assets/models/sensevoice/`，因此只影响 Debug APK；
-构建脚本会自动下载并缓存 sherpa-onnx AAR，网络不可用时可提前放入
-`app/build/third-party/`。也可以通过 `-PMEMOISLE_SENSEVOICE_MODEL_URL=...` 指定
+构建脚本会自动下载 sherpa-onnx AAR 并按 SHA-256 校验，缓存在
+`~/.gradle/caches/memoisle-third-party/`，各 worktree 和 clean 之后共用，只下载一次；
+网络不可用时可提前把官方 AAR 放到这个目录。升级 `sherpaOnnxVersion` 时要同步更新 `sherpaOnnxSha256`。也可以通过 `-PMEMOISLE_SENSEVOICE_MODEL_URL=...` 指定
 内部模型镜像地址。
 
 Android 端 TTS 请求服务端 `POST /api/v1/speech/tts`，因此需要先按[后端说明](../backend/README.md)
