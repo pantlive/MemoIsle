@@ -47,6 +47,10 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_LLM_API_KEY`：OpenAI 兼容接口密钥；本地无需鉴权的模型服务可留空。
 - `MEMOISLE_LLM_MODEL`：会议总结使用的模型名称，例如 `deepseek-chat`。
 - `MEMOISLE_LLM_TIMEOUT_SECONDS`：会议总结请求超时秒数，默认 30。
+- `MEMOISLE_LEDGER_LLM_BASE_URL`：一句话记账用的本地大模型 OpenAI 兼容接口地址，例如 Ollama 的 `http://127.0.0.1:11434/v1`、LM Studio 的 `http://127.0.0.1:1234/v1`；与 `MEMOISLE_LLM_*` 分开配置，不会借用会议总结的云端模型。直连该地址，不读取 `HTTP(S)_PROXY`。
+- `MEMOISLE_LEDGER_LLM_MODEL`：记账识别用的模型名称，例如 `qwen2.5:7b`；与地址同时配置才启用。推荐非推理模型；推理模型请关闭思考（回复上限 256 token，思考过长会被截断并退回规则）。
+- `MEMOISLE_LEDGER_LLM_API_KEY`：本地模型服务的密钥，无需鉴权时留空，留空时不发送 `Authorization`。
+- `MEMOISLE_LEDGER_LLM_TIMEOUT_SECONDS`：记账识别请求超时秒数，默认 15，最小 1。
 - `MEMOISLE_DEEPSEEK_API_KEY` / `DEEPSEEK_API_KEY`：分类模板生成的服务器默认 DeepSeek 凭证；也可在 Web 设置里按账号保存，优先使用账号凭据。
 - `MEMOISLE_DEEPSEEK_BASE_URL`：分类生成接口地址，默认 `https://api.deepseek.com/v1`。
 - `MEMOISLE_DEEPSEEK_MODEL`：分类生成模型，默认 `deepseek-flash`，支持覆盖为部署中可用的 DeepSeek 模型。
@@ -199,6 +203,26 @@ Android 自定义地址。令牌只在数据库保存 SHA-256 哈希，退出登
 两次输入一致且不同于当前密码。当前密码错误返回 400，失败次数与登录共用限流。
 成功后撤销该账号全部会话及未使用的密码重置链接，所有设备需使用新密码重新登录。
 该操作仅修改账号登录密码，密码库使用独立的主密码。
+
+## 一句话记账
+
+`POST /api/v1/ledger/quick` 接收 `{"text": "今天早饭花了10元", "today": "YYYY-MM-DD"}`，
+识别后直接保存为一笔流水，返回新记录和 `parsed_by`（`llm` 或 `rule`）。默认只用
+`app/ledger_parser.py` 的确定性规则；配置 `MEMOISLE_LEDGER_LLM_BASE_URL` 和
+`MEMOISLE_LEDGER_LLM_MODEL` 后先调用本地大模型（`app/ledger_llm.py`），模型结果逐项校验：
+金额须为不超过 10 亿元的正整数分；句中有规则认得出的日期（今天、昨天、3月5号等）时以规则为准，
+模型给的其他日期须在 1900–2100 年且不晚于明天，否则用今天；分类只能是预设分类或该账号用过的，
+否则改用规则选的分类；账户须出现在原句中；备注固定为原句。模型拒答、超时、连不上或回复不合格时
+退回规则，规则也识别不出时返回 422 且不写入。模型调用在写库加锁之前进行，日志只记状态码或异常类型，
+不记录原句和密钥。
+
+本地以 Ollama 为例：
+
+```bash
+ollama pull qwen2.5:7b
+export MEMOISLE_LEDGER_LLM_BASE_URL=http://127.0.0.1:11434/v1
+export MEMOISLE_LEDGER_LLM_MODEL=qwen2.5:7b
+```
 
 ## 数据导出
 

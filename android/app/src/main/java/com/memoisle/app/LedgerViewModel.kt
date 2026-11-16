@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.memoisle.app.data.LedgerCategoryUsage
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
+import com.memoisle.app.data.LedgerQuickResult
 import com.memoisle.app.data.LedgerSummary
 import com.memoisle.app.data.currentLedgerMonth
 import com.memoisle.app.data.formatLedgerMoney
@@ -128,10 +129,11 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
             return
         }
         val today = LocalDate.now().toString()
-        mutate(onDone, onSuccess = { entry: LedgerEntry ->
+        mutate(onDone, onSuccess = { result: LedgerQuickResult ->
+            val entry = result.entry
             // 记到别的月份时切过去，刷新后能在列表里看到这一笔。
             uiState = uiState.copy(month = entry.data.occurredOn.take(7), quickEntry = entry)
-            "已记下：${describeQuickEntry(entry)}"
+            "已记下：${describeQuickEntry(entry)}" + if (result.byLocalModel) "（本地模型识别）" else ""
         }) { api.quickCreateLedgerEntry(sentence, today) }
     }
 

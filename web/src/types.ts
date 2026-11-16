@@ -786,6 +786,14 @@ export interface LedgerEntry extends LedgerEntryInput {
   updated_at: string;
 }
 
+/** 一句话记账的识别方式：llm 为服务端配置的本地大模型，rule 为固定规则。 */
+export type LedgerParsedBy = "llm" | "rule";
+
+/** 一句话记下的一笔，附带识别方式。 */
+export interface LedgerQuickResult extends LedgerEntry {
+  parsed_by: LedgerParsedBy;
+}
+
 export interface LedgerCurrencyTotal {
   currency: string;
   income_cents: number;

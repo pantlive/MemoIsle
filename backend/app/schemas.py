@@ -2437,6 +2437,8 @@ class VaultItemRead(BaseModel):
 
 
 LedgerKind = Literal["income", "expense"]
+# 一句话记账用的识别方式：llm 为本地大模型，rule 为固定规则。
+LedgerParsedBy = Literal["llm", "rule"]
 # 单笔上限 10 亿元，按分保存。
 LEDGER_MAX_AMOUNT_CENTS = 100_000_000_000
 LEDGER_DEFAULT_CURRENCY = "CNY"
@@ -2577,6 +2579,12 @@ class LedgerEntryRead(BaseModel):
 
         resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
         return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class LedgerQuickRead(LedgerEntryRead):
+    """一句话记下的一笔，附带这次是用哪种方式识别的。"""
+
+    parsed_by: LedgerParsedBy
 
 
 class LedgerCurrencyTotal(BaseModel):

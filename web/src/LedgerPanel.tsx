@@ -181,9 +181,10 @@ export default function LedgerPanel() {
     setQuickError("");
     // 识别失败时保留输入，方便改一改再记。
     void mutate(() => quickCreateLedgerEntry(text, isoDateOf()), {
-      onSuccess: (entry) => {
+      onSuccess: ({ parsed_by: parsedBy, ...entry }) => {
         setQuickText(""); setQuickSaved(entry);
-        return { notice: `已记下：${describeQuickEntry(entry)}`, month: entry.occurred_on.slice(0, 7) };
+        const source = parsedBy === "llm" ? "（本地模型识别）" : "";
+        return { notice: `已记下：${describeQuickEntry(entry)}${source}`, month: entry.occurred_on.slice(0, 7) };
       },
       onError: setQuickError,
     });
