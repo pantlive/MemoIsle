@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user_id, get_session
+from app.ledger_parser import LedgerParseError
 from app.ledger_service import (
     DEFAULT_LIST_LIMIT,
     MAX_LIST_LIMIT,
@@ -16,6 +17,7 @@ from app.ledger_service import (
     LedgerLimitError,
     LedgerVersionConflictError,
     create_entry,
+    create_entry_from_sentence,
     delete_entry,
     list_categories,
     list_entries,
@@ -30,6 +32,7 @@ from app.schemas import (
     LedgerEntryRead,
     LedgerEntryUpdate,
     LedgerKind,
+    LedgerQuickCreate,
     LedgerSummary,
 )
 
@@ -94,6 +97,25 @@ def create_entry_route(
 
     try:
         entry = create_entry(session, user_id, payload)
+    except LedgerLimitError as error:
+        raise HTTPException(status_code=400, detail="记账记录数量已达上限") from error
+    return LedgerEntryRead.model_validate(entry)
+
+
+@router.post(
+    "/quick", response_model=LedgerEntryRead, status_code=status.HTTP_201_CREATED
+)
+def quick_create_entry_route(
+    payload: LedgerQuickCreate,
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> LedgerEntryRead:
+    """一句话记一笔，如“今天早饭花了10元”；识别不出时返回 422 和中文提示。"""
+
+    try:
+        entry = create_entry_from_sentence(session, user_id, payload)
+    except LedgerParseError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except LedgerLimitError as error:
         raise HTTPException(status_code=400, detail="记账记录数量已达上限") from error
     return LedgerEntryRead.model_validate(entry)

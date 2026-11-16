@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -37,7 +38,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.memoisle.app.LedgerViewModel
@@ -63,9 +66,12 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
     var deleting by remember { mutableStateOf<LedgerEntry?>(null) }
     var categoryExpanded by remember { mutableStateOf(false) }
     var showCategoryTotals by rememberSaveable { mutableStateOf(false) }
+    var quickText by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(Unit) { viewModel.load() }
     BackHandler { onClose() }
     val disabled = state.busy || state.loading
+    // 识别失败时不清空，方便改一改再记。
+    val submitQuick = { viewModel.quickAdd(quickText) { quickText = "" } }
 
     Scaffold(topBar = {
         TopAppBar(title = { Text("记账") }, navigationIcon = {
@@ -78,6 +84,17 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = quickText, onValueChange = { quickText = it },
+                        label = { Text("一句话记账") }, placeholder = { Text("如：今天早饭花了10元") },
+                        enabled = !state.busy, singleLine = true, modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { if (!disabled) submitQuick() }))
+                    Button(enabled = !disabled && quickText.isNotBlank(), onClick = submitQuick) { Text("记下") }
+                }
+            }
+            item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(enabled = !state.busy && state.month > "1900-01", onClick = { viewModel.changeMonth(-1) }) { Text("上月") }
                     Column {
@@ -88,7 +105,17 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
                 }
             }
             if (state.loading) item { CircularProgressIndicator() }
-            state.message?.let { message -> item { Text(message) } }
+            state.message?.let { message -> item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(message, Modifier.weight(1f))
+                    state.quickEntry?.let { quick ->
+                        // 列表里有更新的版本时用它，避免拿旧版本号保存。
+                        TextButton(enabled = !disabled, onClick = {
+                            editing = state.entries.find { it.id == quick.id } ?: quick; editorOpen = true
+                        }) { Text("编辑") }
+                    }
+                }
+            } }
             state.error?.let { error -> item {
                 Text(error, color = MaterialTheme.colorScheme.error)
                 TextButton(enabled = !disabled, onClick = viewModel::load) { Text("重新读取") }

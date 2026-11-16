@@ -9499,6 +9499,11 @@ summary:focus-visible {
 .ledger-panel button:disabled, .ledger-dialog button:disabled { opacity: .55; cursor: not-allowed; }
 .ledger-actions, .ledger-month, .ledger-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .ledger-actions .primary { display: inline-flex; align-items: center; gap: 6px; }
+/* 一句话记账：输入框占满剩余宽度，识别失败的提示独占一行。 */
+.ledger-quick { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.ledger-quick input { flex: 1 1 260px; }
+.ledger-quick .ledger-error { flex-basis: 100%; margin: 0; }
+.ledger-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .ledger-filters label, .ledger-fields label { display: grid; gap: 6px; font-size: 13px; }
 .ledger-filters small, .ledger-card small, .ledger-row small, .ledger-empty span { color: var(--muted); }
 .ledger-panel input, .ledger-panel select, .ledger-dialog input, .ledger-dialog select, .ledger-dialog textarea {

@@ -11,6 +11,7 @@ import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
 import com.memoisle.app.data.LedgerSummary
 import com.memoisle.app.data.currentLedgerMonth
+import com.memoisle.app.data.formatLedgerMoney
 import com.memoisle.app.data.shiftLedgerMonth
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 
 data class LedgerUiState(
     val month: String = currentLedgerMonth(),
@@ -32,6 +34,8 @@ data class LedgerUiState(
     val hasMore: Boolean = false,
     val error: String? = null,
     val message: String? = null,
+    /** 一句话刚记下的那一笔，提示旁边提供「编辑」入口。 */
+    val quickEntry: LedgerEntry? = null,
 )
 
 /** 在线记账；取消旧请求，避免切月或退出登录后写回旧账号数据。 */
@@ -70,7 +74,7 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
     fun load() {
         if (uiState.busy) return
         loadJob?.cancel()
-        uiState = uiState.copy(loading = true, error = null, message = null,
+        uiState = uiState.copy(loading = true, error = null, message = null, quickEntry = null,
             entries = emptyList(), summary = null, hasMore = false)
         val snapshot = uiState
         loadJob = viewModelScope.launch {
@@ -115,15 +119,35 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
         mutate(onDone) { api.deleteLedgerEntry(entry.id, entry.version) }
     }
 
-    private fun mutate(onDone: () -> Unit, action: () -> Unit) {
+    /** 一句话记一笔，由服务端识别后直接保存；识别失败时不写入，输入框保留原文。 */
+    fun quickAdd(text: String, onDone: () -> Unit) {
+        val sentence = text.trim()
+        if (sentence.isEmpty() || uiState.busy || uiState.loading) return
+        if (sentence.codePointCount(0, sentence.length) > QUICK_TEXT_MAX_LENGTH) {
+            uiState = uiState.copy(error = "一句话最多 $QUICK_TEXT_MAX_LENGTH 个字。", message = null)
+            return
+        }
+        val today = LocalDate.now().toString()
+        mutate(onDone, onSuccess = { entry: LedgerEntry ->
+            // 记到别的月份时切过去，刷新后能在列表里看到这一笔。
+            uiState = uiState.copy(month = entry.data.occurredOn.take(7), quickEntry = entry)
+            "已记下：${describeQuickEntry(entry)}"
+        }) { api.quickCreateLedgerEntry(sentence, today) }
+    }
+
+    private fun <T> mutate(
+        onDone: () -> Unit,
+        onSuccess: (T) -> String = { "已保存。" },
+        action: () -> T,
+    ) {
         if (uiState.busy || uiState.loading) return
         loadJob?.cancel()
-        uiState = uiState.copy(busy = true, error = null, message = null)
+        uiState = uiState.copy(busy = true, error = null, message = null, quickEntry = null)
         mutationJob = viewModelScope.launch {
             var message: String
             try {
-                withContext(Dispatchers.IO) { action() }
-                message = "已保存。"
+                val result = withContext(Dispatchers.IO) { action() }
+                message = onSuccess(result)
                 // 写入成功就关闭表单，刷新失败时不能让用户重复提交。
                 onDone()
             } catch (error: CancellationException) {
@@ -155,6 +179,13 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
         snapshot.copy(entries = entries, summary = summary, categories = categories, hasMore = entries.size == PAGE_SIZE)
     }
 
+    private fun describeQuickEntry(entry: LedgerEntry): String = listOfNotNull(
+        "${entry.data.category} ${if (entry.data.kind == "income") "+" else "-"}" +
+            formatLedgerMoney(entry.data.amountCents, entry.data.currency),
+        entry.data.occurredOn,
+        entry.data.account,
+    ).joinToString(" · ")
+
     private fun describe(error: Exception): String = when (error) {
         is ApiException -> error.detailMessage ?: "操作失败（${error.statusCode}），请重试。"
         is java.io.IOException -> "无法连接服务器。记账仅支持在线使用，请检查网络后重试。"
@@ -163,6 +194,7 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
 
     companion object {
         const val PAGE_SIZE = 500
+        const val QUICK_TEXT_MAX_LENGTH = 200
         fun factory(api: MemoApiClient): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = LedgerViewModel(api) as T

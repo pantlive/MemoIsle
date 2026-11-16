@@ -2450,6 +2450,24 @@ _LEDGER_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 LEDGER_MONTH_PATTERN = r"^(19\d{2}|20\d{2}|2100)-(0[1-9]|1[0-2])$"
 
 
+def _ledger_date_input(value: object) -> object:
+    """只接受 YYYY-MM-DD，不把时间戳或带时间的字符串猜成日期。"""
+
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not _LEDGER_DATE_PATTERN.fullmatch(value):
+        raise ValueError("日期格式应为 YYYY-MM-DD")
+    return value
+
+
+def _ledger_date_in_range(value: date) -> date:
+    """拦住明显输错的年份。"""
+
+    if not LEDGER_MIN_DATE <= value <= LEDGER_MAX_DATE:
+        raise ValueError("日期超出可记录范围")
+    return value
+
+
 def _optional_ledger_text(value: object, limit: int, name: str) -> str | None:
     if value is None:
         return None
@@ -2492,20 +2510,14 @@ class LedgerEntryFields(BaseModel):
     def validate_occurred_on(cls, value: object) -> object:
         """只接受 YYYY-MM-DD，不把时间戳或带时间的字符串猜成日期。"""
 
-        if isinstance(value, date) and not isinstance(value, datetime):
-            return value
-        if not isinstance(value, str) or not _LEDGER_DATE_PATTERN.fullmatch(value):
-            raise ValueError("日期格式应为 YYYY-MM-DD")
-        return value
+        return _ledger_date_input(value)
 
     @field_validator("occurred_on")
     @classmethod
     def validate_date_range(cls, value: date) -> date:
         """拦住明显输错的年份。"""
 
-        if not LEDGER_MIN_DATE <= value <= LEDGER_MAX_DATE:
-            raise ValueError("日期超出可记录范围")
-        return value
+        return _ledger_date_in_range(value)
 
     @field_validator("category", mode="before")
     @classmethod
@@ -2601,3 +2613,42 @@ class LedgerCategoryUsage(BaseModel):
     kind: LedgerKind
     category: str
     entry_count: int
+
+
+LEDGER_QUICK_TEXT_MAX_LENGTH = 200
+
+
+class LedgerQuickCreate(BaseModel):
+    """一句话记一笔，如“今天早饭花了10元”。
+
+    today 由客户端按用户本地时区给出，用来换算“今天”“昨天”。
+    """
+
+    text: str
+    today: date
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def validate_text(cls, value: object) -> str:
+        """去掉首尾空白后 1–200 字。"""
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("请输入一句话，如：今天早饭花了10元")
+        cleaned = value.strip()
+        if len(cleaned) > LEDGER_QUICK_TEXT_MAX_LENGTH:
+            raise ValueError(f"一句话最多 {LEDGER_QUICK_TEXT_MAX_LENGTH} 个字")
+        return cleaned
+
+    @field_validator("today", mode="before")
+    @classmethod
+    def validate_today(cls, value: object) -> object:
+        """与流水日期同样只接受 YYYY-MM-DD。"""
+
+        return _ledger_date_input(value)
+
+    @field_validator("today")
+    @classmethod
+    def validate_today_range(cls, value: date) -> date:
+        """与流水日期同样的年份范围。"""
+
+        return _ledger_date_in_range(value)
