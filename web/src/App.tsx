@@ -151,6 +151,7 @@ import { createLevelStore } from "./levelStore";
 import VoiceLevelMeter from "./VoiceLevelMeter";
 import {
   type AppRoute,
+  isStandaloneView,
   keepLinkedMemo,
   readAppRoute,
   writeAppRoute,
@@ -186,6 +187,7 @@ const LinkHealthDialog = lazyComponent(() => import("./LinkHealthDialog"));
 const BrowserHistoryDialog = lazyComponent(() => import("./BrowserHistoryDialog"));
 const ShortcutHelpDialog = lazyComponent(() => import("./ShortcutHelpDialog"));
 const VaultPanel = lazyComponent(() => import("./VaultPanel"), <p className="vault-loading" role="status">正在打开密码库…</p>);
+const LedgerPanel = lazyComponent(() => import("./LedgerPanel"), <p role="status">正在打开记账…</p>);
 const CategoryTemplatePanel = lazyComponent(() => import("./CategoryTemplatePanel"));
 const ImageOrganizationPanel = lazyComponent(() => import("./ImageOrganizationPanel"));
 const WeeklyDigest = lazyComponent(() => import("./WeeklyDigest"));
@@ -262,7 +264,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   }
   const initialRoute = initialRouteRef.current;
   const [activeType, setActiveType] = useState<ActiveView>(
-    initialRoute.view === "vault" ? "all" : initialRoute.view,
+    isStandaloneView(initialRoute.view) ? "all" : initialRoute.view,
   );
   const [memos, setMemos] = useState<Memo[]>([]);
   const [currentResultCount, setCurrentResultCount] = useState(0);
@@ -358,8 +360,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const [resourcePreviewMemo, setResourcePreviewMemo] = useState<Memo | null>(null);
   const [resourcePreviewEditing, setResourcePreviewEditing] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
-  // 密码库是独立页面，不属于任何内容类型；切换到任何内容视图都会离开它。
+  // 密码库和记账是独立页面，切换到任何内容视图都会离开它们。
   const [vaultOpen, setVaultOpen] = useState(initialRoute.view === "vault");
+  const [ledgerOpen, setLedgerOpen] = useState(initialRoute.view === "ledger");
+  const ledgerOpenRef = useRef(ledgerOpen);
+  ledgerOpenRef.current = ledgerOpen;
   const vaultReminderCount = useVaultReminderCount();
   const vaultOpenRef = useRef(vaultOpen);
   vaultOpenRef.current = vaultOpen;
@@ -1104,6 +1109,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   const changeActiveType = (type: ActiveView, preserveCapture = false) => {
     setVaultOpen(false);
+    setLedgerOpen(false);
     if (type === activeType) {
       return;
     }
@@ -1295,6 +1301,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   const focusCapture = useCallback(() => {
     setVaultOpen(false);
+    setLedgerOpen(false);
     if (
       activeType === "all" ||
       activeType === "inbox" ||
@@ -1660,8 +1667,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         setShortcutHelpOpen(true);
         return;
       }
-      // 密码库页面不响应内容列表的单键快捷键，避免误触。
-      if (vaultOpenRef.current) {
+      // 独立页面不响应内容列表的单键快捷键，避免误触。
+      if (vaultOpenRef.current || ledgerOpenRef.current) {
         return;
       }
       if (activeTypeRef.current === "resource" && resourceListKeyRef.current(event)) {
@@ -1717,10 +1724,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   // 所以后退/前进恢复出的状态不会再压一条历史。
   useEffect(() => {
     writeAppRoute({
-      view: vaultOpen ? "vault" : activeType,
-      item: vaultOpen ? null : selectedId,
+      view: ledgerOpen ? "ledger" : vaultOpen ? "vault" : activeType,
+      item: vaultOpen || ledgerOpen ? null : selectedId,
     });
-  }, [activeType, selectedId, vaultOpen]);
+  }, [activeType, selectedId, vaultOpen, ledgerOpen]);
 
   useEffect(() => {
     if (selectedId !== linkedMemoIdRef.current) {
@@ -1755,7 +1762,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       openResourcePreview(memo);
       return;
     }
-    if (memo.type !== activeType || vaultOpen) {
+    if (memo.type !== activeType || vaultOpen || ledgerOpen) {
       switchType(memo.type);
     }
     linkedMemoIdRef.current = memo.id;
@@ -1767,12 +1774,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   const applyRouteRef = useRef<(route: AppRoute) => void>(() => undefined);
   applyRouteRef.current = (route) => {
-    if (route.view === "vault") {
+    if (isStandaloneView(route.view)) {
       setSelectedId(null);
-      setVaultOpen(true);
+      setVaultOpen(route.view === "vault");
+      setLedgerOpen(route.view === "ledger");
       return;
     }
-    if (route.view !== activeType || vaultOpen) {
+    if (route.view !== activeType || vaultOpen || ledgerOpen) {
       switchType(route.view);
     }
     if (route.item && route.item !== selectedId) {
@@ -1802,7 +1810,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
-    if (value.trim()) setVaultOpen(false);
+    if (value.trim()) {
+      setVaultOpen(false);
+      setLedgerOpen(false);
+    }
     if (
       value.trim() &&
       activeType !== "all" &&
@@ -3857,9 +3868,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             // 首页现在是与「全部内容」合并后的唯一入口，需要正常显示选中态。
             const active = item.action === "vault"
               ? vaultOpen
-              : item.action === "history"
-                ? browserHistoryOpen
-                : !vaultOpen && item.view === activeType;
+              : item.action === "ledger"
+                ? ledgerOpen
+                : item.action === "history"
+                  ? browserHistoryOpen
+                  : !vaultOpen && !ledgerOpen && item.view === activeType;
             return (
               <Fragment key={item.label}>
               {item.group && <span className="nav-group" aria-hidden="true">{item.group}</span>}
@@ -3877,7 +3890,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     setModelSettingsOpen(true);
                   } else if (item.action === "vault") {
                     setSelectedId(null);
+                    setLedgerOpen(false);
                     setVaultOpen(true);
+                  } else if (item.action === "ledger") {
+                    setSelectedId(null);
+                    setVaultOpen(false);
+                    setLedgerOpen(true);
                   } else if (item.action === "history") {
                     setBrowserHistoryOpen(true);
                   }
@@ -4005,7 +4023,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             />
           </div>
           <button
-            className={`trash-shortcut${activeType === "inbox" ? " active" : ""}`}
+            className={`trash-shortcut${!vaultOpen && !ledgerOpen && activeType === "inbox" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("inbox")}
             aria-label="收件箱"
@@ -4013,7 +4031,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             <Icon name="inbox" size={18} /><span className="top-bar-label">收件箱</span>
           </button>
           <button
-            className={`trash-shortcut${activeType === "trash" ? " active" : ""}`}
+            className={`trash-shortcut${!vaultOpen && !ledgerOpen && activeType === "trash" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("trash")}
             aria-label="回收站"
@@ -4025,12 +4043,19 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             type="button"
             onClick={() => {
               setSelectedId(null);
+              setLedgerOpen(false);
               setVaultOpen(true);
             }}
             aria-label={vaultReminderCount > 0 ? `密码库，${vaultReminderCount} 条提醒` : "密码库"}
           >
             <Icon name="vault" size={18} /><span className="top-bar-label">密码库</span>
             {vaultReminderCount > 0 && <span className="vault-shortcut-badge" aria-hidden="true">{vaultReminderCount}</span>}
+          </button>
+          <button className={`trash-shortcut${ledgerOpen ? " active" : ""}`} type="button"
+            aria-label="记账" onClick={() => {
+              setSelectedId(null); setVaultOpen(false); setLedgerOpen(true);
+            }}>
+            <Icon name="ledger" size={18} /><span className="top-bar-label">记账</span>
           </button>
           <button
             className={`trash-shortcut${browserHistoryOpen ? " active" : ""}`}
@@ -4043,7 +4068,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         </header>
 
         <main className="main-content">
-          {vaultOpen ? <VaultPanel /> : <>
+          {ledgerOpen ? <LedgerPanel /> : vaultOpen ? <VaultPanel /> : <>
           <div className="page-heading">
             {activeType === "all" ? (
               <div>
@@ -5674,15 +5699,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       )}
 
       <nav className="mobile-navigation" aria-label="移动端主导航">
-        <button className={activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>首页</span></button>
-        <button className={activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
+        <button className={!vaultOpen && !ledgerOpen && activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>首页</span></button>
+        <button className={!vaultOpen && !ledgerOpen && activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
           <Icon name="link" size={20} />
           <span>资料</span>
         </button>
-        <button className={activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>图片</span></button>
+        <button className={!vaultOpen && !ledgerOpen && activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>图片</span></button>
         <button className="mobile-create" onClick={focusCapture}><Icon name="plus" size={20} /><span>新建</span></button>
-        <button className={activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>灵感</span></button>
-        <button className={activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>单词</span></button>
+        <button className={!vaultOpen && !ledgerOpen && activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>灵感</span></button>
+        <button className={!vaultOpen && !ledgerOpen && activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>单词</span></button>
       </nav>
     </div>
   );

@@ -50,6 +50,8 @@ Web / Android 搜索
 
 ### 后端
 
+- 独立记账模块 `/api/v1/ledger`：支持收入/支出流水增删改查、按月份/方向/分类筛选与分页、历史分类候选；金额以整数分保存，单笔上限 10 亿元，每账号最多 50000 笔。月度汇总按币种分别统计收入、支出、结余及分类小计；修改和删除使用数据库版本校验，冲突返回 409 和当前记录。所有操作按账号隔离，旧库由 `create_schema` 自动补建 `ledger_entry` 表。
+
 - FastAPI 版本化 API：`/api/v1`。
 - 统一 `Memo` 数据模型，已预留 `word`、`resource`、`idea` 三种类型。
 - 网页资料保存 `source_url` 和 `source_title`，只接受 HTTP(S) 链接。
@@ -242,6 +244,8 @@ Web / Android 搜索
 
 ### Web
 
+- 侧栏「工具 → 记账」与顶栏记账入口打开按需加载的独立页面，支持 `?view=ledger` 深链接、刷新和浏览器前进/后退。提供月份切换、多币种收支卡片、分类小计、方向/分类筛选和更多流水分页；模态框新建/编辑、删除二次确认，409 时提示「已在其他设备修改」并重新读取。与密码库互斥，搜索或切换内容视图时关闭。
+
 - 内容列表与回收站统一支持每页 10/25/50/100 条、当前页全选及选中条目操作，翻页、筛选和排序清除选择；删除最后一页内容后回到有效页码。
 - 图片工作区支持全库或选中的 OCR 与模板归类、进度和暂停续跑；可按分类筛选，在详情查看依据或手动选择模板。重复图片支持组分页及大组内分页，选中移入回收站后可还原。
 
@@ -298,6 +302,8 @@ Web / Android 搜索
 - 提供桌面侧栏、移动底部导航、加载、空和失败状态。
 
 ### Android
+
+- 底部导航在密码库前新增「记账」，打开独立在线页面：月度收支与分类汇总、筛选、分页和流水新建/编辑/确认删除均通过相同后端接口；金额使用 `Long` 分，解析规则与 Web 保持一致。断网时提示重新联网，版本冲突提示并刷新；退出登录取消记账请求并清空内存状态。本地 SQLite 与 `DATABASE_VERSION = 15` 保持不变。
 
 - 原生 Jetpack Compose，最低 API 26，目标 API 36。
 - 界面使用 Material 图标与统一的字号、圆角和四类内容配色；顶栏随页面切换并收纳收件箱、同步与「⋯」菜单，非首页按返回先回首页；详情、新建单词/资料和密码库编辑为全屏页面，底部固定主操作，未修改时不可保存。
@@ -397,6 +403,10 @@ MemoIsle 页面并登录，使页面把当前用户凭证同步给扩展。
 
 | 范围 | 命令/方式 | 结果 |
 | --- | --- | --- |
+| 记账后端 | 指定 Conda base 的 `/home/lsl/miniconda3/bin/python`；`MEMOISLE_DATABASE_URL=sqlite+pysqlite:////tmp/memoisle-ledger-check.db python -m pytest -q backend/tests/test_ledger.py backend/tests/test_vault.py`，随后完整 `backend/tests` | 专项 40 项、全套 634 项通过；含并发修改/删除、并发配额、分页、多币种、账号隔离与旧库补表。测试使用隔离数据库；完整回归有 1 条已有的 422 状态常量弃用警告 |
+| 记账 Web | `/home/lsl/env/node-v24.16.0-linux-x64/bin/npm`；在 `web` 下 `npm test && npm run build` | 110 项测试与 TypeScript/Vite 构建通过；含金额、月份、独立路由、编辑请求、删除确认、冲突刷新与离线错误 |
+| 记账浏览器 | 指定 Python 中的 Playwright + Chromium，隔离 SQLite 与本地服务 | 新增/编辑/确认删除、多币种、方向筛选、月份切换、导航高亮、另一端 API 修改后的冲突刷新、密码库切换与历史返回、深链接刷新、390px 窄屏页面和模态框无横向溢出均通过 |
+| 记账 Android | OpenJDK 17、Android SDK 36、Gradle 9.4.1；`GRADLE_USER_HOME="$PWD/.cache/ledger-gradle" ANDROID_USER_HOME="$PWD/.cache/ledger-android" ./android/gradlew -p android --offline --no-daemon -x downloadSherpaOnnxAar testDebugUnitTest assembleDebug lintDebug` | 68 项单元测试、Debug APK、lint 通过；复用本机同版本 sherpa-onnx 1.13.7 AAR，复制到本 worktree 并验证 ZIP 后跳过下载任务。构建缓存也仅写入本 worktree；未运行 Android 真机 UI/跨设备实测 |
 | Python 静态检查 | `ruff check backend` | 通过 |
 | 后端测试 | `pytest -q` | 全部通过，覆盖 AgentlyMail 两阶段调用、邮箱验证码、密码重置、登录限流、第三方登录、Bearer 会话、撤销、用户隔离、回收站恢复/永久删除和 30 天清理 |
 | Web 类型与生产构建 | `npm run build` | 通过 |
@@ -449,6 +459,8 @@ MemoIsle 页面并登录，使页面把当前用户凭证同步给扩展。
 | 图片压缩（Android） | `./gradlew testDebugUnitTest` | 通过，`MemoTest` 覆盖压缩策略判定、目标尺寸与提醒文案 |
 
 ## 5. 当前边界
+
+- 记账数据在服务器数据库中存明文；Android 记账仅支持在线使用，不进入离线同步；暂不支持记账导入导出、跨币种折算。各币种均统一以两位小数记录，日期范围为 1900–2100 年；Web 已通过浏览器联调与窄屏检查，Android 真机操作及 Web/Android 跨设备联调仍需人工验收。
 
 - 网页资料核心 P0 已完成代码、接口和 Web/Android 运行时验收；扩展已覆盖当前浏览器打开网页快照、当前页一次性捕获、用户选中文本摘录，以及任意页面图片右键收藏。地址学习已通过自动化测试和真实链路检查（Web 5174 + 后端 8011：右键收藏按登记地址请求 `/api/v1/memos` 并跳转回 5174）；扩展的图标/快捷键和图片右键菜单属于浏览器安装态入口，仍需在现有 Chrome 的开发者模式下手动加载 v0.4.1 后点击确认。
 - 扩展新增 `<all_urls>` 主机权限以支持任意站点取图；生产发布前需在商店说明中解释该权限只用于用户主动右键收藏的那张图片，且本地 `file://` 图片需要用户额外开启「允许访问文件网址」。

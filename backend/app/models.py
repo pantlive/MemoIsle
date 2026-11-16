@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -1268,6 +1270,44 @@ class VaultItem(Base):
     ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     iv: Mapped[str] = mapped_column(String(32), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class LedgerEntry(Base):
+    """记账流水；按明文保存，方便服务器按月份和分类汇总。
+
+    金额统一换算成「分」存整数，避免浮点误差；不同币种分开统计，不做折算。
+    """
+
+    __tablename__ = "ledger_entry"
+    __table_args__ = (
+        Index("ix_ledger_entry_user_occurred", "user_id", "occurred_on"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # income 或 expense。
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    # 上限 10 亿元，超过 32 位整数范围。
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="CNY")
+    occurred_on: Mapped[date] = mapped_column(Date, nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    account: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # ORM 把版本放入 UPDATE/DELETE 条件，防止同时读取旧版本后相互覆盖。
+    __mapper_args__ = {"version_id_col": version, "version_id_generator": False}
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

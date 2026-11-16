@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
@@ -2433,3 +2434,170 @@ class VaultItemRead(BaseModel):
 
         resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
         return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+LedgerKind = Literal["income", "expense"]
+# 单笔上限 10 亿元，按分保存。
+LEDGER_MAX_AMOUNT_CENTS = 100_000_000_000
+LEDGER_DEFAULT_CURRENCY = "CNY"
+LEDGER_CATEGORY_MAX_LENGTH = 30
+LEDGER_ACCOUNT_MAX_LENGTH = 30
+LEDGER_NOTE_MAX_LENGTH = 500
+LEDGER_MIN_DATE = date(1900, 1, 1)
+LEDGER_MAX_DATE = date(2100, 12, 31)
+_LEDGER_CURRENCY_PATTERN = re.compile(r"[A-Z]{3}")
+_LEDGER_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+LEDGER_MONTH_PATTERN = r"^(19\d{2}|20\d{2}|2100)-(0[1-9]|1[0-2])$"
+
+
+def _optional_ledger_text(value: object, limit: int, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{name} 必须是文本")
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > limit:
+        raise ValueError(f"{name} 最多 {limit} 个字")
+    return cleaned
+
+
+class LedgerEntryFields(BaseModel):
+    """一笔收支；金额以分为单位的正整数，方向由 kind 区分。"""
+
+    kind: LedgerKind
+    # strict：拒绝 "100"、100.0 这类需要猜测的写法，客户端必须先换算成分。
+    amount_cents: int = Field(gt=0, le=LEDGER_MAX_AMOUNT_CENTS, strict=True)
+    currency: str = LEDGER_DEFAULT_CURRENCY
+    occurred_on: date
+    category: str
+    account: str | None = None
+    note: str | None = None
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def validate_currency(cls, value: object) -> str:
+        """币种是三位字母代码，统一大写。"""
+
+        if not isinstance(value, str):
+            raise ValueError("币种必须是三位字母代码")
+        cleaned = value.strip().upper()
+        if not _LEDGER_CURRENCY_PATTERN.fullmatch(cleaned):
+            raise ValueError("币种必须是三位字母代码")
+        return cleaned
+
+    @field_validator("occurred_on", mode="before")
+    @classmethod
+    def validate_occurred_on(cls, value: object) -> object:
+        """只接受 YYYY-MM-DD，不把时间戳或带时间的字符串猜成日期。"""
+
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if not isinstance(value, str) or not _LEDGER_DATE_PATTERN.fullmatch(value):
+            raise ValueError("日期格式应为 YYYY-MM-DD")
+        return value
+
+    @field_validator("occurred_on")
+    @classmethod
+    def validate_date_range(cls, value: date) -> date:
+        """拦住明显输错的年份。"""
+
+        if not LEDGER_MIN_DATE <= value <= LEDGER_MAX_DATE:
+            raise ValueError("日期超出可记录范围")
+        return value
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def validate_category(cls, value: object) -> str:
+        """分类去掉首尾空白后不能为空。"""
+
+        cleaned = _optional_ledger_text(value, LEDGER_CATEGORY_MAX_LENGTH, "分类")
+        if cleaned is None:
+            raise ValueError("分类不能为空")
+        return cleaned
+
+    @field_validator("account", mode="before")
+    @classmethod
+    def validate_account(cls, value: object) -> str | None:
+        """账户可选，例如现金、银行卡、支付宝。"""
+
+        return _optional_ledger_text(value, LEDGER_ACCOUNT_MAX_LENGTH, "账户")
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def validate_note(cls, value: object) -> str | None:
+        """备注可选。"""
+
+        return _optional_ledger_text(value, LEDGER_NOTE_MAX_LENGTH, "备注")
+
+
+class LedgerEntryCreate(LedgerEntryFields):
+    """新记一笔。"""
+
+
+class LedgerEntryUpdate(LedgerEntryFields):
+    """整条替换，带上读取时的版本号。"""
+
+    expected_version: int = Field(ge=1)
+
+
+class LedgerEntryRead(BaseModel):
+    """返回给客户端的一笔收支。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: LedgerKind
+    amount_cents: int
+    currency: str
+    occurred_on: date
+    category: str
+    account: str | None
+    note: str | None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_time(self, value: datetime) -> str:
+        """统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class LedgerCurrencyTotal(BaseModel):
+    """某个币种当月的收入、支出和结余。"""
+
+    currency: str
+    income_cents: int
+    expense_cents: int
+    balance_cents: int
+    entry_count: int
+
+
+class LedgerCategoryTotal(BaseModel):
+    """某个币种、方向下一个分类的小计。"""
+
+    currency: str
+    kind: LedgerKind
+    category: str
+    amount_cents: int
+    entry_count: int
+
+
+class LedgerSummary(BaseModel):
+    """月度汇总；不同币种分开统计，不做汇率折算。"""
+
+    month: str
+    totals: list[LedgerCurrencyTotal]
+    categories: list[LedgerCategoryTotal]
+
+
+class LedgerCategoryUsage(BaseModel):
+    """用过的分类及次数，供客户端提示。"""
+
+    kind: LedgerKind
+    category: str
+    entry_count: int

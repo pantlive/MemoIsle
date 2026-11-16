@@ -19,6 +19,11 @@ import type {
   EbookJob,
   EbookJobCreateRequest,
   EmailRegisterResponse,
+  LedgerCategoryUsage,
+  LedgerEntry,
+  LedgerEntryInput,
+  LedgerKind,
+  LedgerSummary,
   LinkHealthAction,
   LinkHealthCenter,
   LinkHealthStatus,
@@ -772,6 +777,57 @@ export async function deleteVaultItem(id: string, expectedVersion: number): Prom
   return request<void>(`/vault/items/${id}?expected_version=${expectedVersion}`, {
     method: "DELETE",
   });
+}
+
+// 记账接口：明文保存，按月份和分类由服务端汇总。
+export async function listLedgerEntries(filters: {
+  month?: string;
+  kind?: LedgerKind;
+  category?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<LedgerEntry[]> {
+  const params = new URLSearchParams();
+  if (filters.month) params.set("month", filters.month);
+  if (filters.kind) params.set("kind", filters.kind);
+  if (filters.category) params.set("category", filters.category);
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.offset) params.set("offset", String(filters.offset));
+  const query = params.toString();
+  return request<LedgerEntry[]>(`/ledger/entries${query ? `?${query}` : ""}`);
+}
+
+export async function createLedgerEntry(input: LedgerEntryInput): Promise<LedgerEntry> {
+  return request<LedgerEntry>("/ledger/entries", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateLedgerEntry(
+  id: string,
+  input: LedgerEntryInput,
+  expectedVersion: number,
+): Promise<LedgerEntry> {
+  return request<LedgerEntry>(`/ledger/entries/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...input, expected_version: expectedVersion }),
+  });
+}
+
+export async function deleteLedgerEntry(id: string, expectedVersion: number): Promise<void> {
+  return request<void>(
+    `/ledger/entries/${encodeURIComponent(id)}?expected_version=${expectedVersion}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function getLedgerSummary(month: string): Promise<LedgerSummary> {
+  return request<LedgerSummary>(`/ledger/summary?month=${encodeURIComponent(month)}`);
+}
+
+export async function listLedgerCategories(): Promise<LedgerCategoryUsage[]> {
+  return request<LedgerCategoryUsage[]>("/ledger/categories");
 }
 
 export async function listQuickAccess(limit = 8): Promise<Memo[]> {
