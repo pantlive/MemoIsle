@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 
 import {
   ApiError, createLedgerEntry, deleteLedgerEntry, getLedgerSummary,
-  listLedgerCategories, listLedgerEntries, updateLedgerEntry,
+  listLedgerCategories, listLedgerEntries, quickCreateLedgerEntry, updateLedgerEntry,
 } from "./api";
 import Icon from "./Icon";
 import {
@@ -13,7 +13,24 @@ import {
 import type { LedgerCategoryUsage, LedgerEntry, LedgerEntryInput, LedgerKind, LedgerSummary } from "./types";
 
 const PAGE_SIZE = 500;
+const QUICK_TEXT_MAX_LENGTH = 200;
 const describe = (error: unknown): string => error instanceof Error ? error.message : "操作失败，请重试。";
+
+/** 一句话记账成功后的识别结果，例如「餐饮 -¥10.00 · 11月16日 · 微信」；不是今年的带上年份。 */
+function describeQuickEntry(entry: LedgerEntry): string {
+  const year = entry.occurred_on.slice(0, 4);
+  const day = formatEntryDate(entry.occurred_on);
+  const date = year === String(new Date().getFullYear()) ? day : `${year}年${day}`;
+  return [`${entry.category} ${formatSignedAmount(entry.kind, entry.amount_cents, entry.currency)}`, date, entry.account]
+    .filter(Boolean).join(" · ");
+}
+
+interface MutationOptions<T> {
+  /** 自定义成功提示；返回的 month 与当前月份不同时切过去，由切月触发重新读取。 */
+  onSuccess?: (result: T) => { notice: string; month?: string };
+  /** 自定义失败提示的位置，例如一句话记账显示在输入框下方。 */
+  onError?: (message: string) => void;
+}
 
 function LedgerEditor({ entry, month, categories, busy, error, onClose, onSave }: {
   entry: LedgerEntry | null;
@@ -95,6 +112,9 @@ export default function LedgerPanel() {
   const [editor, setEditor] = useState<{ entry: LedgerEntry | null } | null>(null);
   const [dialogError, setDialogError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [quickText, setQuickText] = useState("");
+  const [quickError, setQuickError] = useState("");
+  const [quickSaved, setQuickSaved] = useState<LedgerEntry | null>(null);
   const requestId = useRef(0);
   const mutationBusy = useRef(false);
 
@@ -133,35 +153,65 @@ export default function LedgerPanel() {
     } finally { if (id === requestId.current) setLoading(false); }
   }
 
-  async function mutate(action: () => Promise<unknown>): Promise<void> {
+  async function mutate<T>(action: () => Promise<T>, options: MutationOptions<T> = {}): Promise<void> {
     if (mutationBusy.current) return;
     mutationBusy.current = true;
-    setBusy(true); setDialogError(""); setNotice("");
+    setBusy(true); setDialogError(""); setNotice(""); setQuickSaved(null);
     try {
-      await action();
-      setEditor(null); setNotice("已保存。");
-      await reload();
+      const result = await action();
+      const success = options.onSuccess?.(result);
+      setEditor(null); setNotice(success?.notice ?? "已保存。");
+      if (success?.month && success.month !== month) setMonth(success.month);
+      else await reload();
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409) {
         setEditor(null);
         setNotice("已在其他设备修改，已重新读取数据，请重新打开后操作。");
         await reload();
-      } else if (editor) setDialogError(describe(failure));
+      } else if (options.onError) options.onError(describe(failure));
+      else if (editor) setDialogError(describe(failure));
       else setError(describe(failure));
     } finally { mutationBusy.current = false; setBusy(false); }
+  }
+
+  function submitQuick(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const text = quickText.trim();
+    if (!text) { setQuickError("请输入一句话，如：今天早饭花了10元"); return; }
+    setQuickError("");
+    // 识别失败时保留输入，方便改一改再记。
+    void mutate(() => quickCreateLedgerEntry(text, isoDateOf()), {
+      onSuccess: (entry) => {
+        setQuickText(""); setQuickSaved(entry);
+        return { notice: `已记下：${describeQuickEntry(entry)}`, month: entry.occurred_on.slice(0, 7) };
+      },
+      onError: setQuickError,
+    });
   }
 
   const usedCategories = [...new Set(categories.filter((item) => !kind || item.kind === kind).map((item) => item.category))];
   return <section className="ledger-panel" aria-label="记账">
     <div className="page-heading"><div><h1>记账</h1><p className="page-subtitle">每一笔收支，都心中有数</p></div>
       <div className="ledger-actions"><button disabled={loading || busy} onClick={() => void reload()}>刷新</button><button className="primary" disabled={busy || loading} onClick={() => { setDialogError(""); setEditor({ entry: null }); }}><Icon name="plus" size={16} /> 记一笔</button></div></div>
+    <form className="ledger-quick" onSubmit={submitQuick}>
+      <input aria-label="一句话记账" value={quickText} maxLength={QUICK_TEXT_MAX_LENGTH} readOnly={busy}
+        placeholder="如：今天早饭花了10元" enterKeyHint="done" aria-invalid={quickError ? true : undefined}
+        aria-describedby={quickError ? "ledger-quick-error" : undefined}
+        onChange={(event) => { setQuickText(event.target.value); setQuickError(""); }} />
+      <button className="primary" disabled={busy || !quickText.trim()}>记下</button>
+      {quickError && <p id="ledger-quick-error" role="alert" className="ledger-error">{quickError}</p>}
+    </form>
     <div className="ledger-month">
       <button aria-label="上个月" disabled={busy || month === "1900-01"} onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
       <label><span className="sr-only">月份</span><input type="month" value={month} min="1900-01" max="2100-12" disabled={busy} onChange={(event) => { if (/^(19\d{2}|20\d{2}|2100)-(0[1-9]|1[0-2])$/.test(event.target.value)) setMonth(event.target.value); }} /></label>
       <button aria-label="下个月" disabled={busy || month === "2100-12"} onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
       <button disabled={busy} onClick={() => setMonth(monthOf())}>本月</button>
     </div>
-    {notice && <p role="status">{notice}</p>}
+    {notice && <p role="status" className="ledger-notice">{notice}{quickSaved && <button type="button" disabled={busy || loading}
+      aria-label="编辑刚记下的这一笔" onClick={() => {
+        // 列表里有更新的版本时用它，避免拿旧版本号保存。
+        setDialogError(""); setEditor({ entry: entries.find((item) => item.id === quickSaved.id) ?? quickSaved });
+      }}>编辑</button>}</p>}
     {error && <p role="alert" className="ledger-error">{error} <button disabled={loading || busy} onClick={() => void reload()}>重试</button></p>}
     {loading && <p role="status">正在读取…</p>}
     <div className="ledger-totals">{summary?.totals.map((total) => <article className="ledger-card" key={total.currency}>

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.database import commit_with_retry
+from app.ledger_parser import parse_ledger_sentence
 from app.models import LedgerEntry, User, utc_now
 from app.schemas import (
     LedgerCategoryTotal,
@@ -18,6 +19,7 @@ from app.schemas import (
     LedgerEntryCreate,
     LedgerEntryUpdate,
     LedgerKind,
+    LedgerQuickCreate,
     LedgerSummary,
 )
 
@@ -137,6 +139,16 @@ def create_entry(
         raise LedgerLimitError
     commit_with_retry(session)
     return _get_entry(session, user_id, entry_id)
+
+
+def create_entry_from_sentence(
+    session: Session, user_id: str, payload: LedgerQuickCreate
+) -> LedgerEntry:
+    """一句话记一笔：按规则识别后直接保存；识别失败抛 LedgerParseError，不写入。"""
+
+    known = [(item.kind, item.category) for item in list_categories(session, user_id)]
+    entry = parse_ledger_sentence(payload.text, payload.today, known)
+    return create_entry(session, user_id, entry)
 
 
 def update_entry(
