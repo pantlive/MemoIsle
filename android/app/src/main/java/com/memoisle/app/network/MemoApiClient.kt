@@ -3,6 +3,7 @@ package com.memoisle.app.network
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
+import com.memoisle.app.data.LedgerQuickResult
 import com.memoisle.app.data.LedgerSummary
 import com.memoisle.app.data.LedgerCategoryUsage
 import com.memoisle.app.data.MemoDeletion
@@ -743,9 +744,12 @@ class MemoApiClient(baseUrl: String) {
     fun createLedgerEntry(data: LedgerEntryInput): LedgerEntry =
         LedgerEntry.fromJson(execute("POST", "ledger/entries", data.toJson()))
 
-    /** 一句话记一笔，如“今天早饭花了10元”；today 用设备本地日期，识别不出时服务端返回 422 和中文提示。 */
-    fun quickCreateLedgerEntry(text: String, today: String): LedgerEntry =
-        LedgerEntry.fromJson(execute("POST", "ledger/quick", JSONObject().put("text", text).put("today", today)))
+    /**
+     * 一句话记一笔，如“今天早饭花了10元”；today 用设备本地日期，识别不出时服务端返回 422 和中文提示。
+     * 结果附带识别方式：服务端配置了本地大模型时为 llm，否则为 rule。
+     */
+    fun quickCreateLedgerEntry(text: String, today: String): LedgerQuickResult =
+        LedgerQuickResult.fromJson(execute("POST", "ledger/quick", JSONObject().put("text", text).put("today", today)))
 
     fun updateLedgerEntry(id: String, data: LedgerEntryInput, expectedVersion: Int): LedgerEntry =
         LedgerEntry.fromJson(execute("PUT", "ledger/entries/$id", data.toJson().put("expected_version", expectedVersion)))

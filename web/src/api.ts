@@ -23,6 +23,7 @@ import type {
   LedgerEntry,
   LedgerEntryInput,
   LedgerKind,
+  LedgerQuickResult,
   LedgerSummary,
   LinkHealthAction,
   LinkHealthCenter,
@@ -804,9 +805,12 @@ export async function createLedgerEntry(input: LedgerEntryInput): Promise<Ledger
   });
 }
 
-/** 一句话记一笔，如“今天早饭花了10元”；today 用本地日期 YYYY-MM-DD，识别不出时返回 422。 */
-export async function quickCreateLedgerEntry(text: string, today: string): Promise<LedgerEntry> {
-  return request<LedgerEntry>("/ledger/quick", {
+/**
+ * 一句话记一笔，如“今天早饭花了10元”；today 用本地日期 YYYY-MM-DD，识别不出时返回 422。
+ * parsed_by 说明这次是本地大模型还是规则识别的。
+ */
+export async function quickCreateLedgerEntry(text: string, today: string): Promise<LedgerQuickResult> {
+  return request<LedgerQuickResult>("/ledger/quick", {
     method: "POST",
     body: JSON.stringify({ text, today }),
   });

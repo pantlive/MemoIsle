@@ -55,6 +55,19 @@ data class LedgerEntry(
     }
 }
 
+/** 一句话记下的一笔；parsedBy 为 "llm"（服务端配置的本地大模型）或 "rule"（固定规则）。 */
+data class LedgerQuickResult(val entry: LedgerEntry, val parsedBy: String) {
+    val byLocalModel: Boolean get() = parsedBy == "llm"
+
+    companion object {
+        fun fromJson(json: JSONObject): LedgerQuickResult = LedgerQuickResult(
+            entry = LedgerEntry.fromJson(json),
+            // 旧版服务端不返回 parsed_by，按规则识别处理。
+            parsedBy = if (json.isNull("parsed_by")) "rule" else json.getString("parsed_by"),
+        )
+    }
+}
+
 data class LedgerCurrencyTotal(
     val currency: String, val incomeCents: Long, val expenseCents: Long,
     val balanceCents: Long, val entryCount: Int,

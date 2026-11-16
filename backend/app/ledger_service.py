@@ -9,7 +9,13 @@ from sqlalchemy import func, insert, literal, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.config import Settings
 from app.database import commit_with_retry
+from app.ledger_llm import (
+    LedgerLlmUnavailableError,
+    ledger_llm_enabled,
+    parse_with_llm,
+)
 from app.ledger_parser import parse_ledger_sentence
 from app.models import LedgerEntry, User, utc_now
 from app.schemas import (
@@ -19,6 +25,7 @@ from app.schemas import (
     LedgerEntryCreate,
     LedgerEntryUpdate,
     LedgerKind,
+    LedgerParsedBy,
     LedgerQuickCreate,
     LedgerSummary,
 )
@@ -142,13 +149,31 @@ def create_entry(
 
 
 def create_entry_from_sentence(
-    session: Session, user_id: str, payload: LedgerQuickCreate
-) -> LedgerEntry:
-    """一句话记一笔：按规则识别后直接保存；识别失败抛 LedgerParseError，不写入。"""
+    session: Session,
+    user_id: str,
+    payload: LedgerQuickCreate,
+    settings: Settings,
+) -> tuple[LedgerEntry, LedgerParsedBy]:
+    """一句话记一笔，识别后直接保存，返回新记录和识别方式。
+
+    配置了本地模型时先让模型识别，失败、超时或结果不合格时退回规则；
+    规则也识别不出时抛 LedgerParseError，不写入。
+    """
 
     known = [(item.kind, item.category) for item in list_categories(session, user_id)]
-    entry = parse_ledger_sentence(payload.text, payload.today, known)
-    return create_entry(session, user_id, entry)
+    parsed: LedgerEntryCreate | None = None
+    parsed_by: LedgerParsedBy = "rule"
+    if ledger_llm_enabled(settings):
+        # 先结束只读事务再等模型，等待期间不占着数据库连接；写入在模型返回后才加锁。
+        session.rollback()
+        try:
+            parsed = parse_with_llm(payload.text, payload.today, known, settings)
+            parsed_by = "llm"
+        except LedgerLlmUnavailableError:
+            parsed = None
+    if parsed is None:
+        parsed = parse_ledger_sentence(payload.text, payload.today, known)
+    return create_entry(session, user_id, parsed), parsed_by
 
 
 def update_entry(

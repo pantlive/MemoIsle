@@ -8,7 +8,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user_id, get_session
+from app.config import Settings
+from app.dependencies import get_current_user_id, get_session, get_settings
 from app.ledger_parser import LedgerParseError
 from app.ledger_service import (
     DEFAULT_LIST_LIMIT,
@@ -33,12 +34,14 @@ from app.schemas import (
     LedgerEntryUpdate,
     LedgerKind,
     LedgerQuickCreate,
+    LedgerQuickRead,
     LedgerSummary,
 )
 
 router = APIRouter(prefix="/ledger", tags=["ledger"])
 SessionDependency = Annotated[Session, Depends(get_session)]
 UserDependency = Annotated[str, Depends(get_current_user_id)]
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
 MonthQuery = Annotated[str, Query(pattern=LEDGER_MONTH_PATTERN)]
 
 
@@ -103,22 +106,30 @@ def create_entry_route(
 
 
 @router.post(
-    "/quick", response_model=LedgerEntryRead, status_code=status.HTTP_201_CREATED
+    "/quick", response_model=LedgerQuickRead, status_code=status.HTTP_201_CREATED
 )
 def quick_create_entry_route(
     payload: LedgerQuickCreate,
     session: SessionDependency,
     user_id: UserDependency,
-) -> LedgerEntryRead:
-    """一句话记一笔，如“今天早饭花了10元”；识别不出时返回 422 和中文提示。"""
+    settings: SettingsDependency,
+) -> LedgerQuickRead:
+    """一句话记一笔，如“今天早饭花了10元”；识别不出时返回 422 和中文提示。
+
+    配置了本地模型时优先用模型识别，``parsed_by`` 说明这次用的是模型还是规则。
+    """
 
     try:
-        entry = create_entry_from_sentence(session, user_id, payload)
+        entry, parsed_by = create_entry_from_sentence(
+            session, user_id, payload, settings
+        )
     except LedgerParseError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except LedgerLimitError as error:
         raise HTTPException(status_code=400, detail="记账记录数量已达上限") from error
-    return LedgerEntryRead.model_validate(entry)
+    return LedgerQuickRead(
+        **dict(LedgerEntryRead.model_validate(entry)), parsed_by=parsed_by
+    )
 
 
 @router.put("/entries/{entry_id}", response_model=LedgerEntryRead)

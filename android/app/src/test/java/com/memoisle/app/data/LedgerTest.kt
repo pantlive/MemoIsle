@@ -2,8 +2,10 @@ package com.memoisle.app.data
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LedgerTest {
@@ -51,6 +53,20 @@ class LedgerTest {
         assertEquals(entry, LedgerEntry.fromJson(JSONObject(entry.toJson().toString())))
         assertEquals(entry.data, LedgerEntryInput.fromJson(JSONObject(entry.data.toJson().toString())))
         assertNull(LedgerEntryInput.fromJson(entry.data.copy(note = null).toJson()).note)
+    }
+
+    @Test
+    fun quickResultReadsParsedByAndDefaultsToRule() {
+        val entry = LedgerEntry("22222222-2222-4222-8222-222222222222", 1,
+            LedgerEntryInput("expense", 1000L, "CNY", "2026-11-16", "餐饮", null, "今天早饭花了10元"),
+            "2026-11-16T00:00:00Z", "2026-11-16T00:00:00Z")
+        val byModel = LedgerQuickResult.fromJson(entry.toJson().put("parsed_by", "llm"))
+        assertEquals(entry, byModel.entry)
+        assertTrue(byModel.byLocalModel)
+        assertFalse(LedgerQuickResult.fromJson(entry.toJson().put("parsed_by", "rule")).byLocalModel)
+        // 旧版服务端没有这个字段，或返回 null，都按规则识别处理。
+        assertEquals("rule", LedgerQuickResult.fromJson(entry.toJson()).parsedBy)
+        assertEquals("rule", LedgerQuickResult.fromJson(entry.toJson().put("parsed_by", JSONObject.NULL)).parsedBy)
     }
 
     @Test

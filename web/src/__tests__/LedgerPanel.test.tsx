@@ -116,11 +116,12 @@ describe("记账界面", () => {
     const today = isoDateOf();
     const saved: LedgerEntry = { ...entry, id: "22222222-2222-4222-8222-222222222222", version: 1,
       amount_cents: 1000, occurred_on: today, account: null, note: "今天早饭花了10元" };
-    vi.mocked(quickCreateLedgerEntry).mockResolvedValue(saved);
+    vi.mocked(quickCreateLedgerEntry).mockResolvedValue({ ...saved, parsed_by: "rule" });
     await act(async () => root.render(<LedgerPanel />));
     await submitQuick("  今天早饭花了10元 ");
     expect(quickCreateLedgerEntry).toHaveBeenCalledWith("今天早饭花了10元", today);
     expect(container.querySelector('[role="status"]')?.textContent).toContain("已记下：餐饮 -¥10.00 · ");
+    expect(container.querySelector('[role="status"]')?.textContent).not.toContain("本地模型");
     expect(quickInput().value).toBe("");
     expect(listLedgerEntries).toHaveBeenCalledTimes(2);
     expect(listLedgerEntries).toHaveBeenLastCalledWith(expect.objectContaining({ month: monthOf() }));
@@ -136,6 +137,23 @@ describe("记账界面", () => {
     expect(container.querySelector('[aria-label="编辑刚记下的这一笔"]')).toBeNull();
   });
 
+  it("notes when the local model recognized the sentence and edits without the extra field", async () => {
+    const today = isoDateOf();
+    const saved: LedgerEntry = { ...entry, id: "33333333-3333-4333-8333-333333333333", version: 1,
+      amount_cents: 1000, occurred_on: today, account: null, note: "今天早饭花了10元" };
+    vi.mocked(quickCreateLedgerEntry).mockResolvedValue({ ...saved, parsed_by: "llm" });
+    await act(async () => root.render(<LedgerPanel />));
+    await submitQuick("今天早饭花了10元");
+    const notice = container.querySelector('[role="status"]')?.textContent ?? "";
+    expect(notice).toContain("已记下：餐饮 -¥10.00 · ");
+    expect(notice).toContain("（本地模型识别）");
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="编辑刚记下的这一笔"]')!.click(); });
+    vi.mocked(updateLedgerEntry).mockResolvedValue({ ...saved, version: 2 });
+    await act(async () => { container.querySelector("dialog form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(updateLedgerEntry).toHaveBeenCalledWith(saved.id, expect.not.objectContaining({ parsed_by: expect.anything() }), 1);
+  });
+
   it("keeps the sentence and shows the reason below the input when it cannot be recognized", async () => {
     vi.mocked(quickCreateLedgerEntry).mockRejectedValue(new ApiError("没有识别到金额，请写明多少钱", 422));
     await act(async () => root.render(<LedgerPanel />));
@@ -149,7 +167,7 @@ describe("记账界面", () => {
   });
 
   it("switches to the month of an entry recorded in another month", async () => {
-    vi.mocked(quickCreateLedgerEntry).mockResolvedValue({ ...entry, occurred_on: "1999-03-05" });
+    vi.mocked(quickCreateLedgerEntry).mockResolvedValue({ ...entry, occurred_on: "1999-03-05", parsed_by: "rule" });
     await act(async () => root.render(<LedgerPanel />));
     await submitQuick("1999年3月5号午饭25.5元");
     expect(container.textContent).toContain("已记下：餐饮 -¥25.50 · 1999年3月5日 · 现金");

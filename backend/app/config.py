@@ -164,6 +164,12 @@ class Settings:
     llm_api_key: str | None = None
     llm_model: str = ""
     llm_timeout_seconds: float = 30.0
+    # 一句话记账的本地大模型（Ollama、LM Studio、vLLM 等 OpenAI 兼容接口）。
+    # 与会议总结的 llm_* 分开配置，避免把记账内容发给云端模型；未配置时只用规则识别。
+    ledger_llm_base_url: str | None = None
+    ledger_llm_api_key: str | None = None
+    ledger_llm_model: str = ""
+    ledger_llm_timeout_seconds: float = 15.0
     # 分类模板生成单独使用 DeepSeek，避免影响会议总结和图片视觉模型。
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_api_key: str | None = None
@@ -438,6 +444,20 @@ class Settings:
             llm_model=os.environ.get("MEMOISLE_LLM_MODEL", ""),
             llm_timeout_seconds=float(
                 os.environ.get("MEMOISLE_LLM_TIMEOUT_SECONDS", "30"),
+            ),
+            ledger_llm_base_url=(
+                os.environ.get("MEMOISLE_LEDGER_LLM_BASE_URL", "").strip().rstrip("/")
+                or None
+            ),
+            ledger_llm_api_key=(
+                os.environ.get("MEMOISLE_LEDGER_LLM_API_KEY", "").strip() or None
+            ),
+            ledger_llm_model=os.environ.get("MEMOISLE_LEDGER_LLM_MODEL", "").strip(),
+            ledger_llm_timeout_seconds=max(
+                1.0,
+                float(
+                    os.environ.get("MEMOISLE_LEDGER_LLM_TIMEOUT_SECONDS", "15"),
+                ),
             ),
             deepseek_base_url=os.environ.get(
                 "MEMOISLE_DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1",

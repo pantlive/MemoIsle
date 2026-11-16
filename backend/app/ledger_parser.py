@@ -1,6 +1,7 @@
 """一句话记账：用固定规则把“今天早饭花了10元”拆成一笔收支。
 
-不调用大模型，同一句话、同一个“今天”总是得到同一结果，没配模型也能用。
+不调用大模型，同一句话、同一个“今天”总是得到同一结果，没配模型也能用；
+配置了本地模型时（见 ``ledger_llm``），这里是模型失败后的兜底。
 识别不出金额、识别到多笔或日期不存在时抛出 ``LedgerParseError``，不写入任何数据。
 """
 
@@ -240,7 +241,9 @@ class _Amount:
     strong: bool
 
 
-def _normalize(text: str) -> str:
+def normalize_sentence(text: str) -> str:
+    """全角字母、数字和符号转半角，后面的识别都基于这个结果。"""
+
     return text.translate(_HALF_WIDTH)
 
 
@@ -295,8 +298,11 @@ def _digit_value(char: str) -> int:
     return int(char) if char.isascii() else _CN_DIGITS[char]
 
 
-def _find_dates(text: str, today: date) -> tuple[date | None, list[tuple[int, int]]]:
-    """找出句中的日期，返回第一个日期和所有日期所在位置。"""
+def find_dates(text: str, today: date) -> tuple[date | None, list[tuple[int, int]]]:
+    """找出句中的日期，返回第一个日期和所有日期所在位置。
+
+    ``text`` 需先经过 ``normalize_sentence``；日期不存在时抛 ``LedgerParseError``。
+    """
 
     found: list[tuple[int, int, date]] = []
     taken: list[tuple[int, int]] = []
@@ -471,9 +477,11 @@ def _detect_currency(text: str, amount: _Amount) -> str:
     return min(positions)[1] if positions else LEDGER_DEFAULT_CURRENCY
 
 
-def _detect_category(
+def detect_category(
     text: str, kind: LedgerKind, known_categories: Iterable[tuple[str, str]]
 ) -> str:
+    """按用过的分类和关键词表选分类，都没有命中时归到“其他”。"""
+
     folded = text.casefold()
     # 用户自己用过的分类直接写在句子里时优先，长的先匹配。
     custom = sorted(
@@ -498,7 +506,9 @@ def _detect_category(
     return best[2] if best else FALLBACK_CATEGORY
 
 
-def _detect_account(text: str) -> str | None:
+def detect_account(text: str) -> str | None:
+    """句中最先出现的常见账户名，如微信、支付宝。"""
+
     positions = [
         (index, account)
         for account in ACCOUNT_KEYWORDS
@@ -523,9 +533,9 @@ def parse_ledger_sentence(
         raise LedgerParseError("请输入一句话，如：今天早饭花了10元")
     if len(note) > LEDGER_NOTE_MAX_LENGTH:
         raise LedgerParseError(f"一句话最多 {LEDGER_NOTE_MAX_LENGTH} 个字")
-    normalized = _normalize(note)
+    normalized = normalize_sentence(note)
 
-    occurred_on, date_spans = _find_dates(normalized, today)
+    occurred_on, date_spans = find_dates(normalized, today)
     occurred_on = occurred_on or today
     if not LEDGER_MIN_DATE <= occurred_on <= LEDGER_MAX_DATE:
         raise LedgerParseError("日期超出可记录范围")
@@ -547,8 +557,8 @@ def parse_ledger_sentence(
             amount_cents=cents,
             currency=_detect_currency(normalized, amount),
             occurred_on=occurred_on,
-            category=_detect_category(normalized, kind, known_categories),
-            account=_detect_account(normalized),
+            category=detect_category(normalized, kind, known_categories),
+            account=detect_account(normalized),
             note=note,
         )
     except ValidationError as error:  # 理论上不会发生，兜底成中文提示
@@ -560,5 +570,9 @@ __all__ = [
     "FALLBACK_CATEGORY",
     "INCOME_CATEGORY_KEYWORDS",
     "LedgerParseError",
+    "detect_account",
+    "detect_category",
+    "find_dates",
+    "normalize_sentence",
     "parse_ledger_sentence",
 ]
