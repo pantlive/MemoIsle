@@ -1586,6 +1586,15 @@ def audio_download_filename(memo: Memo) -> str:
     return f"memoisle-{memo.id}.{extension}"
 
 
+def decode_image(content: bytes, declared_mime_type: str) -> Image.Image:
+    """校验真实图片格式并解码。
+
+    记账图片识别只读这一张图，不把原图写入图片目录。
+    """
+
+    return _decode_image(content, declared_mime_type)
+
+
 def _decode_image(content: bytes, declared_mime_type: str) -> Image.Image:
     """校验真实图片格式并解码，防止只依赖 Content-Type 的伪图片。"""
 

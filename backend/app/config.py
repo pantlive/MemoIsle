@@ -170,6 +170,10 @@ class Settings:
     ledger_llm_api_key: str | None = None
     ledger_llm_model: str = ""
     ledger_llm_timeout_seconds: float = 15.0
+    # 记账图片的本地视觉模型，复用上面的地址和密钥；留空则不把图片发给模型。
+    ledger_llm_vision_model: str = ""
+    # 图片识别（视觉模型或 OCR 后的文本模型）超时，默认比一句话更长。
+    ledger_image_timeout_seconds: float = 60.0
     # 分类模板生成单独使用 DeepSeek，避免影响会议总结和图片视觉模型。
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_api_key: str | None = None
@@ -458,6 +462,13 @@ class Settings:
                 float(
                     os.environ.get("MEMOISLE_LEDGER_LLM_TIMEOUT_SECONDS", "15"),
                 ),
+            ),
+            ledger_llm_vision_model=os.environ.get(
+                "MEMOISLE_LEDGER_LLM_VISION_MODEL", ""
+            ).strip(),
+            ledger_image_timeout_seconds=max(
+                1.0,
+                float(os.environ.get("MEMOISLE_LEDGER_IMAGE_TIMEOUT_SECONDS", "60")),
             ),
             deepseek_base_url=os.environ.get(
                 "MEMOISLE_DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1",

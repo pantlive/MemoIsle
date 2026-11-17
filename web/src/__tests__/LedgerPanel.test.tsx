@@ -4,17 +4,35 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError, createLedgerEntry, deleteLedgerEntry, getLedgerSummary,
-  listLedgerCategories, listLedgerEntries, quickCreateLedgerEntry, updateLedgerEntry,
+  listLedgerCategories, listLedgerEntries, quickCreateLedgerEntry, recognizeLedgerImage,
+  updateLedgerEntry,
 } from "../api";
+import { compressImageIfNeeded } from "../imageCompression";
 import { isoDateOf, monthOf } from "../ledger";
 import LedgerPanel from "../LedgerPanel";
-import type { LedgerEntry } from "../types";
+import type { LedgerEntry, LedgerImageDraft } from "../types";
 
 vi.mock("../api", async (importOriginal) => ({
   ...await importOriginal<typeof import("../api")>(),
   createLedgerEntry: vi.fn(), deleteLedgerEntry: vi.fn(), getLedgerSummary: vi.fn(),
   listLedgerCategories: vi.fn(), listLedgerEntries: vi.fn(), quickCreateLedgerEntry: vi.fn(),
-  updateLedgerEntry: vi.fn(),
+  recognizeLedgerImage: vi.fn(), updateLedgerEntry: vi.fn(),
+}));
+
+vi.mock("../imageCompression", () => ({
+  compressImageIfNeeded: vi.fn(async (file: Blob, declaredMimeType: string) => ({
+    blob: file,
+    compressed: false,
+    originalBytes: file.size,
+    newBytes: file.size,
+    originalWidth: 1,
+    originalHeight: 1,
+    newWidth: 1,
+    newHeight: 1,
+    originalType: declaredMimeType,
+    newType: file.type || declaredMimeType,
+    animationDropped: false,
+  })),
 }));
 
 const entry: LedgerEntry = {
@@ -176,5 +194,56 @@ describe("记账界面", () => {
     expect(listLedgerEntries).toHaveBeenCalledTimes(2);
     expect(listLedgerEntries).toHaveBeenLastCalledWith(expect.objectContaining({ month: "1999-03" }));
     expect(getLedgerSummary).toHaveBeenLastCalledWith("1999-03");
+  });
+
+  it("prefills a new entry from a recognized image and saves only after confirmation", async () => {
+    const today = isoDateOf();
+    const draft: LedgerImageDraft = {
+      kind: "expense", amount_cents: 6000, currency: "CNY", occurred_on: today,
+      category: "餐饮", account: "微信", note: "图片：星巴克", parsed_by: "vision",
+    };
+    vi.mocked(recognizeLedgerImage).mockResolvedValue(draft);
+    const saved: LedgerEntry = {
+      ...entry, id: "44444444-4444-4444-8444-444444444444", version: 1,
+      amount_cents: 6000, occurred_on: today, account: "微信", note: "图片：星巴克",
+    };
+    vi.mocked(createLedgerEntry).mockResolvedValue(saved);
+    await act(async () => root.render(<LedgerPanel />));
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="选择记账图片"]')!;
+    const file = new File([Uint8Array.from([1, 2, 3])], "receipt.jpg", { type: "image/jpeg" });
+    await act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(compressImageIfNeeded).toHaveBeenCalledWith(file, "image/jpeg");
+    expect(recognizeLedgerImage).toHaveBeenCalledWith(file, today);
+    expect(createLedgerEntry).not.toHaveBeenCalled();
+    const dialog = container.querySelector("dialog")!;
+    expect(dialog.textContent).toContain("识别来源：视觉模型");
+    expect(dialog.textContent).toContain("尚未写入");
+    expect(dialog.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!.value).toBe("60");
+    expect(dialog.querySelector("textarea")!.value).toBe("图片：星巴克");
+    await act(async () => {
+      dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(createLedgerEntry).toHaveBeenCalledWith({
+      kind: "expense", amount_cents: 6000, currency: "CNY", occurred_on: today,
+      category: "餐饮", account: "微信", note: "图片：星巴克",
+    });
+    expect(container.querySelector("dialog")).toBeNull();
+  });
+
+  it("shows image recognition errors under the quick entry box", async () => {
+    vi.mocked(recognizeLedgerImage).mockRejectedValue(new ApiError("还没有配置图片记账识别", 503));
+    await act(async () => root.render(<LedgerPanel />));
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="选择记账图片"]')!;
+    const file = new File([Uint8Array.from([1])], "receipt.png", { type: "image/png" });
+    await act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.querySelector("#ledger-quick-error")?.textContent).toBe("还没有配置图片记账识别");
+    expect(container.querySelector("dialog")).toBeNull();
+    expect(createLedgerEntry).not.toHaveBeenCalled();
   });
 });

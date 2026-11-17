@@ -22,6 +22,7 @@ import type {
   LedgerCategoryUsage,
   LedgerEntry,
   LedgerEntryInput,
+  LedgerImageDraft,
   LedgerKind,
   LedgerQuickResult,
   LedgerSummary,
@@ -814,6 +815,39 @@ export async function quickCreateLedgerEntry(text: string, today: string): Promi
     method: "POST",
     body: JSON.stringify({ text, today }),
   });
+}
+
+/**
+ * 识别小票或支付截图，只返回草稿。today 用本地日期 YYYY-MM-DD。
+ * 未配置本地识别时返回 503；看不清时返回 422。确认前不会写入流水。
+ */
+export async function recognizeLedgerImage(file: Blob, today: string): Promise<LedgerImageDraft> {
+  const accessToken = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/ledger/image/recognize?today=${encodeURIComponent(today)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: file,
+    },
+  );
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string };
+    } | null;
+    const detail = payload?.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : detail?.message ?? `图片识别失败（${response.status}）`;
+    throw new ApiError(message, response.status);
+  }
+  return (await response.json()) as LedgerImageDraft;
 }
 
 export async function updateLedgerEntry(
