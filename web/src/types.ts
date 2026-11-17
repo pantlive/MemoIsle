@@ -794,6 +794,14 @@ export interface LedgerQuickResult extends LedgerEntry {
   parsed_by: LedgerParsedBy;
 }
 
+/** 图片识别方式：vision 本地视觉模型，llm 为 OCR 后的本地文本模型，rule 为规则。 */
+export type LedgerImageParsedBy = "vision" | "llm" | "rule";
+
+/** 图片识别出的草稿，尚未写入。 */
+export interface LedgerImageDraft extends LedgerEntryInput {
+  parsed_by: LedgerImageParsedBy;
+}
+
 export interface LedgerCurrencyTotal {
   currency: string;
   income_cents: number;

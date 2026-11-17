@@ -2,15 +2,25 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 
 import {
   ApiError, createLedgerEntry, deleteLedgerEntry, getLedgerSummary,
-  listLedgerCategories, listLedgerEntries, quickCreateLedgerEntry, updateLedgerEntry,
+  listLedgerCategories, listLedgerEntries, quickCreateLedgerEntry, recognizeLedgerImage,
+  updateLedgerEntry,
 } from "./api";
 import Icon from "./Icon";
+import { compressImageIfNeeded } from "./imageCompression";
 import {
   categoryOptions, centsToAmountInput, formatEntryDate, formatMoney, formatMonthLabel,
   formatSignedAmount, isoDateOf, LEDGER_CURRENCIES, ledgerKindLabels, monthOf,
   parseAmountToCents, shiftMonth,
 } from "./ledger";
-import type { LedgerCategoryUsage, LedgerEntry, LedgerEntryInput, LedgerKind, LedgerSummary } from "./types";
+import type {
+  LedgerCategoryUsage, LedgerEntry, LedgerEntryInput, LedgerImageParsedBy, LedgerKind, LedgerSummary,
+} from "./types";
+
+const PARSED_BY_LABELS: Record<LedgerImageParsedBy, string> = {
+  vision: "视觉模型",
+  llm: "本地模型",
+  rule: "规则",
+};
 
 const PAGE_SIZE = 500;
 const QUICK_TEXT_MAX_LENGTH = 200;
@@ -32,8 +42,11 @@ interface MutationOptions<T> {
   onError?: (message: string) => void;
 }
 
-function LedgerEditor({ entry, month, categories, busy, error, onClose, onSave }: {
+function LedgerEditor({ entry, draft = null, parsedBy = null, month, categories, busy, error, onClose, onSave }: {
   entry: LedgerEntry | null;
+  /** 图片识别出的草稿；有 entry 时忽略，保存仍走新建。 */
+  draft?: LedgerEntryInput | null;
+  parsedBy?: LedgerImageParsedBy | null;
   month: string;
   categories: LedgerCategoryUsage[];
   busy: boolean;
@@ -42,13 +55,14 @@ function LedgerEditor({ entry, month, categories, busy, error, onClose, onSave }
   onSave: (input: LedgerEntryInput) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [kind, setKind] = useState<LedgerKind>(entry?.kind ?? "expense");
-  const [amount, setAmount] = useState(entry ? centsToAmountInput(entry.amount_cents) : "");
-  const [currency, setCurrency] = useState(entry?.currency ?? "CNY");
-  const [date, setDate] = useState(entry?.occurred_on ?? (month === monthOf() ? isoDateOf() : `${month}-01`));
-  const [category, setCategory] = useState(entry?.category ?? "餐饮");
-  const [account, setAccount] = useState(entry?.account ?? "");
-  const [note, setNote] = useState(entry?.note ?? "");
+  const initial = entry ?? draft;
+  const [kind, setKind] = useState<LedgerKind>(initial?.kind ?? "expense");
+  const [amount, setAmount] = useState(initial ? centsToAmountInput(initial.amount_cents) : "");
+  const [currency, setCurrency] = useState(initial?.currency ?? "CNY");
+  const [date, setDate] = useState(initial?.occurred_on ?? (month === monthOf() ? isoDateOf() : `${month}-01`));
+  const [category, setCategory] = useState(initial?.category ?? "餐饮");
+  const [account, setAccount] = useState(initial?.account ?? "");
+  const [note, setNote] = useState(initial?.note ?? "");
   const [validation, setValidation] = useState("");
 
   useEffect(() => {
@@ -78,6 +92,7 @@ function LedgerEditor({ entry, month, categories, busy, error, onClose, onSave }
     onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={submit}>
       <h2 id="ledger-editor-title">{entry ? "编辑流水" : "记一笔"}</h2>
+      {parsedBy && <p className="ledger-source">识别来源：{PARSED_BY_LABELS[parsedBy]}。请核对后再保存，尚未写入。</p>}
       <fieldset disabled={busy} className="ledger-fields">
         <label>方向<select aria-label="方向" value={kind} onChange={(event) => {
           const value = event.target.value as LedgerKind;
@@ -109,7 +124,11 @@ export default function LedgerPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [editor, setEditor] = useState<{ entry: LedgerEntry | null } | null>(null);
+  const [editor, setEditor] = useState<{
+    entry: LedgerEntry | null;
+    draft?: LedgerEntryInput | null;
+    parsedBy?: LedgerImageParsedBy | null;
+  } | null>(null);
   const [dialogError, setDialogError] = useState("");
   const [busy, setBusy] = useState(false);
   const [quickText, setQuickText] = useState("");
@@ -117,6 +136,7 @@ export default function LedgerPanel() {
   const [quickSaved, setQuickSaved] = useState<LedgerEntry | null>(null);
   const requestId = useRef(0);
   const mutationBusy = useRef(false);
+  const imageInput = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
     const id = ++requestId.current;
@@ -174,6 +194,30 @@ export default function LedgerPanel() {
     } finally { mutationBusy.current = false; setBusy(false); }
   }
 
+  async function recognizeFile(file: File): Promise<void> {
+    if (mutationBusy.current) return;
+    mutationBusy.current = true;
+    setBusy(true);
+    setQuickError("");
+    setNotice("");
+    setQuickSaved(null);
+    try {
+      const prepared = await compressImageIfNeeded(file, file.type || "application/octet-stream");
+      const type = prepared.newType || prepared.blob.type || file.type || "application/octet-stream";
+      const body = prepared.blob.type === type ? prepared.blob : new Blob([prepared.blob], { type });
+      const draft = await recognizeLedgerImage(body, isoDateOf());
+      const { parsed_by: parsedBy, ...input } = draft;
+      setDialogError("");
+      // 只预填编辑框，确认保存时才调用 createLedgerEntry。
+      setEditor({ entry: null, draft: input, parsedBy });
+    } catch (failure) {
+      setQuickError(describe(failure));
+    } finally {
+      mutationBusy.current = false;
+      setBusy(false);
+    }
+  }
+
   function submitQuick(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     const text = quickText.trim();
@@ -200,6 +244,13 @@ export default function LedgerPanel() {
         aria-describedby={quickError ? "ledger-quick-error" : undefined}
         onChange={(event) => { setQuickText(event.target.value); setQuickError(""); }} />
       <button className="primary" disabled={busy || !quickText.trim()}>记下</button>
+      <button type="button" disabled={busy || loading} onClick={() => imageInput.current?.click()}>识别图片</button>
+      <input ref={imageInput} type="file" accept="image/*" hidden aria-label="选择记账图片"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) void recognizeFile(file);
+        }} />
       {quickError && <p id="ledger-quick-error" role="alert" className="ledger-error">{quickError}</p>}
     </form>
     <div className="ledger-month">
@@ -238,6 +289,6 @@ export default function LedgerPanel() {
       }}>删除</button></div>
     </li>)}</ul>
     {hasMore && <button disabled={loading || busy} onClick={() => void loadMore()}>加载更多流水</button>}
-    {editor && <LedgerEditor entry={editor.entry} month={month} categories={categories} busy={busy} error={dialogError} onClose={() => setEditor(null)} onSave={(input) => void mutate(() => editor.entry ? updateLedgerEntry(editor.entry.id, input, editor.entry.version) : createLedgerEntry(input))} />}
+    {editor && <LedgerEditor entry={editor.entry} draft={editor.draft} parsedBy={editor.parsedBy} month={month} categories={categories} busy={busy} error={dialogError} onClose={() => setEditor(null)} onSave={(input) => void mutate(() => editor.entry ? updateLedgerEntry(editor.entry.id, input, editor.entry.version) : createLedgerEntry(input))} />}
   </section>;
 }

@@ -55,6 +55,19 @@ data class LedgerEntry(
     }
 }
 
+/**
+ * 图片识别出的草稿，尚未写入。
+ * parsedBy 为 "vision"（本地视觉模型）、"llm"（OCR 后的本地文本模型）或 "rule"（规则）。
+ */
+data class LedgerImageDraft(val data: LedgerEntryInput, val parsedBy: String) {
+    companion object {
+        fun fromJson(json: JSONObject): LedgerImageDraft = LedgerImageDraft(
+            data = LedgerEntryInput.fromJson(json),
+            parsedBy = json.getString("parsed_by"),
+        )
+    }
+}
+
 /** 一句话记下的一笔；parsedBy 为 "llm"（服务端配置的本地大模型）或 "rule"（固定规则）。 */
 data class LedgerQuickResult(val entry: LedgerEntry, val parsedBy: String) {
     val byLocalModel: Boolean get() = parsedBy == "llm"

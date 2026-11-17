@@ -3,6 +3,7 @@ package com.memoisle.app.network
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
+import com.memoisle.app.data.LedgerImageDraft
 import com.memoisle.app.data.LedgerQuickResult
 import com.memoisle.app.data.LedgerSummary
 import com.memoisle.app.data.LedgerCategoryUsage
@@ -750,6 +751,42 @@ class MemoApiClient(baseUrl: String) {
      */
     fun quickCreateLedgerEntry(text: String, today: String): LedgerQuickResult =
         LedgerQuickResult.fromJson(execute("POST", "ledger/quick", JSONObject().put("text", text).put("today", today)))
+
+    /**
+     * 识别小票或支付截图，只返回草稿。today 用设备本地日期。
+     * 未配置本地识别时服务端返回 503；看不清时返回 422。确认前不会写入流水。
+     */
+    fun recognizeLedgerImage(bytes: ByteArray, mimeType: String, today: String): LedgerImageDraft {
+        val normalizedMimeType = normalizeImageMimeType(mimeType)
+            ?: throw IllegalArgumentException("仅支持 PNG/JPEG/WebP/GIF 图片")
+        require(bytes.isNotEmpty()) { "图片内容不能为空" }
+        val connection = URL(
+            normalizedBaseUrl + "ledger/image/recognize?today=" + URLEncoder.encode(today, "UTF-8"),
+        ).openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 10_000
+            // 服务端默认识别超时 60 秒，这里留出余量等它返回中文错误。
+            connection.readTimeout = 90_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            accessToken?.let { token ->
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+            connection.setRequestProperty("Content-Type", normalizedMimeType)
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.outputStream.use { output -> output.write(bytes) }
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (statusCode !in 200..299) {
+                throw ApiException(statusCode, responseBody)
+            }
+            LedgerImageDraft.fromJson(JSONObject(responseBody))
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     fun updateLedgerEntry(id: String, data: LedgerEntryInput, expectedVersion: Int): LedgerEntry =
         LedgerEntry.fromJson(execute("PUT", "ledger/entries/$id", data.toJson().put("expected_version", expectedVersion)))

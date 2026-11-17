@@ -70,6 +70,31 @@ class LedgerTest {
     }
 
     @Test
+    fun imageDraftReadsRecognizedFieldsWithoutAnId() {
+        val json = JSONObject(
+            """
+            {"kind":"expense","amount_cents":6000,"currency":"CNY","occurred_on":"2026-11-16",
+             "category":"餐饮","account":"微信","note":"图片：星巴克","parsed_by":"vision"}
+            """.trimIndent(),
+        )
+        val draft = LedgerImageDraft.fromJson(json)
+        assertEquals(6000L, draft.data.amountCents)
+        assertEquals("CNY", draft.data.currency)
+        assertEquals("2026-11-16", draft.data.occurredOn)
+        assertEquals("餐饮", draft.data.category)
+        assertEquals("微信", draft.data.account)
+        assertEquals("图片：星巴克", draft.data.note)
+        assertEquals("vision", draft.parsedBy)
+        assertNull(
+            LedgerImageDraft.fromJson(json.put("account", JSONObject.NULL).put("parsed_by", "rule")).data.account,
+        )
+        assertEquals(
+            "llm",
+            LedgerImageDraft.fromJson(json.put("parsed_by", "llm")).parsedBy,
+        )
+    }
+
+    @Test
     fun summaryKeepsCurrenciesSeparateAndSupportsLargeTotals() {
         val summary = LedgerSummary.fromJson(JSONObject("""
             {"month":"2026-11","totals":[

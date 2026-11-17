@@ -223,21 +223,38 @@ def _amount_cents(value: object) -> int:
     return cents_int
 
 
-def _resolve_date(value: object, normalized: str, today: date) -> date:
-    try:
-        rule_date, _ = find_dates(normalized, today)
-    except LedgerParseError as error:
-        # 句中写了不存在的日期，交给规则给出明确提示，不让模型猜。
-        raise LedgerLlmUnavailableError("句中日期不存在") from error
-    if rule_date is not None:
-        return rule_date
+def _resolve_date(
+    value: object,
+    normalized: str,
+    today: date,
+    *,
+    earliest: date | None = None,
+    use_rule_date: bool = True,
+) -> date:
+    """句中规则日期优先；模型日期超出允许范围时用今天。
+
+    图片识别传入 ``earliest``（今天往前最多 366 天）且 ``use_rule_date=False``，
+    只接受模型给出的、落在该窗口到明天之间的日期。
+    """
+
+    latest = min(today + timedelta(days=1), LEDGER_MAX_DATE)
+    floor = LEDGER_MIN_DATE if earliest is None else max(earliest, LEDGER_MIN_DATE)
+    if use_rule_date:
+        try:
+            rule_date, _ = find_dates(normalized, today)
+        except LedgerParseError as error:
+            # 句中写了不存在的日期，交给规则给出明确提示，不让模型猜。
+            raise LedgerLlmUnavailableError("句中日期不存在") from error
+        if rule_date is not None:
+            if earliest is not None and not floor <= rule_date <= latest:
+                return today
+            return rule_date
     if isinstance(value, str) and _DATE.fullmatch(value.strip()):
         try:
             model_date = date.fromisoformat(value.strip())
         except ValueError:
             model_date = None
-        latest = min(today + timedelta(days=1), LEDGER_MAX_DATE)
-        if model_date is not None and LEDGER_MIN_DATE <= model_date <= latest:
+        if model_date is not None and floor <= model_date <= latest:
             return model_date
     return today
 
@@ -271,11 +288,22 @@ def _resolve_account(value: object, normalized: str) -> str | None:
 
 def _build_entry(
     data: dict[str, object],
-    note: str,
+    note: str | None,
     today: date,
     known_categories: list[tuple[str, str]],
     allowed: dict[LedgerKind, list[str]],
+    *,
+    validation_text: str | None = None,
+    earliest: date | None = None,
+    use_rule_date: bool = True,
 ) -> LedgerEntryCreate:
+    """把模型 JSON 收成一笔流水。
+
+    ``validation_text`` 用来核对账户、分类和句中日期，默认就是备注原文。
+    图片识别另传 OCR 文字或摘要；账户必须出现在这段文字里，否则改用规则账户。
+    ``note`` 是真正写入的备注，图片场景由调用方写成「图片：摘要」。
+    """
+
     if data.get("error"):
         raise LedgerLlmUnavailableError("模型判断这句话记不成一笔")
     kind_value = data.get("kind")
@@ -287,14 +315,21 @@ def _build_entry(
     if kind is None:
         raise LedgerLlmUnavailableError("收支方向无效")
     cents = _amount_cents(data.get("amount"))
-    normalized = normalize_sentence(note)
+    source = note if validation_text is None else validation_text
+    normalized = normalize_sentence(source or "")
     currency = data.get("currency") or LEDGER_DEFAULT_CURRENCY
     try:
         return LedgerEntryCreate(
             kind=kind,
             amount_cents=cents,
             currency=currency,
-            occurred_on=_resolve_date(data.get("occurred_on"), normalized, today),
+            occurred_on=_resolve_date(
+                data.get("occurred_on"),
+                normalized,
+                today,
+                earliest=earliest,
+                use_rule_date=use_rule_date,
+            ),
             category=_resolve_category(
                 data.get("category"), kind, normalized, allowed[kind], known_categories
             ),

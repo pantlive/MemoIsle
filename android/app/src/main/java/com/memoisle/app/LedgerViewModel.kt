@@ -1,18 +1,25 @@
 package com.memoisle.app
 
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.memoisle.app.data.ImageCompressor
 import com.memoisle.app.data.LedgerCategoryUsage
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
+import com.memoisle.app.data.LedgerImageDraft
 import com.memoisle.app.data.LedgerQuickResult
 import com.memoisle.app.data.LedgerSummary
 import com.memoisle.app.data.currentLedgerMonth
 import com.memoisle.app.data.formatLedgerMoney
+import com.memoisle.app.data.imageMimeTypeFromFileName
+import com.memoisle.app.data.normalizeImageMimeType
 import com.memoisle.app.data.shiftLedgerMonth
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
@@ -120,6 +127,36 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
         mutate(onDone) { api.deleteLedgerEntry(entry.id, entry.version) }
     }
 
+    /**
+     * 识别相册里的小票或支付截图。成功后只把草稿交给 [onDraft]，确认保存仍走 [save]。
+     */
+    fun recognizeImage(
+        uri: Uri,
+        contentResolver: ContentResolver,
+        onDraft: (LedgerImageDraft) -> Unit,
+    ) {
+        if (uiState.busy || uiState.loading) return
+        uiState = uiState.copy(busy = true, error = null, message = null)
+        viewModelScope.launch {
+            try {
+                val draft = withContext(Dispatchers.IO) {
+                    val displayName = queryDisplayName(contentResolver, uri)
+                    val mimeType = normalizeImageMimeType(contentResolver.getType(uri))
+                        ?: imageMimeTypeFromFileName(displayName)
+                        ?: throw IllegalArgumentException("仅支持 PNG、JPEG、WebP、GIF 图片")
+                    val prepared = ImageCompressor.compress(contentResolver, uri, mimeType)
+                    api.recognizeLedgerImage(prepared.bytes, prepared.mimeType, LocalDate.now().toString())
+                }
+                uiState = uiState.copy(busy = false)
+                onDraft(draft)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                uiState = uiState.copy(busy = false, error = describe(error))
+            }
+        }
+    }
+
     /** 一句话记一笔，由服务端识别后直接保存；识别失败时不写入，输入框保留原文。 */
     fun quickAdd(text: String, onDone: () -> Unit) {
         val sentence = text.trim()
@@ -188,8 +225,20 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
         entry.data.account,
     ).joinToString(" · ")
 
+    private fun queryDisplayName(contentResolver: ContentResolver, uri: Uri): String? {
+        return runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (!cursor.moveToFirst()) return@use null
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index < 0 || cursor.isNull(index)) null else cursor.getString(index)
+                }
+        }.getOrNull()
+    }
+
     private fun describe(error: Exception): String = when (error) {
         is ApiException -> error.detailMessage ?: "操作失败（${error.statusCode}），请重试。"
+        is IllegalArgumentException -> error.message ?: "这张图片无法用于记账。"
         is java.io.IOException -> "无法连接服务器。记账仅支持在线使用，请检查网络后重试。"
         else -> "读取或保存失败，请稍后重试。"
     }

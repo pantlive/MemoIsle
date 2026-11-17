@@ -2439,6 +2439,8 @@ class VaultItemRead(BaseModel):
 LedgerKind = Literal["income", "expense"]
 # 一句话记账用的识别方式：llm 为本地大模型，rule 为固定规则。
 LedgerParsedBy = Literal["llm", "rule"]
+# 图片记账的识别方式：vision 为本地视觉模型，llm 为 OCR 后的本地文本模型，rule 为规则。
+LedgerImageParsedBy = Literal["vision", "llm", "rule"]
 # 单笔上限 10 亿元，按分保存。
 LEDGER_MAX_AMOUNT_CENTS = 100_000_000_000
 LEDGER_DEFAULT_CURRENCY = "CNY"
@@ -2585,6 +2587,12 @@ class LedgerQuickRead(LedgerEntryRead):
     """一句话记下的一笔，附带这次是用哪种方式识别的。"""
 
     parsed_by: LedgerParsedBy
+
+
+class LedgerImageDraft(LedgerEntryCreate):
+    """图片识别出的草稿，尚未写入；确认前客户端可以改。"""
+
+    parsed_by: LedgerImageParsedBy
 
 
 class LedgerCurrencyTotal(BaseModel):

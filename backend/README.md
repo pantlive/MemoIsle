@@ -51,6 +51,8 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_LEDGER_LLM_MODEL`：记账识别用的模型名称，例如 `qwen2.5:7b`；与地址同时配置才启用。推荐非推理模型；推理模型请关闭思考（回复上限 256 token，思考过长会被截断并退回规则）。
 - `MEMOISLE_LEDGER_LLM_API_KEY`：本地模型服务的密钥，无需鉴权时留空，留空时不发送 `Authorization`。
 - `MEMOISLE_LEDGER_LLM_TIMEOUT_SECONDS`：记账识别请求超时秒数，默认 15，最小 1。
+- `MEMOISLE_LEDGER_LLM_VISION_MODEL`：记账图片用的本地视觉模型名，复用上面的地址和密钥；留空则不把图片发给模型。不要填 `MEMOISLE_VISION_MODEL` 或会议总结的云端模型。
+- `MEMOISLE_LEDGER_IMAGE_TIMEOUT_SECONDS`：图片记账识别超时秒数，默认 60，最小 1。视觉模型和 OCR 之后的文本模型都用这个超时。
 - `MEMOISLE_DEEPSEEK_API_KEY` / `DEEPSEEK_API_KEY`：分类模板生成的服务器默认 DeepSeek 凭证；也可在 Web 设置里按账号保存，优先使用账号凭据。
 - `MEMOISLE_DEEPSEEK_BASE_URL`：分类生成接口地址，默认 `https://api.deepseek.com/v1`。
 - `MEMOISLE_DEEPSEEK_MODEL`：分类生成模型，默认 `deepseek-flash`，支持覆盖为部署中可用的 DeepSeek 模型。
@@ -222,6 +224,36 @@ Android 自定义地址。令牌只在数据库保存 SHA-256 哈希，退出登
 ollama pull qwen2.5:7b
 export MEMOISLE_LEDGER_LLM_BASE_URL=http://127.0.0.1:11434/v1
 export MEMOISLE_LEDGER_LLM_MODEL=qwen2.5:7b
+```
+
+## 图片记账
+
+`POST /api/v1/ledger/image/recognize?today=YYYY-MM-DD` 接收一张小票或支付截图的裸二进制
+（`Content-Type` 为图片类型，上限 20 MB）。接口只返回草稿 `LedgerImageDraft`（流水字段加
+`parsed_by`：`vision` / `llm` / `rule`），不写入 `ledger_entry`，也不把图片落盘。
+客户端核对后仍走 `POST /ledger/entries` 保存。
+
+识别只用 `MEMOISLE_LEDGER_LLM_*` 和本地 OCR，不调用 `MEMOISLE_LLM_*`、`MEMOISLE_VISION_MODEL`
+或 `run_image_ocr`（后者会在本地 OCR 失败时回退到云端视觉模型）：
+
+1. 配置了 `MEMOISLE_LEDGER_LLM_VISION_MODEL` 时，把 JPEG 预览发给本地视觉模型，让它返回
+   方向、金额、币种、日期、分类、账户和摘要。
+2. 没配视觉模型，或视觉模型超时、连不上、回复不合格时，用本地 OCR 取文字。配了
+   `MEMOISLE_LEDGER_LLM_MODEL` 就让文本模型拆字段，否则用规则找「实付 / 支付金额 / 合计」，
+   有实付时不以商品行或优惠前的合计为准。
+3. 视觉模型、文本模型都没配，并且本地 OCR 不可用时返回 503 和中文提示。图片能看懂但提不出
+   一笔时返回 422，同样不写入。
+
+账户必须出现在 OCR 文字或摘要里，否则留空。日期限制在今天往前 366 天到明天，超出则用
+`today`。备注写成「图片：摘要」，超长截断。模型调用使用 `trust_env=False` 直连本地地址。
+日志只记状态码或异常类型，不记录 OCR 文本、图片内容和密钥。
+
+本地视觉模型以 Ollama 为例：
+
+```bash
+ollama pull qwen2.5vl
+export MEMOISLE_LEDGER_LLM_BASE_URL=http://127.0.0.1:11434/v1
+export MEMOISLE_LEDGER_LLM_VISION_MODEL=qwen2.5vl
 ```
 
 ## 数据导出

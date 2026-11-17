@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.dependencies import get_current_user_id, get_session, get_settings
+from app.ledger_image import LedgerImageUnavailableError, recognize_ledger_image
 from app.ledger_parser import LedgerParseError
 from app.ledger_service import (
     DEFAULT_LIST_LIMIT,
@@ -27,16 +30,20 @@ from app.ledger_service import (
 )
 from app.schemas import (
     LEDGER_CATEGORY_MAX_LENGTH,
+    LEDGER_MAX_DATE,
+    LEDGER_MIN_DATE,
     LEDGER_MONTH_PATTERN,
     LedgerCategoryUsage,
     LedgerEntryCreate,
     LedgerEntryRead,
     LedgerEntryUpdate,
+    LedgerImageDraft,
     LedgerKind,
     LedgerQuickCreate,
     LedgerQuickRead,
     LedgerSummary,
 )
+from app.service import MAX_IMAGE_BYTES, ImageValidationError
 
 router = APIRouter(prefix="/ledger", tags=["ledger"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -47,6 +54,22 @@ MonthQuery = Annotated[str, Query(pattern=LEDGER_MONTH_PATTERN)]
 
 def _not_found() -> HTTPException:
     return HTTPException(status_code=404, detail="这一笔记录不存在或已删除")
+
+
+def _check_image_size(content_length: str | None, content: bytes) -> None:
+    """Content-Length 或实际字节超过 20 MB 都拒绝，避免把大图读进识别流程。"""
+
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400, detail="Content-Length 无效"
+            ) from error
+        if declared_size > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="图片不能超过 20 MB")
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="图片不能超过 20 MB")
 
 
 def _conflict(error: LedgerVersionConflictError) -> HTTPException:
@@ -130,6 +153,50 @@ def quick_create_entry_route(
     return LedgerQuickRead(
         **dict(LedgerEntryRead.model_validate(entry)), parsed_by=parsed_by
     )
+
+
+@router.post("/image/recognize", response_model=LedgerImageDraft)
+async def recognize_ledger_image_route(
+    request: Request,
+    session: SessionDependency,
+    user_id: UserDependency,
+    settings: SettingsDependency,
+    today: date,
+) -> LedgerImageDraft:
+    """识别小票或支付截图，只返回草稿，不写入流水、不保存图片。
+
+    ``today`` 是客户端本地日期。未配置本地视觉模型、文本模型且本地 OCR
+    不可用时返回 503。
+    """
+
+    if not LEDGER_MIN_DATE <= today <= LEDGER_MAX_DATE:
+        raise HTTPException(status_code=422, detail="日期超出可记录范围")
+    content_type = request.headers.get("content-type", "")
+    content_length = request.headers.get("content-length")
+    # 声明的体积已经超限时不再把正文全部读进来。
+    if content_length is not None:
+        _check_image_size(content_length, b"")
+    content = await request.body()
+    _check_image_size(None, content)
+    known = [(item.kind, item.category) for item in list_categories(session, user_id)]
+    # 先结束只读事务再做识别，等待模型和 OCR 期间不占着数据库连接。
+    session.rollback()
+    try:
+        entry, parsed_by = await run_in_threadpool(
+            recognize_ledger_image,
+            content,
+            content_type,
+            today,
+            known,
+            settings,
+        )
+    except ImageValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LedgerImageUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except LedgerParseError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return LedgerImageDraft(**entry.model_dump(), parsed_by=parsed_by)
 
 
 @router.put("/entries/{entry_id}", response_model=LedgerEntryRead)

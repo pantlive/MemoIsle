@@ -1,6 +1,9 @@
 package com.memoisle.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,18 +37,22 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.memoisle.app.LedgerViewModel
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
+import com.memoisle.app.data.LedgerImageDraft
 import com.memoisle.app.data.centsToAmountInput
 import com.memoisle.app.data.currentLedgerMonth
 import com.memoisle.app.data.formatLedgerMoney
@@ -67,18 +74,40 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
     var categoryExpanded by remember { mutableStateOf(false) }
     var showCategoryTotals by rememberSaveable { mutableStateOf(false) }
     var quickText by rememberSaveable { mutableStateOf("") }
+    var imageDraft by remember { mutableStateOf<LedgerEntryInput?>(null) }
+    var imageSource by remember { mutableStateOf<String?>(null) }
+    var editorNonce by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            viewModel.recognizeImage(uri, context.contentResolver) { draft ->
+                editing = null
+                imageDraft = draft.data
+                imageSource = draft.parsedBy
+                editorNonce += 1
+                editorOpen = true
+            }
+        }
+    }
     LaunchedEffect(Unit) { viewModel.load() }
     BackHandler { onClose() }
     val disabled = state.busy || state.loading
     // 识别失败时不清空，方便改一改再记。
     val submitQuick = { viewModel.quickAdd(quickText) { quickText = "" } }
+    fun openEditor(entry: LedgerEntry?, draft: LedgerImageDraft? = null) {
+        editing = entry
+        imageDraft = if (entry == null) draft?.data else null
+        imageSource = if (entry == null) draft?.parsedBy else null
+        editorNonce += 1
+        editorOpen = true
+    }
 
     Scaffold(topBar = {
         TopAppBar(title = { Text("记账") }, navigationIcon = {
             IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
         }, actions = {
             TextButton(enabled = !disabled, onClick = viewModel::load) { Text("刷新") }
-            TextButton(enabled = !disabled, onClick = { editing = null; editorOpen = true }) { Text("记一笔") }
+            TextButton(enabled = !disabled, onClick = { openEditor(null) }) { Text("记一笔") }
         })
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
@@ -92,6 +121,11 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { if (!disabled) submitQuick() }))
                     Button(enabled = !disabled && quickText.isNotBlank(), onClick = submitQuick) { Text("记下") }
+                    TextButton(enabled = !disabled, onClick = {
+                        imagePicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    }) { Text("识别图片") }
                 }
             }
             item {
@@ -111,7 +145,7 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
                     state.quickEntry?.let { quick ->
                         // 列表里有更新的版本时用它，避免拿旧版本号保存。
                         TextButton(enabled = !disabled, onClick = {
-                            editing = state.entries.find { it.id == quick.id } ?: quick; editorOpen = true
+                            openEditor(state.entries.find { it.id == quick.id } ?: quick)
                         }) { Text("编辑") }
                     }
                 }
@@ -167,7 +201,7 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
                             color = if (entry.data.kind == "income") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                         entry.data.note?.let { Text(it) }
                         Row {
-                            TextButton(enabled = !disabled, onClick = { editing = entry; editorOpen = true }) { Text("编辑") }
+                            TextButton(enabled = !disabled, onClick = { openEditor(entry) }) { Text("编辑") }
                             TextButton(enabled = !disabled, onClick = { deleting = entry }) { Text("删除") }
                         }
                     }
@@ -177,12 +211,17 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
             item { Text("记账仅支持在线使用。", Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall) }
         }
     }
-    if (editorOpen) LedgerEditor(
-        entry = editing, month = state.month, busy = state.busy, serverError = state.error,
-        usedCategories = state.categories.map { it.kind to it.category },
-        onDismiss = { editorOpen = false },
-        onSave = { input -> viewModel.save(editing, input) { editorOpen = false } },
-    )
+    if (editorOpen) key(editorNonce) {
+        LedgerEditor(
+            entry = editing,
+            draft = if (editing == null) imageDraft else null,
+            parsedBy = if (editing == null) imageSource else null,
+            month = state.month, busy = state.busy, serverError = state.error,
+            usedCategories = state.categories.map { it.kind to it.category },
+            onDismiss = { editorOpen = false },
+            onSave = { input -> viewModel.save(editing, input) { editorOpen = false } },
+        )
+    }
     deleting?.let { entry ->
         AlertDialog(onDismissRequest = { if (!state.busy) deleting = null },
             title = { Text("永久删除这笔流水？") },
@@ -198,22 +237,33 @@ fun LedgerScreen(viewModel: LedgerViewModel, onClose: () -> Unit) {
 
 @Composable
 private fun LedgerEditor(
-    entry: LedgerEntry?, month: String, busy: Boolean, serverError: String?,
-    usedCategories: List<Pair<String, String>>, onDismiss: () -> Unit, onSave: (LedgerEntryInput) -> Unit,
+    entry: LedgerEntry?, draft: LedgerEntryInput?, parsedBy: String?, month: String, busy: Boolean,
+    serverError: String?, usedCategories: List<Pair<String, String>>, onDismiss: () -> Unit,
+    onSave: (LedgerEntryInput) -> Unit,
 ) {
-    var kind by rememberSaveable { mutableStateOf(entry?.data?.kind ?: "expense") }
-    var amount by rememberSaveable { mutableStateOf(entry?.data?.let { centsToAmountInput(it.amountCents) }.orEmpty()) }
-    var currency by rememberSaveable { mutableStateOf(entry?.data?.currency ?: "CNY") }
-    var date by rememberSaveable { mutableStateOf(entry?.data?.occurredOn ?: if (month == currentLedgerMonth()) LocalDate.now().toString() else "$month-01") }
-    var category by rememberSaveable { mutableStateOf(entry?.data?.category ?: "餐饮") }
-    var account by rememberSaveable { mutableStateOf(entry?.data?.account.orEmpty()) }
-    var note by rememberSaveable { mutableStateOf(entry?.data?.note.orEmpty()) }
+    val seed = entry?.data ?: draft
+    var kind by rememberSaveable { mutableStateOf(seed?.kind ?: "expense") }
+    var amount by rememberSaveable { mutableStateOf(seed?.let { centsToAmountInput(it.amountCents) }.orEmpty()) }
+    var currency by rememberSaveable { mutableStateOf(seed?.currency ?: "CNY") }
+    var date by rememberSaveable { mutableStateOf(seed?.occurredOn ?: if (month == currentLedgerMonth()) LocalDate.now().toString() else "$month-01") }
+    var category by rememberSaveable { mutableStateOf(seed?.category ?: "餐饮") }
+    var account by rememberSaveable { mutableStateOf(seed?.account.orEmpty()) }
+    var note by rememberSaveable { mutableStateOf(seed?.note.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
     var categoryExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text(if (entry == null) "记一笔" else "编辑流水") },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                parsedBy?.let { source ->
+                    val label = when (source) {
+                        "vision" -> "视觉模型"
+                        "llm" -> "本地模型"
+                        "rule" -> "规则"
+                        else -> source
+                    }
+                    Text("识别来源：$label。请核对后再保存，尚未写入。")
+                }
                 Row {
                     listOf("expense", "income").forEach { value -> TextButton(enabled = !busy, onClick = {
                         kind = value; category = if (value == "income") "工资" else "餐饮"
