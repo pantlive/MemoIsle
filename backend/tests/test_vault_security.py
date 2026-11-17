@@ -470,7 +470,7 @@ def test_logout_invalidates_the_grant(
 def test_forwarded_for_is_trusted_only_from_configured_proxies(
     vault_client: TestClient,
 ) -> None:
-    """不可信的直连即使带了 X-Forwarded-For，也按它自己的地址处理。"""
+    """不可信的直连忽略转发头。可信代理从右往左取第一个不是代理的地址。"""
 
     class _Peer:
         def __init__(self, host: str) -> None:
@@ -487,12 +487,31 @@ def test_forwarded_for_is_trusted_only_from_configured_proxies(
         trusted_proxy_ips="127.0.0.1/32",
         vault_web_ip_allowlist=f"{WEB_IP}/32",
     )
+    spoofed = f"{WEB_IP}, 198.51.100.9"
     assert client_ip(_Request("198.51.100.9", WEB_IP)) == "198.51.100.9"  # type: ignore[arg-type]
     assert client_ip(_Request("127.0.0.1", WEB_IP)) == WEB_IP  # type: ignore[arg-type]
     assert client_ip(_Request("127.0.0.1", "not-an-ip")) is None  # type: ignore[arg-type]
+    assert client_ip(_Request("127.0.0.1", spoofed)) == "198.51.100.9"  # type: ignore[arg-type]
+    assert client_ip(_Request("127.0.0.1", f"{spoofed}, 127.0.0.1")) == (  # type: ignore[arg-type]
+        "198.51.100.9"
+    )
+    assert client_ip(_Request("127.0.0.1", "127.0.0.1")) is None  # type: ignore[arg-type]
     denied = vault_client.get("/api/v1/vault", headers={"X-Forwarded-For": WEB_IP})
     assert denied.status_code == 403
     assert denied.json()["detail"]["code"] in {
         "vault_ip_blocked",
         "vault_ip_allowlist_empty",
     }
+
+    transport = vault_client._transport
+    previous_client = transport.client
+    transport.client = ("127.0.0.1", 50000)
+    try:
+        blocked = vault_client.get(
+            "/api/v1/vault",
+            headers={"X-Forwarded-For": spoofed},
+        )
+    finally:
+        transport.client = previous_client
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["code"] == "vault_ip_blocked"

@@ -194,21 +194,36 @@ def peer_is_trusted(peer: str | None, settings: Settings) -> bool:
 
 
 def client_ip(request: Request) -> str | None:
-    """解析客户端 IP。不可解析时返回空，调用方一律当成不允许。"""
+    """解析客户端 IP。直连不可信时只用套接字地址。
+
+    直连属于可信代理时，从右往左读 X-Forwarded-For，跳过仍是可信代理的地址，
+    取第一个不是代理的地址。全都是代理，或者每一段都解析失败时，返回空。
+    调用方把空地址一律当成不允许。
+    """
 
     settings = _settings(request)
     peer = request.client.host if request.client is not None else None
     if peer_is_trusted(peer, settings):
-        forwarded = request.headers.get("x-forwarded-for", "")
-        for part in forwarded.split(","):
-            address = _parse_ip(part)
-            if address is not None:
-                return str(address)
-        return None
+        return _untrusted_forwarded_ip(request, settings)
     address = _parse_ip(peer)
     if address is None:
         return None
     return str(address)
+
+
+def _untrusted_forwarded_ip(request: Request, settings: Settings) -> str | None:
+    """从右往左跳过可信代理，留下客户端地址。解析不了的段直接跳过。"""
+
+    forwarded = request.headers.get("x-forwarded-for", "")
+    networks = trusted_proxy_networks(settings)
+    for part in reversed(forwarded.split(",")):
+        address = _parse_ip(part)
+        if address is None:
+            continue
+        if any(address in network for network in networks):
+            continue
+        return str(address)
+    return None
 
 
 def client_ip_hash(settings: Settings, ip: str | None, client_type: ClientType) -> str:

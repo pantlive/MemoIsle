@@ -245,7 +245,8 @@ class Settings:
     # 网页 IP 白名单兜底，逗号分隔的 CIDR。设置页只能再追加，删不掉这里的条目。
     # 合并后仍为空时，网页端拒绝打开密码库。
     vault_web_ip_allowlist: str = ""
-    # 只有直连地址落在这里时才采信 X-Forwarded-For，避免客户端自己伪造来源。
+    # 只有直连地址落在这里时才采信 X-Forwarded-For。
+    # 采信时从右往左跳过仍属于这份名单的地址，避免客户端伪造最左边的来源。
     trusted_proxy_ips: str = ""
 
     @classmethod
