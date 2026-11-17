@@ -346,33 +346,104 @@ def test_allowlist_is_the_union_of_environment_and_settings(
     assert blocked.json()["detail"]["code"] == "vault_ip_blocked"
 
 
-def test_wrong_master_password_and_bad_code_each_send_one_alert(
+def _alert_messages(client: TestClient) -> list[str]:
+    return [body for body in _outbox(client) if "有一次验证没有通过" in body]
+
+
+def test_wrong_master_password_alert_is_throttled_in_the_same_window(
     vault_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """主密码输错、验证码输错，各多一封报警邮件，邮件里没有密钥。"""
+    """主密码输错发一封报警；同一有效期内再失败不再各发一封。"""
 
     _use_ip(monkeypatch, WEB_IP)
-    before = len(_outbox(vault_client))
+    before = len(_alert_messages(vault_client))
     reported = vault_client.post("/api/v1/vault/unlock-failed")
     assert reported.status_code == 200
     assert reported.json()["sent"] is True
-    alerts = _outbox(vault_client)
+    alerts = _alert_messages(vault_client)
     assert len(alerts) == before + 1
     assert WEB_IP in alerts[-1]
     assert "主密码不正确" in alerts[-1]
     assert "网页" in alerts[-1]
     vault_client.post("/api/v1/vault/access/code")
-    before_code = len(_outbox(vault_client))
     rejected = vault_client.post(
         "/api/v1/vault/access/verify",
         json={"method": "email", "code": "000000"},
     )
     assert rejected.status_code == 403
-    alerts = _outbox(vault_client)
-    assert len(alerts) == before_code + 1
-    assert "验证码不正确" in alerts[-1]
+    assert rejected.json()["detail"]["code"] == "vault_code_invalid"
+    assert len(_alert_messages(vault_client)) == before + 1
+    assert "000000" not in "\n".join(_outbox(vault_client))
+    again = vault_client.post("/api/v1/vault/unlock-failed")
+    assert again.status_code == 200
+    assert again.json()["sent"] is False
+    assert len(_alert_messages(vault_client)) == before + 1
+
+
+def test_totp_locks_after_repeated_failures_and_throttles_alerts(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """动态码连续输错达到上限后锁定，正确的码也被拒绝，报警只发一封。"""
+
+    _use_ip(monkeypatch, WEB_IP)
+    _verify_email(vault_client)
+    setup = vault_client.post("/api/v1/vault/totp/setup")
+    assert setup.status_code == 200
+    secret = setup.json()["secret"]
+    current = totp_at(secret, int(datetime.now(UTC).timestamp()) // 30)
+    confirmed = vault_client.post(
+        "/api/v1/vault/totp/confirm",
+        json={"code": current},
+    )
+    assert confirmed.status_code == 200
+    limit = vault_client.app.state.settings.auth_verification_code_max_attempts
+    before = len(_alert_messages(vault_client))
+    statuses: list[tuple[int, str]] = []
+    for _ in range(limit):
+        rejected = vault_client.post(
+            "/api/v1/vault/access/verify",
+            json={"method": "totp", "code": "000000"},
+        )
+        statuses.append((rejected.status_code, rejected.json()["detail"]["code"]))
+    assert statuses[:-1] == [(403, "vault_code_invalid")] * (limit - 1)
+    assert statuses[-1] == (429, "vault_totp_locked")
+    correct = vault_client.post(
+        "/api/v1/vault/access/verify",
+        json={"method": "totp", "code": current},
+    )
+    assert correct.status_code == 429
+    assert correct.json()["detail"]["code"] == "vault_totp_locked"
+    assert "Retry-After" in correct.headers
+    alerts = _alert_messages(vault_client)
+    assert len(alerts) == before + 1
+    assert "身份验证器动态码不正确" in alerts[-1]
+    assert secret not in alerts[-1]
     assert "000000" not in alerts[-1]
+    for _ in range(3):
+        reported = vault_client.post("/api/v1/vault/unlock-failed")
+        assert reported.status_code == 200
+        assert reported.json()["sent"] is False
+    assert len(_alert_messages(vault_client)) == before + 1
+    minutes = vault_client.app.state.settings.auth_verification_code_expire_minutes
+    with vault_client.app.state.database.session_factory() as session:
+        setting = session.get(
+            VaultSecuritySetting,
+            vault_client.app.state.settings.local_user_id,
+        )
+        assert setting is not None
+        setting.totp_failure_window_started_at = datetime.now(UTC) - timedelta(
+            minutes=minutes + 1,
+        )
+        session.commit()
+    fresh = totp_at(secret, int(datetime.now(UTC).timestamp()) // 30)
+    granted = vault_client.post(
+        "/api/v1/vault/access/verify",
+        json={"method": "totp", "code": fresh},
+    )
+    assert granted.status_code == 200
+    assert granted.json()["granted"] is True
 
 
 def test_logout_invalidates_the_grant(

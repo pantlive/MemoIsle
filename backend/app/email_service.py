@@ -127,17 +127,24 @@ def send_vault_alert_email(
     client_type: str,
     user_agent: str,
     reason: str,
+    suppressed_count: int = 0,
 ) -> None:
     """主密码或二次验证失败时报警。正文不包含密码、验证码或密钥。"""
 
     client_label = "手机" if client_type == "mobile" else "网页"
+    suppressed = ""
+    if suppressed_count > 0:
+        suppressed = (
+            f"自上次提醒以来，另有 {suppressed_count} 次失败没有逐封通知。\n"
+        )
     body = (
         "MemoIsle 密码库有一次验证没有通过。\n\n"
         f"时间：{occurred_at}\n"
         f"IP：{client_ip or '无法识别'}\n"
         f"客户端：{client_label}\n"
         f"浏览器：{user_agent.strip() or '未提供'}\n"
-        f"原因：{reason}\n\n"
+        f"原因：{reason}\n"
+        f"{suppressed}\n"
         "如果不是你本人操作，请尽快修改登录密码。"
     )
     send_email(settings, recipient, "MemoIsle 密码库安全提醒", body)

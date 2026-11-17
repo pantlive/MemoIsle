@@ -86,6 +86,18 @@ class VaultCodeRateLimitedError(VaultAccessError):
         self.retry_after_seconds = max(1, retry_after_seconds)
 
 
+class VaultTotpLockedError(VaultAccessError):
+    """动态码失败次数用尽，锁定期间正确的码也不接受。"""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "vault_totp_locked",
+            "动态码尝试次数过多，请稍后再试",
+        )
+        self.retry_after_seconds = max(1, retry_after_seconds)
+
+
 @dataclass(frozen=True)
 class AuthContext:
     """当前请求对应的用户和登录会话。开发模式没有 Bearer 时会话为空。"""
@@ -110,7 +122,7 @@ def http_error(error: VaultAccessError) -> HTTPException:
     """把门禁错误转成带 code 的 4xx，前端靠 code 区分白名单和二次验证。"""
 
     headers = None
-    if isinstance(error, VaultCodeRateLimitedError):
+    if isinstance(error, (VaultCodeRateLimitedError, VaultTotpLockedError)):
         headers = {"Retry-After": str(error.retry_after_seconds)}
     return HTTPException(
         status_code=error.status_code,
@@ -687,6 +699,91 @@ def _consume_email_code(
     return True
 
 
+def _verification_window(settings: Settings) -> timedelta:
+    """动态码锁定和报警节流共用邮箱验证码的有效期。"""
+
+    return timedelta(minutes=settings.auth_verification_code_expire_minutes)
+
+
+def _retry_after_seconds(
+    started_at: datetime,
+    settings: Settings,
+    now: datetime,
+) -> int:
+    remaining = _verification_window(settings) - (now - _as_utc(started_at))
+    return max(1, int(remaining.total_seconds()))
+
+
+def _reset_expired_totp_failures(
+    setting: VaultSecuritySetting,
+    settings: Settings,
+    now: datetime,
+) -> None:
+    started_at = setting.totp_failure_window_started_at
+    if started_at is None:
+        return
+    if now - _as_utc(started_at) >= _verification_window(settings):
+        setting.totp_failure_count = 0
+        setting.totp_failure_window_started_at = None
+
+
+def _totp_is_locked(setting: VaultSecuritySetting, settings: Settings) -> bool:
+    return (
+        setting.totp_failure_window_started_at is not None
+        and setting.totp_failure_count >= settings.auth_verification_code_max_attempts
+    )
+
+
+def _notify_alert(
+    request: Request,
+    session: Session,
+    user: User,
+    reason: str,
+    *,
+    raise_on_delivery_error: bool,
+) -> bool:
+    """同一用户在验证码有效期内只发一封报警，其余次数留到下一封汇总。
+
+    发送失败也会占住这个窗口，避免穷举时反复打 SMTP。
+    调用前对同一会话做的失败计数会一起提交。
+    """
+
+    setting = _ensure_setting(session, user.id)
+    now = utc_now()
+    app_settings = _settings(request)
+    sent_at = setting.alert_sent_at
+    if (
+        sent_at is not None
+        and now - _as_utc(sent_at) < _verification_window(app_settings)
+    ):
+        setting.alert_suppressed_count += 1
+        session.commit()
+        return False
+    suppressed = setting.alert_suppressed_count
+    try:
+        send_vault_alert_email(
+            app_settings,
+            user.email or "",
+            occurred_at=now,
+            client_ip=client_ip(request),
+            client_type=client_type(request),
+            user_agent=user_agent_of(request)[:200],
+            reason=reason,
+            suppressed_count=suppressed,
+        )
+    except Exception:
+        logger.exception("密码库报警邮件发送失败")
+        setting.alert_sent_at = now
+        session.commit()
+        if raise_on_delivery_error:
+            raise
+        return False
+    setting.alert_sent_at = now
+    setting.alert_suppressed_count = 0
+    session.commit()
+    return True
+
+
 def _alert(
     request: Request,
     session: Session,
@@ -696,19 +793,15 @@ def _alert(
     """报警邮件只写时间、IP、客户端和浏览器。没有邮箱或发信失败时不挡住原错误。"""
 
     if user is None or not (user.email or "").strip():
+        session.commit()
         return
-    try:
-        send_vault_alert_email(
-            _settings(request),
-            user.email or "",
-            occurred_at=utc_now(),
-            client_ip=client_ip(request),
-            client_type=client_type(request),
-            user_agent=user_agent_of(request)[:200],
-            reason=reason,
-        )
-    except Exception:
-        logger.exception("密码库报警邮件发送失败")
+    _notify_alert(
+        request,
+        session,
+        user,
+        reason,
+        raise_on_delivery_error=False,
+    )
 
 
 def verify_access(
@@ -742,13 +835,36 @@ def verify_access(
                 "vault_totp_unavailable",
                 "还没有绑定身份验证器",
             )
+        setting = _ensure_setting(session, auth.user_id)
+        now = utc_now()
+        _reset_expired_totp_failures(setting, settings, now)
+        if _totp_is_locked(setting, settings):
+            started_at = setting.totp_failure_window_started_at
+            if started_at is None:
+                started_at = now
+            raise VaultTotpLockedError(
+                _retry_after_seconds(started_at, settings, now),
+            )
         if not _totp_matches(session, settings, auth.user_id, code):
+            if setting.totp_failure_window_started_at is None:
+                setting.totp_failure_window_started_at = now
+                setting.totp_failure_count = 1
+            else:
+                setting.totp_failure_count += 1
+            locked = _totp_is_locked(setting, settings)
             _alert(request, session, user, "身份验证器动态码不正确")
+            if locked:
+                started_at = setting.totp_failure_window_started_at or now
+                raise VaultTotpLockedError(
+                    _retry_after_seconds(started_at, settings, now),
+                )
             raise VaultAccessError(
                 status.HTTP_403_FORBIDDEN,
                 "vault_code_invalid",
                 "动态码不正确",
             )
+        setting.totp_failure_count = 0
+        setting.totp_failure_window_started_at = None
     else:
         if not _consume_email_code(session, settings, auth.user_id, code):
             _alert(request, session, user, "邮箱验证码不正确或已失效")
@@ -793,16 +909,13 @@ def record_unlock_failure(
     user = session.get(User, auth.user_id)
     if user is None or not (user.email or "").strip():
         return False
-    send_vault_alert_email(
-        _settings(request),
-        user.email or "",
-        occurred_at=utc_now(),
-        client_ip=client_ip(request),
-        client_type=client_type(request),
-        user_agent=user_agent_of(request)[:200],
-        reason="主密码不正确",
+    return _notify_alert(
+        request,
+        session,
+        user,
+        "主密码不正确",
+        raise_on_delivery_error=True,
     )
-    return True
 
 
 def _ensure_setting(session: Session, user_id: str) -> VaultSecuritySetting:
@@ -813,6 +926,10 @@ def _ensure_setting(session: Session, user_id: str) -> VaultSecuritySetting:
             totp_secret_cipher=None,
             totp_enabled=False,
             ip_allowlist=[],
+            totp_failure_count=0,
+            totp_failure_window_started_at=None,
+            alert_sent_at=None,
+            alert_suppressed_count=0,
         )
         session.add(setting)
         session.flush()

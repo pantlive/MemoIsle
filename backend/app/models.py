@@ -1308,6 +1308,26 @@ class VaultSecuritySetting(Base):
         nullable=False,
         default=list,
     )
+    # 动态码失败次数和窗口起点。窗口长度用验证码有效期，超过次数后整段拒绝。
+    totp_failure_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    totp_failure_window_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # 报警邮件节流。窗口内只发一封，其余次数留到下一封汇总。
+    alert_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    alert_suppressed_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
