@@ -19,6 +19,15 @@ class MemoIsleApplication : Application() {
         super.onCreate()
         api = MemoApiClient(BuildConfig.API_BASE_URL)
         tokenStore = AuthTokenStore(applicationContext)
+        // 先放进内存，再挂保存回调，避免启动时把刚读出的令牌又写一遍。
+        api.vaultClientToken = tokenStore.loadVaultClientToken()
+        api.onVaultClientTokenChanged = { token ->
+            if (token.isNullOrBlank()) {
+                tokenStore.clearVaultClientToken()
+            } else {
+                tokenStore.saveVaultClientToken(token)
+            }
+        }
         repository = MemoRepository(
             database = MemoDatabaseHelper(applicationContext),
             api = api,

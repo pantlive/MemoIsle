@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 from uuid import uuid4
 
@@ -11,26 +12,35 @@ from app.bookmark_service import (
     read_bookmark_batch,
     run_pending_bookmark_imports,
 )
+from app.config import Settings
+from app.database import Database
 from app.models import BookmarkImportBatch, BookmarkImportItem, Memo
 from app.schemas import BookmarkImportRequest
 from fastapi.testclient import TestClient
 
 
-def bookmark_payload() -> dict[str, list[dict[str, str]]]:
+def bookmark_payload(token: str | None = None) -> dict[str, list[dict[str, str]]]:
     """生成包含两条有效书签的结构化导入请求。"""
 
+    if token is None:
+        first_url = "https://pytorch.org/tutorials/#start"
+        second_url = "https://example.org/article?id=42"
+    else:
+        # 并发回归要重复导入，每次用不同网址，避免被上一轮当成已收藏。
+        first_url = f"https://example.org/pytorch/{token}#start"
+        second_url = f"https://example.org/article?id={token}"
     return {
         "items": [
             {
                 "client_item_id": "bookmark-1",
                 "title": "PyTorch 入门教程",
-                "url": "https://pytorch.org/tutorials/#start",
+                "url": first_url,
                 "folder_path": "书签栏/学习/深度学习",
             },
             {
                 "client_item_id": "bookmark-2",
                 "title": "稍后阅读的文章",
-                "url": "https://example.org/article?id=42",
+                "url": second_url,
                 "folder_path": "书签栏/稍后阅读",
             },
         ]
@@ -227,3 +237,89 @@ def test_bookmark_import_finishes_before_metadata_enrichment(
     assert len(imported_memos) == 2
     assert {memo.resource_metadata_status for memo in imported_memos} == {"pending"}
     assert {memo.resource_category_status for memo in imported_memos} == {"pending"}
+
+
+def _race_bookmark_import_against_recovery(
+    database: Database,
+    settings: Settings,
+    user_id: str,
+    batch_id: str,
+) -> None:
+    """让导入和启动恢复同时跑完一个批次，并核对返回的计数。"""
+
+    barrier = threading.Barrier(2)
+    outcomes: list[tuple[str, int]] = []
+    errors: list[BaseException] = []
+
+    def process() -> None:
+        barrier.wait()
+        try:
+            with database.session_factory() as session:
+                processed = process_bookmark_batch(
+                    session,
+                    user_id,
+                    batch_id,
+                    settings,
+                )
+                outcomes.append((processed.status, processed.imported_count))
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+    def recover() -> None:
+        barrier.wait()
+        try:
+            run_pending_bookmark_imports(settings.database_url, settings)
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+    workers = [
+        threading.Thread(target=process),
+        threading.Thread(target=recover),
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=30)
+        assert not worker.is_alive()
+
+    assert errors == []
+    with database.session_factory() as session:
+        stored = session.get(BookmarkImportBatch, batch_id)
+        assert stored is not None
+        items = [
+            item
+            for item in session.query(BookmarkImportItem).all()
+            if item.batch_id == batch_id
+        ]
+    assert stored.status == "completed"
+    assert stored.imported_count == 2
+    assert stored.failed_count == 0
+    assert {item.status for item in items} == {"imported"}
+    assert {item.error_code for item in items} == {None}
+    assert outcomes == [("completed", 2)]
+
+
+def test_concurrent_bookmark_import_and_recovery_keep_imported_count(
+    client: TestClient,
+) -> None:
+    """导入与启动恢复重叠时，两条书签都计入 imported_count。"""
+
+    database = client.app.state.database
+    settings = client.app.state.settings
+    user_id = settings.local_user_id
+    for _ in range(5):
+        with database.session_factory() as session:
+            batch = create_bookmark_batch(
+                session,
+                user_id,
+                BookmarkImportRequest.model_validate(
+                    bookmark_payload(uuid4().hex),
+                ),
+            )
+            batch_id = batch.id
+        _race_bookmark_import_against_recovery(
+            database,
+            settings,
+            user_id,
+            batch_id,
+        )

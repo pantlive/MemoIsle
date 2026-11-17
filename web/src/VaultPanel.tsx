@@ -2,16 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 
 import {
   ApiError,
+  confirmVaultTotp,
   createVault,
   createVaultItem,
   deleteVaultItem,
+  getVaultAccess,
+  getVaultSecurity,
   getVaultStatus,
   listVaultItems,
+  reportVaultUnlockFailure,
+  requestVaultAccessCode,
   resetVault,
+  setupVaultTotp,
   updateVaultItem,
   updateVaultKey,
+  updateVaultSecurity,
+  verifyVaultAccess,
   type VaultItemRecord,
+  type VaultSecuritySettings,
   type VaultStatus,
+  type VaultTotpSetup,
 } from "./api";
 import {
   MIN_MASTER_PASSWORD_LENGTH,
@@ -53,6 +63,7 @@ import {
   touchVaultSession,
 } from "./vaultSession";
 import Icon from "./Icon";
+import { vaultGate } from "./vaultAccess";
 
 const CLIPBOARD_CLEAR_MS = 30_000;
 const RESET_PHRASE = "清空密码库";
@@ -65,7 +76,7 @@ const kindIcons: Record<VaultKind, string> = {
   subscription: "AI",
 };
 
-type Phase = "loading" | "error" | "insecure" | "setup" | "locked" | "unlocked";
+type Phase = "loading" | "error" | "insecure" | "setup" | "step_up" | "ip_blocked" | "locked" | "unlocked";
 
 // WebCrypto 只在 HTTPS 或 localhost 下可用；局域网 http 地址打开时无法加密。
 const cryptoAvailable = (): boolean => (
@@ -224,6 +235,14 @@ export default function VaultPanel() {
   const [importPassword, setImportPassword] = useState("");
   const [importProgress, setImportProgress] = useState("");
   const [importError, setImportError] = useState("");
+  const [stepCode, setStepCode] = useState("");
+  const [stepMethod, setStepMethod] = useState<"email" | "totp">("email");
+  const [totpAvailable, setTotpAvailable] = useState(false);
+  const [grantHours, setGrantHours] = useState(4);
+  const [security, setSecurity] = useState<VaultSecuritySettings | null>(null);
+  const [allowlistText, setAllowlistText] = useState("");
+  const [totpDraft, setTotpDraft] = useState<VaultTotpSetup | null>(null);
+  const [totpCode, setTotpCode] = useState("");
 
   useEffect(() => {
     if (!importState && !changeOpen) return;
@@ -253,6 +272,28 @@ export default function VaultPanel() {
     setBrokenCount(results.length - decrypted.length);
   }, []);
 
+  const applyGate = useCallback((error: unknown): boolean => {
+    const code = error instanceof ApiError ? error.code : undefined;
+    const gate = vaultGate(code);
+    if (gate === "ip_blocked") {
+      setFormError(describe(error));
+      setPhase("ip_blocked");
+      return true;
+    }
+    if (gate === "step_up") {
+      setPhase("step_up");
+      return true;
+    }
+    return false;
+  }, []);
+
+  const loadSecurity = useCallback(async () => {
+    const next = await getVaultSecurity();
+    setSecurity(next);
+    setAllowlistText(next.user_allowlist.join("\n"));
+    setTotpAvailable(next.totp_enabled);
+  }, []);
+
   const refreshStatus = useCallback(async () => {
     if (!cryptoAvailable()) {
       setPhase("insecure");
@@ -262,21 +303,33 @@ export default function VaultPanel() {
     try {
       const next = await getVaultStatus();
       setStatus(next);
-      const key = getVaultSessionKey();
       if (!next.configured) {
+        // 还没建库时只检查 IP，不要求二次验证。
         lockVaultSession();
         setPhase("setup");
-      } else if (key) {
+        return;
+      }
+      const access = await getVaultAccess();
+      setTotpAvailable(access.totp_enabled);
+      setGrantHours(access.hours);
+      if (!access.granted) {
+        setPhase("step_up");
+        return;
+      }
+      const key = getVaultSessionKey();
+      if (key) {
         await loadEntries(key);
         setPhase("unlocked");
+        await loadSecurity();
       } else {
         setPhase("locked");
       }
     } catch (error) {
+      if (applyGate(error)) return;
       setFormError(describe(error));
       setPhase("error");
     }
-  }, [loadEntries]);
+  }, [applyGate, loadEntries, loadSecurity]);
 
   useEffect(() => {
     void refreshStatus();
@@ -344,10 +397,19 @@ export default function VaultPanel() {
       setStatus(created);
       startVaultSession(key);
       setEntries([]);
+      const access = await getVaultAccess();
+      setTotpAvailable(access.totp_enabled);
+      setGrantHours(access.hours);
+      if (!access.granted) {
+        setPhase("step_up");
+        setNotice("密码库已创建。打开条目前需要验证邮箱验证码或动态码。");
+        return;
+      }
       setPhase("unlocked");
+      await loadSecurity();
       setNotice("密码库已创建。主密码不会上传，请务必记住它。");
     } catch (error) {
-      setFormError(describe(error));
+      if (!applyGate(error)) setFormError(describe(error));
     } finally {
       setBusy(false);
     }
@@ -371,9 +433,91 @@ export default function VaultPanel() {
       startVaultSession(key);
       await loadEntries(key);
       setPhase("unlocked");
+      await loadSecurity();
       setNotice(`已解锁，${VAULT_AUTO_LOCK_MS / 60_000} 分钟无操作会自动锁定。`);
     } catch (error) {
-      setFormError(describe(error));
+      if (error instanceof WrongMasterPasswordError) {
+        void reportVaultUnlockFailure().catch(() => undefined);
+      }
+      if (!applyGate(error)) setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRequestCode = async () => {
+    setBusy(true);
+    setFormError("");
+    try {
+      setNotice(await requestVaultAccessCode());
+    } catch (error) {
+      if (!applyGate(error)) setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleVerifyAccess = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!stepCode.trim()) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      await verifyVaultAccess(stepMethod, stepCode.trim());
+      setStepCode("");
+      setNotice("验证通过。");
+      await refreshStatus();
+    } catch (error) {
+      if (!applyGate(error)) setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveAllowlist = async () => {
+    setBusy(true);
+    setFormError("");
+    try {
+      const entries = allowlistText.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+      const saved = await updateVaultSecurity(entries);
+      setSecurity(saved);
+      setAllowlistText(saved.user_allowlist.join("\n"));
+      setNotice("已保存追加的 IP 白名单。环境变量里的地址不能在这里删除。");
+    } catch (error) {
+      if (!applyGate(error)) setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSetupTotp = async () => {
+    setBusy(true);
+    setFormError("");
+    try {
+      setTotpDraft(await setupVaultTotp());
+      setTotpCode("");
+      setNotice("已生成新的身份验证器密钥。确认动态码之前，原来的动态码不能使用。");
+    } catch (error) {
+      if (!applyGate(error)) setFormError(describe(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmTotp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (totpCode.trim().length < 6) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      await confirmVaultTotp(totpCode.trim());
+      setTotpDraft(null);
+      setTotpCode("");
+      setTotpAvailable(true);
+      if (security) setSecurity({ ...security, totp_enabled: true });
+      setNotice("身份验证器已绑定。之后可以用动态码代替邮箱验证码。");
+    } catch (error) {
+      if (!applyGate(error)) setFormError(describe(error));
     } finally {
       setBusy(false);
     }
@@ -412,6 +556,10 @@ export default function VaultPanel() {
       setChangeOpen(false);
       setNotice("主密码已更改，其他设备下次解锁时使用新主密码。");
     } catch (error) {
+      if (error instanceof WrongMasterPasswordError) {
+        void reportVaultUnlockFailure().catch(() => undefined);
+      }
+      if (applyGate(error)) return;
       setFormError(
         error instanceof ApiError && error.status === 409
           ? "主密码刚在其他地方改过，请刷新后重试。"
@@ -663,6 +811,66 @@ export default function VaultPanel() {
         </div>
       )}
 
+      {phase === "ip_blocked" && (
+        <div className="state-panel error-state">
+          <p>{formError || "当前网络不在密码库白名单中。"}</p>
+          <p>网页端只能从允许的 IP 打开密码库。环境变量里的白名单需要管理员配置，被拦住的地址不能在这里把自己加进去。</p>
+          <button type="button" onClick={() => void refreshStatus()}>重试</button>
+        </div>
+      )}
+
+      {phase === "step_up" && (
+        <form className="vault-card vault-gate" onSubmit={(event) => void handleVerifyAccess(event)}>
+          <h2>验证后才能打开密码库</h2>
+          <p>
+            这个浏览器需要每 {grantHours} 小时验证一次。验证码发到账号邮箱，也可以使用已绑定的身份验证器。
+            换 IP 或换浏览器需要重新验证。
+          </p>
+          {totpAvailable && (
+            <div className="vault-field-tools" role="group" aria-label="验证方式">
+              <button
+                type="button"
+                className={stepMethod === "email" ? "active" : ""}
+                aria-pressed={stepMethod === "email"}
+                onClick={() => setStepMethod("email")}
+              >
+                邮箱验证码
+              </button>
+              <button
+                type="button"
+                className={stepMethod === "totp" ? "active" : ""}
+                aria-pressed={stepMethod === "totp"}
+                onClick={() => setStepMethod("totp")}
+              >
+                身份验证器
+              </button>
+            </div>
+          )}
+          {stepMethod === "email" && (
+            <button type="button" disabled={busy} onClick={() => void handleRequestCode()}>
+              {busy ? "发送中…" : "发送验证码"}
+            </button>
+          )}
+          <label className="vault-field">
+            <span className="vault-field-label">
+              <span>{stepMethod === "totp" ? "动态码" : "验证码"}</span>
+            </span>
+            <input
+              value={stepCode}
+              onChange={(event) => setStepCode(event.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              required
+            />
+          </label>
+          {formError && <p className="vault-error" role="alert">{formError}</p>}
+          <button type="submit" className="primary" disabled={busy || stepCode.trim().length < 6}>
+            {busy ? "验证中…" : "验证"}
+          </button>
+        </form>
+      )}
+
       {phase === "setup" && (
         <form className="vault-card vault-gate" onSubmit={(event) => void handleSetup(event)}>
           <h2>设置主密码</h2>
@@ -767,6 +975,61 @@ export default function VaultPanel() {
               ))}
             </div>
           </div>
+          <details className="vault-card vault-security">
+            <summary>安全设置</summary>
+            <p>
+              网页端每 {security?.web_grant_hours ?? grantHours} 小时重新验证，并且只能从白名单 IP 打开。
+              手机端每 {security?.mobile_grant_hours ?? 24} 小时验证一次，不限制 IP。
+            </p>
+            <h3>身份验证器</h3>
+            <p>{security?.totp_enabled ? "已绑定。可以用动态码代替邮箱验证码。" : "还没有绑定。绑定后可以用动态码打开密码库。"}</p>
+            <button type="button" disabled={busy} onClick={() => void handleSetupTotp()}>
+              {security?.totp_enabled ? "重新生成密钥" : "生成密钥"}
+            </button>
+            {totpDraft && (
+              <form onSubmit={(event) => void handleConfirmTotp(event)}>
+                <p>把下面的密钥或链接加到身份验证器，再输入当前动态码确认。确认前不会启用。</p>
+                <p className="vault-secret-text">{totpDraft.secret}</p>
+                <p className="vault-secret-text">{totpDraft.otpauth_uri}</p>
+                <label className="vault-field">
+                  <span className="vault-field-label"><span>动态码</span></span>
+                  <input
+                    value={totpCode}
+                    onChange={(event) => setTotpCode(event.target.value)}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    required
+                  />
+                </label>
+                <button type="submit" className="primary" disabled={busy || totpCode.trim().length < 6}>
+                  确认绑定
+                </button>
+              </form>
+            )}
+            <h3>网页 IP 白名单</h3>
+            <p>环境变量里的地址只读，设置页只能再追加。名单全部清空后，网页端会拒绝访问，直到管理员在环境变量里重新配置。</p>
+            <ul className="vault-readonly-list">
+              {(security?.env_allowlist.length ?? 0) === 0
+                ? <li>环境变量里还没有地址</li>
+                : (security?.env_allowlist ?? []).map((entry) => (
+                  <li key={entry}>{entry}（环境变量，不可删除）</li>
+                ))}
+            </ul>
+            <label className="vault-field">
+              <span className="vault-field-label"><span>追加的地址，每行一条 CIDR</span></span>
+              <textarea
+                value={allowlistText}
+                onChange={(event) => setAllowlistText(event.target.value)}
+                rows={4}
+                spellCheck={false}
+                placeholder="203.0.113.10/32"
+              />
+            </label>
+            <button type="button" disabled={busy} onClick={() => void handleSaveAllowlist()}>
+              保存追加的白名单
+            </button>
+            {formError && phase === "unlocked" && <p className="vault-error" role="alert">{formError}</p>}
+          </details>
           <div className="category-filter vault-kind-filter" role="group" aria-label="按类型筛选">
             {(["all", "login", "secret", "server", "recovery", "subscription", "reminders"] as KindFilter[])
               // 「需处理」没有提醒时不显示，正在看这一栏时保留，避免按钮突然消失。

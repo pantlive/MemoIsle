@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 from uuid import UUID, uuid4, uuid5
 
@@ -37,6 +38,16 @@ class BookmarkBatchStateError(ValueError):
 
 
 canonicalize_bookmark_url = canonicalize_resource_url
+
+# 启动恢复线程和本次导入会同时处理一个批次。条纹锁让它们排队，
+# 避免后写入的旧计数把 imported_count 盖成更小的值。
+_BATCH_LOCKS = tuple(threading.Lock() for _ in range(64))
+
+
+def _bookmark_batch_lock(batch_id: str) -> threading.Lock:
+    """返回这个导入批次对应的进程内互斥锁。"""
+
+    return _BATCH_LOCKS[hash(batch_id) % len(_BATCH_LOCKS)]
 
 
 def _existing_resource_urls(
@@ -230,6 +241,7 @@ def _load_batch_items(session: Session, batch_id: str) -> list[BookmarkImportIte
                 BookmarkImportItem.created_at.asc(),
                 BookmarkImportItem.id.asc(),
             )
+            .execution_options(populate_existing=True)
         ).all()
     )
 
@@ -278,6 +290,18 @@ def process_bookmark_batch(
     settings: Settings | None = None,
 ) -> BookmarkImportBatch:
     """导入批次中的待处理或失败书签，并为其启动自动分类。"""
+
+    with _bookmark_batch_lock(batch_id):
+        return _import_bookmark_batch(session, user_id, batch_id, settings)
+
+
+def _import_bookmark_batch(
+    session: Session,
+    user_id: str,
+    batch_id: str,
+    settings: Settings | None = None,
+) -> BookmarkImportBatch:
+    """在批次锁内导入待处理或失败书签。"""
 
     batch = _load_batch(session, user_id, batch_id)
     if batch.undone_at is not None:
@@ -481,28 +505,33 @@ def run_pending_bookmark_imports(
             batch_keys = [(batch.user_id, batch.id) for batch in batches]
 
             for user_id, batch_id in batch_keys:
-                # 上一进程退出时遗留的 processing 项需要恢复为可幂等重试状态。
-                for item in _load_batch_items(session, batch_id):
-                    if item.status == "processing":
-                        item.status = "pending"
-                        item.error_code = None
-                        item.updated_at = datetime.now(UTC)
-                session.commit()
-                try:
-                    process_bookmark_batch(
-                        session,
-                        user_id,
-                        batch_id,
-                        settings,
-                    )
-                except (BookmarkBatchNotFoundError, BookmarkBatchStateError):
-                    session.rollback()
-                    continue
-                except Exception:  # noqa: BLE001
-                    # 单个异常批次不能阻止其他用户的待处理批次恢复。
-                    session.rollback()
-                    continue
-                processed_count += 1
+                # 与正在进行的导入共用批次锁，避免把对方刚写入的结果改回 pending。
+                with _bookmark_batch_lock(batch_id):
+                    for item in _load_batch_items(session, batch_id):
+                        # 上一进程退出时遗留的 processing 项需要恢复为可幂等重试状态。
+                        if item.status == "processing":
+                            item.status = "pending"
+                            item.error_code = None
+                            item.updated_at = datetime.now(UTC)
+                    session.commit()
+                    try:
+                        _import_bookmark_batch(
+                            session,
+                            user_id,
+                            batch_id,
+                            settings,
+                        )
+                    except (
+                        BookmarkBatchNotFoundError,
+                        BookmarkBatchStateError,
+                    ):
+                        session.rollback()
+                        continue
+                    except Exception:  # noqa: BLE001
+                        # 单个异常批次不能阻止其他用户的待处理批次恢复。
+                        session.rollback()
+                        continue
+                    processed_count += 1
     finally:
         database.dispose()
     return processed_count

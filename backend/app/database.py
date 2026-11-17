@@ -601,6 +601,35 @@ class Database:
                 )
             )
             table_names = set(inspect(self.engine).get_table_names())
+            if "vault_security_setting" in table_names:
+                security_columns = {
+                    column["name"]
+                    for column in inspect(self.engine).get_columns(
+                        "vault_security_setting",
+                    )
+                }
+                security_migrations = {
+                    "totp_failure_count": (
+                        "ALTER TABLE vault_security_setting "
+                        "ADD COLUMN totp_failure_count INTEGER NOT NULL DEFAULT 0"
+                    ),
+                    "totp_failure_window_started_at": (
+                        "ALTER TABLE vault_security_setting "
+                        "ADD COLUMN totp_failure_window_started_at DATETIME"
+                    ),
+                    "alert_sent_at": (
+                        "ALTER TABLE vault_security_setting "
+                        "ADD COLUMN alert_sent_at DATETIME"
+                    ),
+                    "alert_suppressed_count": (
+                        "ALTER TABLE vault_security_setting "
+                        "ADD COLUMN alert_suppressed_count INTEGER "
+                        "NOT NULL DEFAULT 0"
+                    ),
+                }
+                for name, statement in security_migrations.items():
+                    if name not in security_columns:
+                        connection.execute(text(statement))
             if "resource_category_template" in table_names:
                 template_columns = {
                     column["name"]

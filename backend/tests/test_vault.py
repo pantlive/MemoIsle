@@ -5,10 +5,13 @@ from __future__ import annotations
 import base64
 import json
 import os
+import secrets
 from dataclasses import replace
 from uuid import uuid4
 
+import pytest
 from app.auth_service import create_dev_session
+from app.vault_security_service import VAULT_CLIENT_COOKIE, issue_grant
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -17,6 +20,72 @@ from fastapi.testclient import TestClient
 ITERATIONS = 600_000
 # 与浏览器端 vault.ts 保持一致。
 KEY_WRAP_AAD = b"memoisle-vault-key:v1"
+
+
+def install_web_grant(
+    client: TestClient,
+    user_id: str,
+    session_id: str | None,
+) -> None:
+    """给测试客户端放一份已验证授权。主机名不是 IP，调用方要先固定地址。"""
+
+    settings = client.app.state.settings
+    token = secrets.token_urlsafe(32)
+    with client.app.state.database.session_factory() as session:
+        issue_grant(
+            session,
+            settings,
+            user_id=user_id,
+            auth_session_id=session_id,
+            kind="web",
+            ip="203.0.113.10",
+            user_agent="testclient",
+            token=token,
+            hours=settings.vault_web_grant_hours,
+        )
+        session.commit()
+    # TestClient 的主机名没有点，带 domain 的 Cookie 不会被送回去。
+    _set_vault_cookie(client, token)
+
+
+def _set_vault_cookie(client: TestClient, token: str) -> None:
+    """去掉域名后再写入，保证后续请求会带上密码库客户端令牌。"""
+
+    for cookie in list(client.cookies.jar):
+        if cookie.name == VAULT_CLIENT_COOKIE:
+            client.cookies.jar.clear(cookie.domain, cookie.path, cookie.name)
+    client.cookies.set(VAULT_CLIENT_COOKIE, token)
+
+
+def _keep_vault_cookie(client: TestClient) -> None:
+    """验证接口写入的 Cookie 带 testserver 域名，这里改成主机名无关的会话 Cookie。"""
+
+    def _rebind(response: object) -> None:
+        del response
+        token = None
+        for cookie in list(client.cookies.jar):
+            if cookie.name == VAULT_CLIENT_COOKIE and cookie.value:
+                token = cookie.value
+        if token:
+            _set_vault_cookie(client, token)
+
+    client.event_hooks["response"].append(_rebind)
+
+
+@pytest.fixture(autouse=True)
+def vault_web_access(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """原有用例走网页端：白名单放行文档地址，并先拿到授权。"""
+
+    monkeypatch.setattr(
+        "app.vault_security_service.client_ip",
+        lambda _request: "203.0.113.10",
+    )
+    client.app.state.settings = replace(
+        client.app.state.settings,
+        vault_web_ip_allowlist="203.0.113.10/32",
+    )
+    _keep_vault_cookie(client)
+    install_web_grant(client, client.app.state.settings.local_user_id, None)
 
 
 def b64(data: bytes) -> str:
@@ -262,10 +331,14 @@ def test_vault_is_account_scoped_and_kept_out_of_memos(client: TestClient) -> No
     assert item_id not in exported.text and payload["wrapped_key"] not in exported.text
 
     settings = client.app.state.settings
+    other_id = str(uuid4())
     with client.app.state.database.session_factory() as session:
-        token = create_dev_session(
-            session, replace(settings, local_user_id=str(uuid4()))
-        ).token
+        created = create_dev_session(
+            session, replace(settings, local_user_id=other_id)
+        )
+        token = created.token
+        other_session_id = created.session.id
+    install_web_grant(client, other_id, other_session_id)
     client.app.state.settings = replace(settings, auth_dev_mode=False)
     other = {"Authorization": f"Bearer {token}"}
     assert client.get("/api/v1/vault", headers=other).json()["configured"] is False

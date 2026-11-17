@@ -1,11 +1,13 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.network.ApiException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -37,6 +39,20 @@ class VaultTest {
         assertEquals("备注", data.notes)
         assertEquals(90, data.rotateDays)
         assertEquals("2026-03-30T08:00:00.000Z", data.changedAt)
+    }
+
+    @Test
+    fun vaultGateMapsAccessErrors() {
+        val denied = ApiException(
+            403,
+            """{"detail":{"message":"需要验证","code":"vault_step_up_required"}}""",
+        )
+        assertEquals("vault_step_up_required", denied.code)
+        assertEquals("需要验证", denied.detailMessage)
+        assertEquals("step_up", vaultGate(denied.code))
+        assertEquals("ip_blocked", vaultGate("vault_ip_blocked"))
+        assertEquals("ip_blocked", vaultGate("vault_ip_allowlist_empty"))
+        assertNull(vaultGate("vault_code_invalid"))
     }
 
     @Test

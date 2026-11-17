@@ -1259,6 +1259,117 @@ class VaultKey(Base):
     )
 
 
+class VaultAccessGrant(Base):
+    """密码库二次验证通过后的授权。
+
+    只保存 IP、浏览器指纹和客户端令牌的 HMAC，不保存明文地址或令牌。
+    授权绑在登录会话上，退出登录后立即失效。读数据不会延长 expires_at。
+    """
+
+    __tablename__ = "vault_access_grant"
+    __table_args__ = (
+        Index("ix_vault_access_grant_user_token", "user_id", "token_hash"),
+        Index("ix_vault_access_grant_expires", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # 开发模式没有 Bearer 会话时为空；正式登录必须等于当前 auth_session.id。
+    auth_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    client_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    ip_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    fingerprint_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
+class VaultSecuritySetting(Base):
+    """密码库安全设置。身份验证器密钥以密文保存，白名单只存用户追加的 CIDR。"""
+
+    __tablename__ = "vault_security_setting"
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    totp_secret_cipher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    ip_allowlist: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    # 动态码失败次数和窗口起点。窗口长度用验证码有效期，超过次数后整段拒绝。
+    totp_failure_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    totp_failure_window_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # 报警邮件节流。窗口内只发一封，其余次数留到下一封汇总。
+    alert_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    alert_suppressed_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class VaultChallenge(Base):
+    """密码库邮箱验证码。只保存哈希，用过或超过尝试次数后不能再用。"""
+
+    __tablename__ = "vault_challenge"
+    __table_args__ = (
+        Index("ix_vault_challenge_user_sent", "user_id", "sent_at"),
+        Index(
+            "uq_vault_challenge_user_unconsumed",
+            "user_id",
+            unique=True,
+            sqlite_where=text("consumed_at IS NULL"),
+            postgresql_where=text("consumed_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class VaultItem(Base):
     """密码库条目；标题、类型和内容都在浏览器里加密后才上传。"""
 

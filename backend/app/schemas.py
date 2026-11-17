@@ -2436,6 +2436,84 @@ class VaultItemRead(BaseModel):
         return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+VaultClientType = Literal["web", "mobile"]
+VaultAccessMethod = Literal["email", "totp"]
+
+
+class VaultAccessStatus(BaseModel):
+    """当前客户端有没有打开密码库的授权。状态接口本身不发放授权。"""
+
+    granted: bool
+    expires_at: datetime | None = None
+    totp_enabled: bool
+    hours: int
+    client_type: VaultClientType
+    # 只在手机端验证成功时返回。网页令牌放在 HttpOnly Cookie 里。
+    client_token: str | None = None
+
+    @field_serializer("expires_at")
+    def serialize_expires_at(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class VaultAccessVerify(BaseModel):
+    """用邮箱验证码或身份验证器动态码换授权。"""
+
+    method: VaultAccessMethod = "email"
+    code: str = Field(min_length=6, max_length=12)
+
+
+class VaultSecurityRead(BaseModel):
+    """安全设置。环境变量条目只读，用户条目可以改。"""
+
+    totp_enabled: bool
+    env_allowlist: list[str]
+    user_allowlist: list[str]
+    web_grant_hours: int
+    mobile_grant_hours: int
+
+
+class VaultSecurityUpdate(BaseModel):
+    """只提交用户追加的 CIDR。服务端会丢掉和环境变量重复的条目。"""
+
+    user_allowlist: list[str] = Field(default_factory=list, max_length=32)
+
+    @field_validator("user_allowlist")
+    @classmethod
+    def validate_entries(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for item in value:
+            text = item.strip()
+            if not text:
+                continue
+            if len(text) > 64:
+                raise ValueError("IP 白名单条目过长")
+            cleaned.append(text)
+        return cleaned
+
+
+class VaultTotpSetup(BaseModel):
+    """绑定过程中一次性展示的密钥。确认前不能用来换授权。"""
+
+    secret: str
+    otpauth_uri: str
+
+
+class VaultTotpConfirm(BaseModel):
+    """用身份验证器上的 6 位动态码确认绑定。"""
+
+    code: str = Field(min_length=6, max_length=8)
+
+
+class VaultUnlockFailureReport(BaseModel):
+    """上报主密码错误后是否发出了报警邮件。"""
+
+    sent: bool
+
+
 LedgerKind = Literal["income", "expense"]
 # 一句话记账用的识别方式：llm 为本地大模型，rule 为固定规则。
 LedgerParsedBy = Literal["llm", "rule"]
