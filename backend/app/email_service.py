@@ -82,6 +82,67 @@ def _build_email_message(
     return message
 
 
+def send_vault_code_email(
+    settings: Settings,
+    recipient: str,
+    code: str,
+    *,
+    client_type: str,
+    user_agent: str,
+    hours: int,
+) -> None:
+    """发送打开密码库的验证码，写明客户端和授权时长。"""
+
+    client_label = "手机" if client_type == "mobile" else "网页"
+    browser = user_agent.strip() or "未提供"
+    if client_type == "mobile":
+        scope = (
+            f"验证成功后，这台手机在 {hours} 小时内可以打开密码库，"
+            "更换网络不需要重新验证。"
+        )
+    else:
+        scope = (
+            f"验证成功后，这个 IP 上的这个浏览器在 {hours} 小时内可以打开密码库。"
+            "换 IP 或换浏览器需要重新验证。"
+        )
+    body = (
+        "你正在申请打开 MemoIsle 密码库。\n\n"
+        f"验证码：{code}\n\n"
+        f"客户端：{client_label}\n"
+        f"浏览器：{browser}\n"
+        f"{scope}\n"
+        f"验证码 {settings.auth_verification_code_expire_minutes} 分钟内有效，"
+        "只能使用一次。\n"
+        "如果不是你本人操作，请尽快修改登录密码。"
+    )
+    send_email(settings, recipient, "MemoIsle 密码库验证码", body)
+
+
+def send_vault_alert_email(
+    settings: Settings,
+    recipient: str,
+    *,
+    occurred_at: object,
+    client_ip: str | None,
+    client_type: str,
+    user_agent: str,
+    reason: str,
+) -> None:
+    """主密码或二次验证失败时报警。正文不包含密码、验证码或密钥。"""
+
+    client_label = "手机" if client_type == "mobile" else "网页"
+    body = (
+        "MemoIsle 密码库有一次验证没有通过。\n\n"
+        f"时间：{occurred_at}\n"
+        f"IP：{client_ip or '无法识别'}\n"
+        f"客户端：{client_label}\n"
+        f"浏览器：{user_agent.strip() or '未提供'}\n"
+        f"原因：{reason}\n\n"
+        "如果不是你本人操作，请尽快修改登录密码。"
+    )
+    send_email(settings, recipient, "MemoIsle 密码库安全提醒", body)
+
+
 def send_verification_code_email(
     settings: Settings,
     recipient: str,

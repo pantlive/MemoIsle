@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import secrets
@@ -89,6 +90,36 @@ def load_or_create_secret_file(path: Path) -> str:
     if not secret:
         raise ValueError(f"登录密钥文件为空：{path}")
     return secret
+
+
+def parse_cidr_list(raw: str, name: str) -> tuple[str, ...]:
+    """拆开逗号分隔的 CIDR，并拒绝无法解析的条目。"""
+
+    networks: list[str] = []
+    for part in raw.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        try:
+            network = ipaddress.ip_network(text, strict=False)
+        except ValueError as error:
+            raise ValueError(f"{name} 包含无效地址：{text}") from error
+        rendered = str(network)
+        if rendered not in networks:
+            networks.append(rendered)
+    return tuple(networks)
+
+
+def bounded_hours(raw: str, name: str) -> int:
+    """读取授权小时数，限制在 1 到 14 天。"""
+
+    try:
+        hours = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} 必须是整数") from error
+    if hours < 1 or hours > 24 * 14:
+        raise ValueError(f"{name} 必须在 1 到 {24 * 14} 之间")
+    return hours
 
 
 def environment_flag(name: str, default: bool) -> bool:
@@ -208,6 +239,14 @@ class Settings:
     word_bilingual_dictionary_url: str = DEFAULT_WORD_BILINGUAL_DICTIONARY_URL
     word_bilingual_suggest_url: str = DEFAULT_WORD_BILINGUAL_SUGGEST_URL
     android_apk_path: Path = DEFAULT_ANDROID_APK_PATH
+    # 网页密码库授权固定 4 小时，手机 24 小时；读数据不会延长。
+    vault_web_grant_hours: int = 4
+    vault_mobile_grant_hours: int = 24
+    # 网页 IP 白名单兜底，逗号分隔的 CIDR。设置页只能再追加，删不掉这里的条目。
+    # 合并后仍为空时，网页端拒绝打开密码库。
+    vault_web_ip_allowlist: str = ""
+    # 只有直连地址落在这里时才采信 X-Forwarded-For，避免客户端自己伪造来源。
+    trusted_proxy_ips: str = ""
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -575,5 +614,25 @@ class Settings:
             word_bilingual_suggest_url=os.environ.get(
                 "MEMOISLE_WORD_BILINGUAL_SUGGEST_URL",
                 DEFAULT_WORD_BILINGUAL_SUGGEST_URL,
+            ),
+            vault_web_grant_hours=bounded_hours(
+                os.environ.get("MEMOISLE_VAULT_WEB_GRANT_HOURS", "4"),
+                "MEMOISLE_VAULT_WEB_GRANT_HOURS",
+            ),
+            vault_mobile_grant_hours=bounded_hours(
+                os.environ.get("MEMOISLE_VAULT_MOBILE_GRANT_HOURS", "24"),
+                "MEMOISLE_VAULT_MOBILE_GRANT_HOURS",
+            ),
+            vault_web_ip_allowlist=",".join(
+                parse_cidr_list(
+                    os.environ.get("MEMOISLE_VAULT_WEB_IP_ALLOWLIST", ""),
+                    "MEMOISLE_VAULT_WEB_IP_ALLOWLIST",
+                ),
+            ),
+            trusted_proxy_ips=",".join(
+                parse_cidr_list(
+                    os.environ.get("MEMOISLE_TRUSTED_PROXY_IPS", ""),
+                    "MEMOISLE_TRUSTED_PROXY_IPS",
+                ),
             ),
         )

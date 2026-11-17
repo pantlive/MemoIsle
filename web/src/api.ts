@@ -224,8 +224,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const accessToken = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    // 密码库授权 Cookie 在跨域部署时也要带上。同源请求本来就会带 Cookie。
+    credentials: init?.credentials ?? "include",
     headers: {
       "Content-Type": "application/json",
+      "X-MemoIsle-Client": "web",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
@@ -378,6 +381,7 @@ export async function downloadUserData(
   const response = await fetch(`${API_BASE_URL}/exports/${format}`, {
     headers: {
       Accept: "application/json",
+      "X-MemoIsle-Client": "web",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
   });
@@ -403,6 +407,7 @@ export async function importLibraryData(file: File): Promise<WordImportResponse>
     method: "POST",
     headers: {
       "Content-Type": format === "csv" ? "text/csv" : "application/json",
+      "X-MemoIsle-Client": "web",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: file,
@@ -430,6 +435,7 @@ export async function importWords(file: File): Promise<WordImportResponse> {
     method: "POST",
     headers: {
       "Content-Type": format === "csv" ? "text/csv" : "application/json",
+      "X-MemoIsle-Client": "web",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: file,
@@ -781,6 +787,74 @@ export async function deleteVaultItem(id: string, expectedVersion: number): Prom
   });
 }
 
+export interface VaultAccessStatus {
+  granted: boolean;
+  expires_at: string | null;
+  totp_enabled: boolean;
+  hours: number;
+  client_type: "web" | "mobile";
+  client_token?: string | null;
+}
+
+export interface VaultSecuritySettings {
+  totp_enabled: boolean;
+  env_allowlist: string[];
+  user_allowlist: string[];
+  web_grant_hours: number;
+  mobile_grant_hours: number;
+}
+
+export interface VaultTotpSetup {
+  secret: string;
+  otpauth_uri: string;
+}
+
+export async function getVaultAccess(): Promise<VaultAccessStatus> {
+  return request<VaultAccessStatus>("/vault/access");
+}
+
+export async function requestVaultAccessCode(): Promise<string> {
+  const response = await request<{ detail: string }>("/vault/access/code", { method: "POST" });
+  return response.detail;
+}
+
+export async function verifyVaultAccess(
+  method: "email" | "totp",
+  code: string,
+): Promise<VaultAccessStatus> {
+  return request<VaultAccessStatus>("/vault/access/verify", {
+    method: "POST",
+    body: JSON.stringify({ method, code }),
+  });
+}
+
+export async function reportVaultUnlockFailure(): Promise<boolean> {
+  const response = await request<{ sent: boolean }>("/vault/unlock-failed", { method: "POST" });
+  return response.sent;
+}
+
+export async function getVaultSecurity(): Promise<VaultSecuritySettings> {
+  return request<VaultSecuritySettings>("/vault/security");
+}
+
+export async function updateVaultSecurity(userAllowlist: string[]): Promise<VaultSecuritySettings> {
+  return request<VaultSecuritySettings>("/vault/security", {
+    method: "PUT",
+    body: JSON.stringify({ user_allowlist: userAllowlist }),
+  });
+}
+
+export async function setupVaultTotp(): Promise<VaultTotpSetup> {
+  return request<VaultTotpSetup>("/vault/totp/setup", { method: "POST" });
+}
+
+export async function confirmVaultTotp(code: string): Promise<void> {
+  await request<{ totp_enabled: boolean }>("/vault/totp/confirm", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
 // 记账接口：明文保存，按月份和分类由服务端汇总。
 export async function listLedgerEntries(filters: {
   month?: string;
@@ -829,6 +903,7 @@ export async function recognizeLedgerImage(file: Blob, today: string): Promise<L
       method: "POST",
       headers: {
         "Content-Type": file.type || "application/octet-stream",
+        "X-MemoIsle-Client": "web",
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: file,
@@ -1151,6 +1226,7 @@ export async function synthesizeSpeech(
     headers: {
       "Content-Type": "application/json",
       Accept: "audio/wav",
+      "X-MemoIsle-Client": "web",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: JSON.stringify({ text, voice }),
@@ -1347,6 +1423,7 @@ export async function uploadMemoAudio(
       headers: {
         "Content-Type": audio.type || "audio/webm",
         "X-Audio-Duration-Ms": String(durationMs),
+        "X-MemoIsle-Client": "web",
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: audio,
@@ -1369,7 +1446,10 @@ export async function uploadMemoAudio(
 export async function loadMemoAudioUrl(memoId: string): Promise<string> {
   const accessToken = getAccessToken();
   const response = await fetch(`${API_BASE_URL}/memos/${memoId}/audio`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    headers: {
+      "X-MemoIsle-Client": "web",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
   });
   if (!response.ok) {
     clearAccessToken();
@@ -1415,6 +1495,7 @@ export async function uploadMemoImage(
       method: "POST",
       headers: {
         "Content-Type": file.type || "application/octet-stream",
+        "X-MemoIsle-Client": "web",
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: file,
@@ -1450,7 +1531,10 @@ export async function loadMemoImageUrl(
   const accessToken = getAccessToken();
   const suffix = variant === "original" ? "" : "/thumbnail";
   const response = await fetch(`${API_BASE_URL}/memos/${memoId}/image${suffix}`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    headers: {
+      "X-MemoIsle-Client": "web",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
   });
   if (!response.ok) {
     if (response.status === 401) {

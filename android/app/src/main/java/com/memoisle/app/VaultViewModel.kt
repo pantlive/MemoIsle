@@ -14,6 +14,7 @@ import com.memoisle.app.data.VaultItemData
 import com.memoisle.app.data.VaultKeyMaterial
 import com.memoisle.app.data.WrongMasterPasswordException
 import com.memoisle.app.data.stampSecretChange
+import com.memoisle.app.data.vaultGate
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
 import com.memoisle.app.network.VaultItemRecord
@@ -25,7 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class VaultPhase { LOADING, ERROR, NOT_CONFIGURED, LOCKED, UNLOCKED }
+enum class VaultPhase { LOADING, ERROR, NOT_CONFIGURED, STEP_UP, IP_BLOCKED, LOCKED, UNLOCKED }
 
 data class VaultUiState(
     val phase: VaultPhase = VaultPhase.LOADING,
@@ -35,6 +36,8 @@ data class VaultUiState(
     val busy: Boolean = false,
     val error: String? = null,
     val message: String? = null,
+    val totpEnabled: Boolean = false,
+    val accessHours: Int = 24,
 )
 
 /**
@@ -60,6 +63,7 @@ class VaultViewModel(
             try {
                 val status = withContext(Dispatchers.IO) { api.getVaultStatus() }
                 if (!status.configured) {
+                    // 还没建库时不要求二次验证。
                     lock()
                     uiState = uiState.copy(phase = VaultPhase.NOT_CONFIGURED)
                     return@launch
@@ -71,13 +75,57 @@ class VaultViewModel(
                     wrappedKey = status.wrappedKey.orEmpty(),
                     wrapIv = status.wrapIv.orEmpty(),
                 )
+                val access = withContext(Dispatchers.IO) { api.getVaultAccess() }
+                uiState = uiState.copy(totpEnabled = access.totpEnabled, accessHours = access.hours)
+                if (!access.granted) {
+                    uiState = uiState.copy(phase = VaultPhase.STEP_UP, itemCount = status.itemCount)
+                    return@launch
+                }
                 if (key != null) {
                     reloadEntries()
                 } else {
                     uiState = uiState.copy(phase = VaultPhase.LOCKED, itemCount = status.itemCount)
                 }
             } catch (error: Exception) {
-                uiState = uiState.copy(phase = VaultPhase.ERROR, error = describe(error))
+                uiState = uiState.copy(phase = gatePhase(error) ?: VaultPhase.ERROR, error = describe(error))
+            }
+        }
+    }
+
+    fun requestAccessCode() {
+        if (uiState.busy) return
+        uiState = uiState.copy(busy = true, error = null)
+        viewModelScope.launch {
+            try {
+                val message = withContext(Dispatchers.IO) { api.requestVaultAccessCode() }
+                uiState = uiState.copy(busy = false, message = message)
+            } catch (error: Exception) {
+                uiState = uiState.copy(busy = false, phase = gatePhase(error) ?: uiState.phase, error = describe(error))
+            }
+        }
+    }
+
+    fun submitAccessCode(code: String, useTotp: Boolean) {
+        if (code.isBlank() || uiState.busy) return
+        uiState = uiState.copy(busy = true, error = null)
+        viewModelScope.launch {
+            try {
+                val access = withContext(Dispatchers.IO) {
+                    api.verifyVaultAccess(if (useTotp) "totp" else "email", code.trim())
+                }
+                uiState = uiState.copy(
+                    busy = false,
+                    totpEnabled = access.totpEnabled,
+                    accessHours = access.hours,
+                    message = "验证通过。",
+                )
+                if (key != null) {
+                    reloadEntries()
+                } else {
+                    uiState = uiState.copy(phase = VaultPhase.LOCKED)
+                }
+            } catch (error: Exception) {
+                uiState = uiState.copy(busy = false, phase = gatePhase(error) ?: uiState.phase, error = describe(error))
             }
         }
     }
@@ -106,7 +154,12 @@ class VaultViewModel(
                 uiState = uiState.copy(busy = false, message = "已解锁，5 分钟无操作或 App 退到后台会自动锁定。")
                 touch()
             } catch (error: Exception) {
-                uiState = uiState.copy(busy = false, error = describe(error))
+                if (error is WrongMasterPasswordException) {
+                    withContext(Dispatchers.IO) {
+                        runCatching { api.reportVaultUnlockFailure() }
+                    }
+                }
+                uiState = uiState.copy(busy = false, phase = gatePhase(error) ?: uiState.phase, error = describe(error))
             }
         }
     }
@@ -237,6 +290,12 @@ class VaultViewModel(
             createdAt = record.createdAt,
             data = VaultItemData.fromJson(plaintext.toString(Charsets.UTF_8)),
         )
+    }
+
+    private fun gatePhase(error: Exception): VaultPhase? = when ((error as? ApiException)?.code?.let(::vaultGate)) {
+        "step_up" -> VaultPhase.STEP_UP
+        "ip_blocked" -> VaultPhase.IP_BLOCKED
+        else -> null
     }
 
     private fun describe(error: Exception): String = when (error) {

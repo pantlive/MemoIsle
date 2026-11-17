@@ -342,6 +342,67 @@ fun VaultScreen(
                         OutlinedButton(onClick = viewModel::load, shape = RoundedCornerShape(12.dp)) { Text("重试") }
                     }
                 }
+                VaultPhase.IP_BLOCKED -> item {
+                    VaultGate(icon = Icons.Outlined.Shield, title = "当前网络不能打开密码库") {
+                        Text(
+                            state.error ?: "请稍后重试。手机端平时不限制 IP，这条提示多半是服务端暂时无法识别地址。",
+                            color = TextMuted,
+                            textAlign = TextAlign.Center,
+                        )
+                        OutlinedButton(onClick = viewModel::load, shape = RoundedCornerShape(12.dp)) { Text("重试") }
+                    }
+                }
+                VaultPhase.STEP_UP -> item {
+                    var code by remember { mutableStateOf("") }
+                    var useTotp by remember { mutableStateOf(false) }
+                    VaultGate(icon = Icons.Outlined.Pin, title = "验证后才能打开密码库") {
+                        Text(
+                            "这台手机每 ${state.accessHours} 小时需要验证一次，更换网络不用重新验证。" +
+                                "验证码会发到账号邮箱。",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        if (state.totpEnabled) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { useTotp = false },
+                                    shape = RoundedCornerShape(12.dp),
+                                ) { Text(if (!useTotp) "邮箱验证码 · 当前" else "邮箱验证码") }
+                                OutlinedButton(
+                                    onClick = { useTotp = true },
+                                    shape = RoundedCornerShape(12.dp),
+                                ) { Text(if (useTotp) "身份验证器 · 当前" else "身份验证器") }
+                            }
+                        }
+                        if (!useTotp) {
+                            OutlinedButton(
+                                onClick = viewModel::requestAccessCode,
+                                enabled = !state.busy,
+                                shape = RoundedCornerShape(12.dp),
+                            ) { Text(if (state.busy) "发送中…" else "发送验证码") }
+                        }
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { code = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text(if (useTotp) "动态码" else "验证码") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        Button(
+                            onClick = {
+                                viewModel.submitAccessCode(code, useTotp && state.totpEnabled)
+                                code = ""
+                            },
+                            enabled = !state.busy && code.trim().length >= 6,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
+                        ) { Text(if (state.busy) "验证中…" else "验证") }
+                    }
+                }
                 VaultPhase.NOT_CONFIGURED -> item {
                     VaultGate(icon = Icons.Outlined.Shield, title = "还没有密码库") {
                         Text(

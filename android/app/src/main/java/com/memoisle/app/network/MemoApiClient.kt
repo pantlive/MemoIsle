@@ -131,6 +131,15 @@ data class VaultItemRecord(
     val updatedAt: String,
 )
 
+data class VaultAccessStatus(
+    val granted: Boolean,
+    val expiresAt: String?,
+    val totpEnabled: Boolean,
+    val hours: Int,
+    val clientType: String,
+    val clientToken: String?,
+)
+
 data class EmailRegisterResponse(
     val user: AuthUser,
 )
@@ -138,6 +147,33 @@ data class EmailRegisterResponse(
 class MemoApiClient(baseUrl: String) {
     private val normalizedBaseUrl = baseUrl.trimEnd('/') + "/"
     var accessToken: String? = null
+
+    /** 手机端密码库授权令牌。网页端放 Cookie，这里放请求头。 */
+    var vaultClientToken: String? = null
+
+    /**
+     * 令牌变化时通知外面保存。启动时先赋值 [vaultClientToken]，再设置这个回调，
+     * 避免把刚从本地读出的令牌又写一遍。
+     */
+    var onVaultClientTokenChanged: ((String?) -> Unit)? = null
+
+    fun replaceVaultClientToken(token: String?) {
+        val next = token?.trim()?.takeIf { it.isNotEmpty() }
+        vaultClientToken = next
+        onVaultClientTokenChanged?.invoke(next)
+    }
+
+    /** 退出登录或会话失效时清掉登录态和密码库授权。 */
+    fun clearSession() {
+        accessToken = null
+        replaceVaultClientToken(null)
+    }
+
+    private fun HttpURLConnection.applyMemoIsleHeaders() {
+        setRequestProperty("X-MemoIsle-Client", "mobile")
+        accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+        vaultClientToken?.let { setRequestProperty("X-MemoIsle-Vault-Client", it) }
+    }
 
     fun authorizationUrl(provider: String, redirectTo: String): String {
         val encodedRedirect = URLEncoder.encode(redirectTo, Charsets.UTF_8.name())
@@ -224,6 +260,7 @@ class MemoApiClient(baseUrl: String) {
     fun downloadUserData(output: OutputStream): Unit {
         val connection = URL(normalizedBaseUrl + "exports/json")
             .openConnection() as HttpURLConnection
+            connection.applyMemoIsleHeaders()
         try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 10_000
@@ -484,6 +521,7 @@ class MemoApiClient(baseUrl: String) {
         }
         val connection = URL(normalizedBaseUrl + "speech/tts")
             .openConnection() as HttpURLConnection
+            connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 8_000
@@ -516,6 +554,7 @@ class MemoApiClient(baseUrl: String) {
         val connection = URL(
             normalizedBaseUrl + "memos/$remoteId/audio?expected_version=${memo.version}",
         ).openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 10_000
@@ -556,6 +595,7 @@ class MemoApiClient(baseUrl: String) {
     fun downloadAudio(memoId: String, target: Path): Path {
         val connection = URL(normalizedBaseUrl + "memos/$memoId/audio")
             .openConnection() as HttpURLConnection
+            connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 10_000
@@ -608,6 +648,7 @@ class MemoApiClient(baseUrl: String) {
         val connection = URL(
             normalizedBaseUrl + "memos/$remoteId/image?expected_version=$expectedVersion",
         ).openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 10_000
@@ -648,6 +689,7 @@ class MemoApiClient(baseUrl: String) {
             "memos/$memoId/image"
         }
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 10_000
@@ -733,6 +775,23 @@ class MemoApiClient(baseUrl: String) {
         executeText("DELETE", "vault/items/$id?expected_version=$expectedVersion")
     }
 
+    fun getVaultAccess(): VaultAccessStatus = execute("GET", "vault/access").toVaultAccessStatus()
+
+    fun requestVaultAccessCode(): String {
+        val response = execute("POST", "vault/access/code")
+        return response.optString("detail").ifBlank { "验证码已发送" }
+    }
+
+    fun verifyVaultAccess(method: String, code: String): VaultAccessStatus {
+        val body = JSONObject().put("method", method).put("code", code)
+        val access = execute("POST", "vault/access/verify", body).toVaultAccessStatus()
+        access.clientToken?.let { replaceVaultClientToken(it) }
+        return access
+    }
+
+    fun reportVaultUnlockFailure(): Boolean =
+        execute("POST", "vault/unlock-failed").optBoolean("sent", false)
+
     // 记账仅在线读写，不进入备忘录的离线数据库与同步队列。
     fun listLedgerEntries(month: String, kind: String = "", category: String = "", offset: Int = 0): List<LedgerEntry> {
         val query = "month=${URLEncoder.encode(month, "UTF-8")}&limit=500&offset=$offset" +
@@ -763,6 +822,7 @@ class MemoApiClient(baseUrl: String) {
         val connection = URL(
             normalizedBaseUrl + "ledger/image/recognize?today=" + URLEncoder.encode(today, "UTF-8"),
         ).openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 10_000
@@ -811,6 +871,7 @@ class MemoApiClient(baseUrl: String) {
 
     private fun executeText(method: String, path: String, body: JSONObject? = null): String {
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = method
             connection.connectTimeout = 8_000
@@ -846,6 +907,17 @@ class MemoApiClient(baseUrl: String) {
 
 private fun JSONObject.optStringOrNull(name: String): String? {
     return if (isNull(name)) null else optString(name).ifBlank { null }
+}
+
+private fun JSONObject.toVaultAccessStatus(): VaultAccessStatus {
+    return VaultAccessStatus(
+        granted = optBoolean("granted", false),
+        expiresAt = optStringOrNull("expires_at"),
+        totpEnabled = optBoolean("totp_enabled", false),
+        hours = optInt("hours", 24),
+        clientType = optString("client_type", "mobile"),
+        clientToken = optStringOrNull("client_token"),
+    )
 }
 
 private fun JSONObject.toVaultItemRecord(): VaultItemRecord {

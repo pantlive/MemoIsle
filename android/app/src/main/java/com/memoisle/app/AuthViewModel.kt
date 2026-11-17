@@ -85,7 +85,7 @@ class AuthViewModel(
                 },
                 onFailure = { error ->
                     tokenStore.clear()
-                    api.accessToken = null
+                    api.clearSession()
                     loadAnonymousState(error.message ?: "登录失败，请重新尝试")
                 },
             )
@@ -250,11 +250,11 @@ class AuthViewModel(
                     api.logout()
                     tokenStore.clear()
                     repository.clearForLogout()
-                    api.accessToken = null
+                    api.clearSession()
                 }
             }.onFailure {
                 tokenStore.clear()
-                api.accessToken = null
+                api.clearSession()
                 repository.clearForLogout()
             }
             val providers = runCatching {
@@ -291,7 +291,7 @@ class AuthViewModel(
                 },
                 onFailure = {
                     tokenStore.clear()
-                    api.accessToken = null
+                    api.clearSession()
                     loadAnonymousState("登录已过期，请重新登录")
                 },
             )
