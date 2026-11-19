@@ -29,6 +29,17 @@ from app.resource_classification_quality import (
 from app.resource_classification_retry import MAX_AUTOMATIC_RETRIES
 
 
+def normalize_invite_code(value: object) -> str | None:
+    """去掉邀请码首尾空白；空字符串视为未填写。"""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("邀请码格式不正确")
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def normalize_model_base_url(value: str | None) -> str | None:
     """校验基础地址，完整模型接口地址会去掉已知端点后缀。"""
 
@@ -144,6 +155,7 @@ class AuthProvidersResponse(BaseModel):
     providers: list[AuthProviderInfo]
     dev_login_available: bool
     email_login_enabled: bool = True
+    invite_required: bool
 
 
 class AuthUserResponse(BaseModel):
@@ -188,6 +200,38 @@ class EmailRegisterResponse(BaseModel):
     user: AuthUserResponse
 
 
+class InvitationCreateResponse(BaseModel):
+    """新生成的邀请码。明文只在这一次响应里出现。"""
+
+    code: str
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_utc_datetime(self, value: datetime) -> str:
+        """统一输出邀请码创建时间。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class InvitationStatusResponse(BaseModel):
+    """当前用户的邀请名额。不包含邀请码明文。"""
+
+    remaining: int
+    created_at: datetime | None = None
+    used_at: datetime | None = None
+    used_by_label: str | None = None
+
+    @field_serializer("created_at", "used_at")
+    def serialize_utc_datetime(self, value: datetime | None) -> str | None:
+        """统一输出邀请时间；未发生的时间保持空。"""
+
+        if value is None:
+            return None
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 class AuthLogoutResponse(BaseModel):
     """退出登录结果。"""
 
@@ -206,6 +250,14 @@ class EmailRegisterRequest(BaseModel):
         pattern=r"^\d{6}$",
     )
     display_name: str | None = Field(default=None, max_length=120)
+    invite_code: str | None = Field(default=None, max_length=32)
+
+    @field_validator("invite_code", mode="before")
+    @classmethod
+    def normalize_invite_code_field(cls, value: object) -> str | None:
+        """去掉邀请码首尾空白。"""
+
+        return normalize_invite_code(value)
 
     @field_validator("email")
     @classmethod
@@ -240,6 +292,14 @@ class VerificationCodeRequest(BaseModel):
     """请求发送邮箱注册验证码。"""
 
     email: str = Field(min_length=5, max_length=320)
+    invite_code: str | None = Field(default=None, max_length=32)
+
+    @field_validator("invite_code", mode="before")
+    @classmethod
+    def normalize_invite_code_field(cls, value: object) -> str | None:
+        """去掉邀请码首尾空白。"""
+
+        return normalize_invite_code(value)
 
     @field_validator("email")
     @classmethod

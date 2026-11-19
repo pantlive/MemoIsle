@@ -65,6 +65,7 @@ data class AuthProvidersResponse(
     val providers: List<AuthProviderInfo>,
     val devLoginAvailable: Boolean,
     val emailLoginEnabled: Boolean,
+    val inviteRequired: Boolean,
 )
 
 data class AuthUser(
@@ -199,6 +200,7 @@ class MemoApiClient(baseUrl: String) {
             providers = providers,
             devLoginAvailable = response.getBoolean("dev_login_available"),
             emailLoginEnabled = response.optBoolean("email_login_enabled", true),
+            inviteRequired = response.optBoolean("invite_required", false),
         )
     }
 
@@ -221,9 +223,10 @@ class MemoApiClient(baseUrl: String) {
         return emailSession(execute("POST", "auth/login", body))
     }
 
-    fun requestVerificationCode(email: String): Unit {
+    fun requestVerificationCode(email: String, inviteCode: String? = null): Unit {
         val body = JSONObject().apply {
             put("email", email)
+            inviteCode?.trim()?.takeIf { it.isNotEmpty() }?.let { put("invite_code", it) }
         }
         execute("POST", "auth/verification-code", body)
     }
@@ -241,6 +244,7 @@ class MemoApiClient(baseUrl: String) {
         confirmPassword: String,
         verificationCode: String,
         displayName: String?,
+        inviteCode: String? = null,
     ): EmailRegisterResponse {
         val body = JSONObject().apply {
             put("email", email)
@@ -248,6 +252,7 @@ class MemoApiClient(baseUrl: String) {
             put("confirm_password", confirmPassword)
             put("verification_code", verificationCode)
             displayName?.takeIf { it.isNotBlank() }?.let { put("display_name", it) }
+            inviteCode?.trim()?.takeIf { it.isNotEmpty() }?.let { put("invite_code", it) }
         }
         val response = execute("POST", "auth/register", body)
         return EmailRegisterResponse(

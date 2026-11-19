@@ -24,6 +24,8 @@ def password_client(tmp_path: Path) -> Iterator[TestClient]:
         audio_directory=tmp_path / "audio",
         image_directory=tmp_path / "images",
         auth_token_secret="password-change-test-secret",
+        # 本文件只验证改密，不走邀请码。
+        auth_invite_required=False,
         resource_enrichment_enabled=False,
         resource_health_monitor_enabled=False,
     )

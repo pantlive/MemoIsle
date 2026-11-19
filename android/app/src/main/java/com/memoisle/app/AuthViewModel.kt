@@ -135,8 +135,15 @@ class AuthViewModel(
         )
     }
 
-    fun requestVerificationCode(email: String): Unit {
+    fun requestVerificationCode(email: String, inviteCode: String): Unit {
         val state = mutableUiState.value
+        if (state.providers?.inviteRequired == true && inviteCode.isBlank()) {
+            mutableUiState.value = state.copy(
+                message = "请输入邀请码",
+                messageTone = AuthMessageTone.ERROR,
+            )
+            return
+        }
         if (
             state.isBusy ||
             state.isSendingVerificationCode ||
@@ -153,7 +160,7 @@ class AuthViewModel(
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    api.requestVerificationCode(email)
+                    api.requestVerificationCode(email, inviteCode)
                 }
             }.fold(
                 onSuccess = {
@@ -215,7 +222,15 @@ class AuthViewModel(
         confirmPassword: String,
         verificationCode: String,
         displayName: String?,
+        inviteCode: String,
     ): Unit {
+        if (mutableUiState.value.providers?.inviteRequired == true && inviteCode.isBlank()) {
+            mutableUiState.value = mutableUiState.value.copy(
+                message = "请输入邀请码",
+                messageTone = AuthMessageTone.ERROR,
+            )
+            return
+        }
         if (password != confirmPassword) {
             mutableUiState.value = mutableUiState.value.copy(
                 message = "两次输入的密码不一致",
@@ -240,6 +255,7 @@ class AuthViewModel(
             verificationCode,
             isRegistration = true,
             displayName = displayName,
+            inviteCode = inviteCode,
         )
     }
 
@@ -305,6 +321,7 @@ class AuthViewModel(
         verificationCode: String,
         isRegistration: Boolean,
         displayName: String?,
+        inviteCode: String = "",
     ): Unit {
         if (mutableUiState.value.isBusy || email.isBlank() || password.isBlank()) {
             return
@@ -324,6 +341,7 @@ class AuthViewModel(
                             confirmPassword,
                             verificationCode,
                             displayName,
+                            inviteCode,
                         )
                     } else {
                         val session = api.loginWithEmail(email, password)

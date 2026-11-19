@@ -163,6 +163,8 @@ class Settings:
     auth_verification_code_expire_minutes: int = 10
     auth_verification_code_resend_seconds: int = 60
     auth_verification_code_max_attempts: int = 5
+    # 默认开启邀请制。还没有真实账号时，第一个注册者不需要邀请码。
+    auth_invite_required: bool = True
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -423,6 +425,10 @@ class Settings:
                     "MEMOISLE_AUTH_VERIFICATION_CODE_MAX_ATTEMPTS",
                     "5",
                 ),
+            ),
+            auth_invite_required=environment_flag(
+                "MEMOISLE_AUTH_INVITE_REQUIRED",
+                True,
             ),
             smtp_host=os.environ.get("MEMOISLE_SMTP_HOST", ""),
             smtp_port=int(os.environ.get("MEMOISLE_SMTP_PORT", "587")),

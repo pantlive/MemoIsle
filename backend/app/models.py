@@ -162,6 +162,37 @@ class AuthVerificationCode(Base):
     )
 
 
+class AuthInvitation(Base):
+    """一次性邀请码。每个用户只能有一行，明文不入库。"""
+
+    __tablename__ = "auth_invitation"
+    __table_args__ = (
+        UniqueConstraint("inviter_user_id", name="uq_auth_invitation_inviter"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    inviter_user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    used_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
 class AuthLoginAttempt(Base):
     """邮箱登录失败记录，用于按账号维度限流。"""
 

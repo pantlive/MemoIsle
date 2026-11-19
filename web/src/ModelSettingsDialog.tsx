@@ -5,14 +5,16 @@ import { themeOptions, type ThemePreference } from "./theme";
 import {
   androidDownloadUrl,
   changePassword,
+  createInvitation,
   getBrowserHistorySettings,
+  getInvitations,
   listModelSettings,
   resetModelSetting,
   saveModelSetting,
   testModelConnection,
   updateBrowserHistorySettings,
 } from "./api";
-import type { ModelProvider, ModelSetting } from "./types";
+import type { InvitationStatus, ModelProvider, ModelSetting } from "./types";
 
 interface ModelSettingsDialogProps {
   themePreference: ThemePreference;
@@ -50,6 +52,12 @@ const providerDetails: Record<ModelProvider, {
   },
 };
 
+function inviteRegistrationLink(code: string): string {
+  const url = new URL(window.location.origin + window.location.pathname);
+  url.searchParams.set("invite_code", code);
+  return url.toString();
+}
+
 function createForm(saved: ModelSetting): ModelSettingForm {
   return {
     saved,
@@ -83,6 +91,11 @@ export default function ModelSettingsDialog({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordError, setPasswordError] = useState("");
+  const [inviteStatus, setInviteStatus] = useState<InvitationStatus | null>(null);
+  const [issuedInviteCode, setIssuedInviteCode] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteNotice, setInviteNotice] = useState("");
 
   async function handlePasswordChange(): Promise<void> {
     if (passwordBusy) return;
@@ -106,6 +119,61 @@ export default function ModelSettingsDialog({
       setPasswordError(error instanceof Error ? error.message : "修改密码失败");
     } finally {
       setPasswordBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void getInvitations()
+      .then((status) => {
+        if (!cancelled) setInviteStatus(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setInviteError(error instanceof Error ? error.message : "读取邀请状态失败");
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleCreateInvitation(): Promise<void> {
+    if (inviteBusy || inviteStatus?.remaining !== 1) return;
+    setInviteBusy(true);
+    setInviteError("");
+    setInviteNotice("");
+    try {
+      const created = await createInvitation();
+      setIssuedInviteCode(created.code);
+      setInviteStatus({
+        remaining: 0,
+        created_at: created.created_at,
+        used_at: null,
+        used_by_label: null,
+      });
+      setInviteNotice("只显示这一次");
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : "生成邀请码失败");
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  async function copyInviteText(value: string, success: string): Promise<void> {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = value;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+      setInviteNotice(success);
+      setInviteError("");
+    } catch {
+      setInviteError("复制失败，请手动选择邀请码");
     }
   }
 
@@ -163,11 +231,13 @@ export default function ModelSettingsDialog({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && busy === null && !passwordBusy) onClose();
+      if (event.key === "Escape" && busy === null && !passwordBusy && !inviteBusy) {
+        onClose();
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onClose, passwordBusy]);
+  }, [busy, inviteBusy, onClose, passwordBusy]);
 
   function updateForm(provider: ModelProvider, patch: Partial<ModelSettingForm>): void {
     setForms((current) => current.map((form) =>
@@ -244,7 +314,7 @@ export default function ModelSettingsDialog({
             className="icon-button"
             aria-label="关闭设置"
             onClick={onClose}
-            disabled={busy !== null || passwordBusy}
+            disabled={busy !== null || passwordBusy || inviteBusy}
           ><Icon name="close" size={16} /></button>
         </div>
         <div className="dialog-body">
@@ -331,6 +401,60 @@ export default function ModelSettingsDialog({
                 </button>
               </div>
             </form>
+          </section>
+          <section className="settings-section" aria-labelledby="settings-invite-title">
+            <div className="settings-section-heading">
+              <div>
+                <h3 id="settings-invite-title">邀请好友</h3>
+                <p>每个账号只能生成 1 个邀请码。用过和还没用的都占用这一次。</p>
+              </div>
+            </div>
+            {inviteStatus == null && !inviteError && <p className="invite-friend-note">正在读取邀请次数…</p>}
+            {inviteStatus != null && (
+              <p className="invite-friend-note">剩余邀请次数：{inviteStatus.remaining}</p>
+            )}
+            {inviteStatus != null && inviteStatus.remaining === 0 && !issuedInviteCode && (
+              <p className="invite-friend-note">
+                {inviteStatus.used_at
+                  ? `邀请码已使用${inviteStatus.used_by_label ? `，注册人：${inviteStatus.used_by_label}` : ""}。`
+                  : "邀请码已生成，还没有人使用。明文不会再次显示。"}
+              </p>
+            )}
+            {issuedInviteCode && (
+              <div className="invite-friend-code cloud-bind-form">
+                <label>
+                  <span>邀请码</span>
+                  <input readOnly value={issuedInviteCode} spellCheck={false} />
+                </label>
+                <p className="invite-friend-link">{inviteRegistrationLink(issuedInviteCode)}</p>
+                <p className="invite-friend-note">只显示这一次。把注册链接发给朋友，打开后会自动填入邀请码。</p>
+                <div className="model-settings-actions">
+                  <button
+                    type="button"
+                    onClick={() => void copyInviteText(issuedInviteCode, "邀请码已复制")}
+                  >复制邀请码</button>
+                  <button
+                    type="button"
+                    onClick={() => void copyInviteText(
+                      inviteRegistrationLink(issuedInviteCode),
+                      "注册链接已复制",
+                    )}
+                  >复制注册链接</button>
+                </div>
+              </div>
+            )}
+            {inviteError && <p className="auth-field-error" role="alert">{inviteError}</p>}
+            {inviteNotice && <p className="invite-friend-note" role="status">{inviteNotice}</p>}
+            <div className="model-settings-actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={inviteBusy || inviteStatus?.remaining !== 1}
+                onClick={() => void handleCreateInvitation()}
+              >
+                {inviteBusy ? "正在生成…" : "生成邀请码"}
+              </button>
+            </div>
           </section>
           <section className="settings-section" aria-labelledby="settings-android-title">
             <div className="settings-section-heading">

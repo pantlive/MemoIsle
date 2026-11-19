@@ -11,6 +11,19 @@ export interface AuthProvidersResponse {
   providers: AuthProviderInfo[];
   dev_login_available: boolean;
   email_login_enabled: boolean;
+  invite_required: boolean;
+}
+
+export interface InvitationStatus {
+  remaining: number;
+  created_at: string | null;
+  used_at: string | null;
+  used_by_label: string | null;
+}
+
+export interface InvitationCreateResponse {
+  code: string;
+  created_at: string;
 }
 
 export interface AuthUser {
