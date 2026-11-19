@@ -1,4 +1,4 @@
-"""密码库二次验证：网页白名单和 4 小时，手机 24 小时且不限制 IP。"""
+"""密码库二次验证：网页可选白名单和 4 小时，手机 24 小时且不限制 IP。"""
 
 from __future__ import annotations
 
@@ -170,11 +170,11 @@ def test_email_code_grants_four_hours_once(
     assert reused.json()["detail"]["code"] == "vault_code_invalid"
 
 
-def test_ip_or_user_agent_change_requires_verification_again(
+def test_ip_change_keeps_grant_but_user_agent_change_requires_verification_again(
     vault_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """换 IP 或换浏览器都要重新验证。两个地址都在白名单里，所以不是被白名单拦住。"""
+    """换 IP 授权仍有效，换浏览器要重新验证。两个地址都在白名单里。"""
 
     vault_client.app.state.settings = replace(
         vault_client.app.state.settings,
@@ -185,8 +185,7 @@ def test_ip_or_user_agent_change_requires_verification_again(
     _use_ip(monkeypatch, OTHER_IP)
     assert vault_client.get("/api/v1/vault").status_code == 200
     moved = vault_client.get("/api/v1/vault/items")
-    assert moved.status_code == 403
-    assert moved.json()["detail"]["code"] == "vault_step_up_required"
+    assert moved.status_code == 404
     _use_ip(monkeypatch, WEB_IP)
     changed_browser = vault_client.get(
         "/api/v1/vault/items",
@@ -271,16 +270,15 @@ def test_mobile_grant_lasts_a_day_and_ignores_ip(
     vault_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """手机端 24 小时，换 IP 仍然有效；空的网页白名单也不拦截手机。"""
+    """手机端 24 小时，换 IP 仍然有效；空的网页白名单也不拦截网页端。"""
 
     vault_client.app.state.settings = replace(
         vault_client.app.state.settings,
         vault_web_ip_allowlist="",
     )
     _use_ip(monkeypatch, WEB_IP)
-    blocked = vault_client.get("/api/v1/vault")
-    assert blocked.status_code == 403
-    assert blocked.json()["detail"]["code"] == "vault_ip_allowlist_empty"
+    allowed = vault_client.get("/api/v1/vault")
+    assert allowed.status_code == 200
     mobile = {"X-MemoIsle-Client": "mobile"}
     assert vault_client.get("/api/v1/vault", headers=mobile).status_code == 200
     sent = vault_client.post("/api/v1/vault/access/code", headers=mobile)
@@ -310,6 +308,44 @@ def test_mobile_grant_lasts_a_day_and_ignores_ip(
     assert access["expires_at"] == body["expires_at"]
 
 
+def test_empty_allowlist_lets_web_verify_from_any_ip(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """名单为空时，网页端从任意 IP 都能发验证码、验证并读取条目。"""
+
+    vault_client.app.state.settings = replace(
+        vault_client.app.state.settings,
+        vault_web_ip_allowlist="",
+    )
+    _use_ip(monkeypatch, WEB_IP)
+    assert vault_client.get("/api/v1/vault").status_code == 200
+    granted = _verify_email(vault_client)
+    assert granted["granted"] is True
+    assert vault_client.get("/api/v1/vault/items").status_code == 404
+    _use_ip(monkeypatch, OTHER_IP)
+    assert vault_client.get("/api/v1/vault").status_code == 200
+    assert vault_client.get("/api/v1/vault/items").status_code == 404
+    monkeypatch.setattr("app.vault_security_service.client_ip", lambda _request: None)
+    assert vault_client.get("/api/v1/vault").status_code == 200
+    assert vault_client.get("/api/v1/vault/items").status_code == 404
+
+
+def test_configured_allowlist_still_blocks_other_ip(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """配了名单、IP 不在名单里时仍返回 vault_ip_blocked。"""
+
+    _use_ip(monkeypatch, OTHER_IP)
+    blocked = vault_client.get("/api/v1/vault")
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["code"] == "vault_ip_blocked"
+    denied = vault_client.post("/api/v1/vault/access/code")
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "vault_ip_blocked"
+
+
 def test_allowlist_is_the_union_of_environment_and_settings(
     vault_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -334,12 +370,17 @@ def test_allowlist_is_the_union_of_environment_and_settings(
     _use_ip(monkeypatch, OTHER_IP)
     assert vault_client.get("/api/v1/vault").status_code == 200
     cleared = vault_client.put("/api/v1/vault/security", json={"user_allowlist": []})
-    assert cleared.status_code == 403
-    _use_ip(monkeypatch, WEB_IP)
-    cleared = vault_client.put("/api/v1/vault/security", json={"user_allowlist": []})
     assert cleared.status_code == 200
     assert cleared.json()["env_allowlist"] == [f"{WEB_IP}/32"]
     assert cleared.json()["user_allowlist"] == []
+    blocked = vault_client.get("/api/v1/vault")
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["code"] == "vault_ip_blocked"
+    _use_ip(monkeypatch, WEB_IP)
+    remaining = vault_client.put("/api/v1/vault/security", json={"user_allowlist": []})
+    assert remaining.status_code == 200
+    assert remaining.json()["env_allowlist"] == [f"{WEB_IP}/32"]
+    assert remaining.json()["user_allowlist"] == []
     _use_ip(monkeypatch, OTHER_IP)
     blocked = vault_client.get("/api/v1/vault")
     assert blocked.status_code == 403
@@ -498,10 +539,7 @@ def test_forwarded_for_is_trusted_only_from_configured_proxies(
     assert client_ip(_Request("127.0.0.1", "127.0.0.1")) is None  # type: ignore[arg-type]
     denied = vault_client.get("/api/v1/vault", headers={"X-Forwarded-For": WEB_IP})
     assert denied.status_code == 403
-    assert denied.json()["detail"]["code"] in {
-        "vault_ip_blocked",
-        "vault_ip_allowlist_empty",
-    }
+    assert denied.json()["detail"]["code"] == "vault_ip_blocked"
 
     transport = vault_client._transport
     previous_client = transport.client

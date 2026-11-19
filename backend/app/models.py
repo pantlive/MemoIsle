@@ -1263,7 +1263,8 @@ class VaultAccessGrant(Base):
     """密码库二次验证通过后的授权。
 
     只保存 IP、浏览器指纹和客户端令牌的 HMAC，不保存明文地址或令牌。
-    授权绑在登录会话上，退出登录后立即失效。读数据不会延长 expires_at。
+    授权绑在登录会话和浏览器指纹上，不再按 IP 匹配；ip_hash 只作记录。
+    退出登录后立即失效。读数据不会延长 expires_at。
     """
 
     __tablename__ = "vault_access_grant"

@@ -1,10 +1,11 @@
 """密码库二次验证。
 
-网页端要同时满足 IP 白名单、登录会话、客户端令牌和浏览器指纹，授权 4 小时。
+网页端要同时满足登录会话、客户端令牌和浏览器指纹，授权 4 小时。
+IP 白名单可选：名单为空不限制；配置后网页端才按 CIDR 拦截。授权不再绑定 IP。
 手机端不检查 IP，授权 24 小时。读数据不会延长窗口。库里不存明文 IP、验证码或 TOTP 密钥。
 
 客户端类型来自请求头 X-MemoIsle-Client，缺省按网页处理。这个头可以伪造，
-伪造成手机端就能绕过 IP 白名单；局限写在 docs/implementation-status.md。
+伪造成手机端就能绕过已配置的 IP 白名单；局限写在 docs/implementation-status.md。
 """
 
 from __future__ import annotations
@@ -198,7 +199,7 @@ def client_ip(request: Request) -> str | None:
 
     直连属于可信代理时，从右往左读 X-Forwarded-For，跳过仍是可信代理的地址，
     取第一个不是代理的地址。全都是代理，或者每一段都解析失败时，返回空。
-    调用方把空地址一律当成不允许。
+    配置了白名单时，空地址按不允许处理；名单为空则不检查 IP。
     """
 
     settings = _settings(request)
@@ -227,7 +228,7 @@ def _untrusted_forwarded_ip(request: Request, settings: Settings) -> str | None:
 
 
 def client_ip_hash(settings: Settings, ip: str | None, client_type: ClientType) -> str:
-    """网页保存真实 IP 的 HMAC。手机端不参与匹配，写入固定占位。"""
+    """网页仍写入真实 IP 的 HMAC，但授权匹配不再用它。手机端写入固定占位。"""
 
     material = ip if client_type == "web" and ip else MOBILE_IP_PLACEHOLDER
     return _hmac(settings, IP_HASH_PURPOSE, material)
@@ -334,7 +335,7 @@ def ip_allowed(ip: str | None, networks: list[str]) -> bool:
 
 
 def enforce_web_ip(request: Request, session: Session, user_id: str) -> None:
-    """网页端检查白名单。手机端直接返回。"""
+    """网页端在配置了白名单时检查名单。名单为空则放行。手机端直接返回。"""
 
     if client_type(request) == "mobile":
         return
@@ -342,7 +343,7 @@ def enforce_web_ip(request: Request, session: Session, user_id: str) -> None:
 
 
 def enforce_mutation_ip(request: Request, session: Session, user_id: str) -> None:
-    """改白名单时，手机端也必须从当前允许的 IP 进来。"""
+    """改白名单时，当前 IP 必须已经在名单里。名单为空则不限制。"""
 
     _enforce_ip(request, session, user_id)
 
@@ -353,11 +354,7 @@ def _enforce_ip(request: Request, session: Session, user_id: str) -> None:
         user_allowlist(session, user_id),
     )
     if not networks:
-        raise VaultAccessError(
-            status.HTTP_403_FORBIDDEN,
-            "vault_ip_allowlist_empty",
-            "还没有配置网页密码库的 IP 白名单",
-        )
+        return
     if not ip_allowed(client_ip(request), networks):
         raise VaultAccessError(
             status.HTTP_403_FORBIDDEN,
@@ -440,7 +437,7 @@ def active_grant(
     token: str | None,
     user_agent: str,
 ) -> VaultAccessGrant | None:
-    """返回仍绑定当前会话、令牌和浏览器的授权。网页还要 IP 一致。"""
+    """返回仍绑定当前会话、令牌和浏览器的授权。不再按 IP 匹配。"""
 
     if token is None or not _session_still_live(session, auth, settings):
         return None
@@ -457,11 +454,7 @@ def active_grant(
         statement = statement.where(VaultAccessGrant.auth_session_id.is_(None))
     else:
         statement = statement.where(VaultAccessGrant.auth_session_id == auth.session_id)
-    if kind == "web":
-        statement = statement.where(
-            VaultAccessGrant.ip_hash == client_ip_hash(settings, ip, "web"),
-        )
-    grant = session.scalar(statement)
+    grant = session.scalars(statement).first()
     if grant is None:
         return None
     if _as_utc(grant.expires_at) <= now:
@@ -518,7 +511,10 @@ def issue_grant(
     token: str,
     hours: int,
 ) -> VaultAccessGrant:
-    """签发或续期授权。过期时间从现在起算，不会因为之后的读取再往后推。"""
+    """签发或续期授权。过期时间从现在起算，不会因为之后的读取再往后推。
+
+    仍写入 ip_hash（列不能为空），但查找和续期不再按 IP 过滤。
+    """
 
     now = utc_now()
     session.execute(
@@ -540,9 +536,8 @@ def issue_grant(
         statement = statement.where(VaultAccessGrant.auth_session_id.is_(None))
     else:
         statement = statement.where(VaultAccessGrant.auth_session_id == auth_session_id)
-    if kind == "web":
-        statement = statement.where(VaultAccessGrant.ip_hash == ip_hash)
-    grant = session.scalar(statement)
+    grants = list(session.scalars(statement))
+    grant = grants[0] if grants else None
     expires_at = now + timedelta(hours=hours)
     if grant is None:
         grant = VaultAccessGrant(
@@ -560,6 +555,8 @@ def issue_grant(
     else:
         grant.expires_at = expires_at
         grant.ip_hash = ip_hash
+        for extra in grants[1:]:
+            session.delete(extra)
     session.flush()
     return grant
 
@@ -836,12 +833,6 @@ def verify_access(
     kind = client_type(request)
     if kind == "web":
         enforce_web_ip(request, session, auth.user_id)
-        if client_ip(request) is None:
-            raise VaultAccessError(
-                status.HTTP_400_BAD_REQUEST,
-                "vault_ip_blocked",
-                "无法识别客户端地址，请稍后重试",
-            )
     user = session.get(User, auth.user_id)
     if method == "totp":
         if not totp_enabled(session, auth.user_id):
@@ -1126,7 +1117,7 @@ def confirm_totp(
 
 
 def require_grant_user(request: Request, session: Session) -> str:
-    """敏感接口：网页先过 IP，再要求未过期的授权。"""
+    """敏感接口：网页先过可选的 IP 白名单，再要求未过期的授权。"""
 
     auth = resolve_auth(request, session)
     try:
@@ -1155,7 +1146,7 @@ def require_grant_user(request: Request, session: Session) -> str:
 
 
 def require_ip_user(request: Request, session: Session) -> AuthContext:
-    """状态接口只检查网页 IP，不发放授权。"""
+    """状态接口只检查网页 IP 白名单（名单为空则不限制），不发放授权。"""
 
     auth = resolve_auth(request, session)
     try:
