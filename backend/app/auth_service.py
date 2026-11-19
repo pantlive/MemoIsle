@@ -24,6 +24,7 @@ from app.models import (
     AuthCredential,
     AuthEmailToken,
     AuthIdentity,
+    AuthInvitation,
     AuthLoginAttempt,
     AuthSession,
     AuthVerificationCode,
@@ -43,6 +44,9 @@ APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
 STATE_TTL_SECONDS = 10 * 60
 PASSWORD_ITERATIONS = 600_000
 DUMMY_PASSWORD_SALT = "0" * 32
+# 去掉 0/O、1/I/L，避免邀请码被读错。大约 10 位。
+INVITATION_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+INVITATION_CODE_LENGTH = 10
 VERIFY_EMAIL_PURPOSE = "verify_email"
 PASSWORD_RESET_PURPOSE = "password_reset"
 
@@ -103,6 +107,18 @@ class VerificationCodeRateLimitedError(Exception):
         self.retry_after_seconds = retry_after_seconds
 
 
+class InvitationRequiredError(Exception):
+    """当前注册必须提供邀请码。"""
+
+
+class InvitationInvalidError(Exception):
+    """邀请码无效或已被使用。"""
+
+
+class InvitationQuotaExceededError(Exception):
+    """该用户已经生成过邀请码，没有剩余名额。"""
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderProfile:
     """OAuth 提供方返回的最小身份信息。"""
@@ -121,6 +137,24 @@ class CreatedAuthSession:
     token: str
     session: AuthSession
     user: User
+
+
+@dataclass(frozen=True, slots=True)
+class CreatedInvitation:
+    """刚生成的邀请码。明文只存在于这次返回值里。"""
+
+    code: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class InvitationStatus:
+    """用户的邀请名额，不包含邀请码明文。"""
+
+    remaining: int
+    created_at: datetime | None
+    used_at: datetime | None
+    used_by_label: str | None
 
 
 def provider_label(provider: AuthProvider) -> str:
@@ -833,12 +867,151 @@ def _clear_login_attempts(session: Session, email: str) -> None:
     session.commit()
 
 
+def _normalize_invitation_code(code: str) -> str:
+    """比对前去掉全部空白并转成大写。"""
+
+    return "".join(code.split()).upper()
+
+
+def _invitation_code_hash(settings: Settings, code: str) -> str:
+    """使用应用密钥计算邀请码哈希。明文不入库。"""
+
+    normalized = _normalize_invitation_code(code)
+    return hmac.new(
+        settings.auth_token_secret.encode("utf-8"),
+        f"invitation:{normalized}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _masked_email(email: str | None) -> str | None:
+    """只保留邮箱本地部分的首字符，避免在邀请状态里暴露完整地址。"""
+
+    if email is None:
+        return None
+    normalized = email.strip().lower()
+    if "@" not in normalized:
+        return None
+    local, domain = normalized.split("@", 1)
+    if not local or not domain:
+        return None
+    return f"{local[0]}***@{domain}"
+
+
+def _used_by_label(user: User | None) -> str | None:
+    """优先显示昵称；没有昵称时显示打码邮箱。"""
+
+    if user is None:
+        return None
+    name = user.display_name.strip()
+    if name:
+        return name
+    return _masked_email(user.email)
+
+
+def invitation_required(session: Session, settings: Settings) -> bool:
+    """是否必须持有邀请码才能注册。
+
+    本地开发用户（``local_user_id``）不计入。开关打开且已有其他账号时返回真。
+    两个请求同时注册第一个真实账号时，可能都看到「还没有账号」从而都免邀请码。
+    """
+
+    if not settings.auth_invite_required:
+        return False
+    existing_user_id = session.scalar(
+        select(User.id).where(User.id != settings.local_user_id).limit(1),
+    )
+    return existing_user_id is not None
+
+
+def validate_invitation(
+    session: Session,
+    settings: Settings,
+    code: str | None,
+) -> None:
+    """检查邀请码仍然可用。不写入、不消费。"""
+
+    if not invitation_required(session, settings):
+        return
+    normalized = _normalize_invitation_code(code or "")
+    if not normalized:
+        raise InvitationRequiredError
+    invitation_id = session.scalar(
+        select(AuthInvitation.id).where(
+            AuthInvitation.code_hash == _invitation_code_hash(settings, normalized),
+            AuthInvitation.used_at.is_(None),
+        ),
+    )
+    if invitation_id is None:
+        raise InvitationInvalidError
+
+
+def create_invitation(
+    session: Session,
+    settings: Settings,
+    user_id: str,
+) -> CreatedInvitation:
+    """为用户生成唯一的一次性邀请码。已有记录（无论是否使用）都算名额用完。"""
+
+    existing = session.scalar(
+        select(AuthInvitation.id).where(AuthInvitation.inviter_user_id == user_id),
+    )
+    if existing is not None:
+        raise InvitationQuotaExceededError
+    alphabet = INVITATION_CODE_ALPHABET
+    plaintext = "".join(
+        secrets.choice(alphabet) for _ in range(INVITATION_CODE_LENGTH)
+    )
+    created_at = utc_now()
+    session.add(
+        AuthInvitation(
+            id=str(uuid4()),
+            inviter_user_id=user_id,
+            code_hash=_invitation_code_hash(settings, plaintext),
+            created_at=created_at,
+        ),
+    )
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise InvitationQuotaExceededError from error
+    return CreatedInvitation(code=plaintext, created_at=created_at)
+
+
+def get_invitation_status(session: Session, user_id: str) -> InvitationStatus:
+    """返回剩余名额和使用情况。不返回邀请码明文。"""
+
+    invitation = session.scalar(
+        select(AuthInvitation).where(AuthInvitation.inviter_user_id == user_id),
+    )
+    if invitation is None:
+        return InvitationStatus(
+            remaining=1,
+            created_at=None,
+            used_at=None,
+            used_by_label=None,
+        )
+    used_by = (
+        session.get(User, invitation.used_by_user_id)
+        if invitation.used_by_user_id is not None
+        else None
+    )
+    return InvitationStatus(
+        remaining=0,
+        created_at=invitation.created_at,
+        used_at=invitation.used_at,
+        used_by_label=_used_by_label(used_by),
+    )
+
+
 def register_with_password(
     session: Session,
     settings: Settings,
     email: str,
     password: str,
     display_name: str | None = None,
+    invite_code: str | None = None,
 ) -> User:
     """创建已通过邮箱验证码验证的邮箱密码账号。"""
 
@@ -846,6 +1019,10 @@ def register_with_password(
     existing_verified_user = session.scalar(select(User).where(User.email == email))
     if existing_verified_user is not None:
         raise EmailAlreadyRegisteredError
+
+    requires_invite = invitation_required(session, settings)
+    if requires_invite:
+        validate_invitation(session, settings, invite_code)
 
     password_salt = secrets.token_bytes(16).hex()
     user = User(
@@ -864,6 +1041,23 @@ def register_with_password(
     )
     session.add(user)
     session.add(credential)
+    if requires_invite:
+        # 先让新用户落库，条件更新才能写 used_by_user_id。同一事务提交。
+        session.flush()
+        consumed = session.execute(
+            update(AuthInvitation)
+            .where(
+                AuthInvitation.code_hash == _invitation_code_hash(
+                    settings,
+                    invite_code or "",
+                ),
+                AuthInvitation.used_at.is_(None),
+            )
+            .values(used_at=utc_now(), used_by_user_id=user.id),
+        )
+        if int(consumed.rowcount or 0) != 1:
+            session.rollback()
+            raise InvitationInvalidError
     session.commit()
     session.refresh(user)
     return user
@@ -1036,6 +1230,8 @@ def login_with_provider(
         user = session.scalar(select(User).where(User.email == profile.email))
 
     if user is None:
+        if invitation_required(session, settings):
+            raise AuthProviderError("当前仅支持邀请注册，请先用邀请码通过邮箱注册")
         user = User(
             id=str(uuid4()),
             email=profile.email if profile.email_verified else None,

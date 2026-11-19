@@ -1,5 +1,7 @@
 import type {
   AuthProvidersResponse,
+  InvitationCreateResponse,
+  InvitationStatus,
   AuthProvider,
   AuthSession,
   AuthUser,
@@ -287,7 +289,9 @@ export async function registerWithEmail(
   confirmPassword: string,
   verificationCode: string,
   displayName?: string,
+  inviteCode?: string,
 ): Promise<EmailRegisterResponse> {
+  const normalizedInviteCode = inviteCode?.trim();
   return request<EmailRegisterResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify({
@@ -296,15 +300,31 @@ export async function registerWithEmail(
       confirm_password: confirmPassword,
       verification_code: verificationCode,
       display_name: displayName?.trim() || undefined,
+      ...(normalizedInviteCode ? { invite_code: normalizedInviteCode } : {}),
     }),
   });
 }
 
-export async function requestVerificationCode(email: string): Promise<void> {
+export async function requestVerificationCode(
+  email: string,
+  inviteCode?: string,
+): Promise<void> {
+  const normalizedInviteCode = inviteCode?.trim();
   await request<{ status: string }>("/auth/verification-code", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({
+      email,
+      ...(normalizedInviteCode ? { invite_code: normalizedInviteCode } : {}),
+    }),
   });
+}
+
+export async function getInvitations(): Promise<InvitationStatus> {
+  return request<InvitationStatus>("/auth/invitations");
+}
+
+export async function createInvitation(): Promise<InvitationCreateResponse> {
+  return request<InvitationCreateResponse>("/auth/invitations", { method: "POST" });
 }
 
 export async function requestEmailVerification(email: string): Promise<void> {

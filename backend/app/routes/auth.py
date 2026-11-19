@@ -26,6 +26,9 @@ from app.auth_service import (
     EmailNotVerifiedError,
     EmailTokenInvalidError,
     InvalidEmailCredentialsError,
+    InvitationInvalidError,
+    InvitationQuotaExceededError,
+    InvitationRequiredError,
     LoginRateLimitedError,
     PasswordChangeUnavailableError,
     VerificationCodeInvalidError,
@@ -34,8 +37,11 @@ from app.auth_service import (
     change_password,
     consume_verification_code,
     create_dev_session,
+    create_invitation,
     ensure_email_available,
     exchange_authorization_code,
+    get_invitation_status,
+    invitation_required,
     login_with_password,
     login_with_provider,
     prepare_verification_code,
@@ -48,6 +54,7 @@ from app.auth_service import (
     resolve_post_login_uri,
     revoke_session,
     sign_state,
+    validate_invitation,
     verify_email_token,
     verify_state,
 )
@@ -72,6 +79,8 @@ from app.schemas import (
     EmailRegisterResponse,
     EmailTokenConfirmRequest,
     EmailTokenRequest,
+    InvitationCreateResponse,
+    InvitationStatusResponse,
     PasswordChangeRequest,
     PasswordResetConfirmRequest,
     VerificationCodeRequest,
@@ -166,7 +175,10 @@ async def _handle_auth_callback(
 
 
 @router.get("/auth/providers", response_model=AuthProvidersResponse, tags=["auth"])
-def read_auth_providers(settings: SettingsDependency) -> AuthProvidersResponse:
+def read_auth_providers(
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> AuthProvidersResponse:
     """返回当前环境可用的登录方式。第三方登录默认关闭。"""
 
     providers = [
@@ -181,6 +193,7 @@ def read_auth_providers(settings: SettingsDependency) -> AuthProvidersResponse:
         providers=providers,
         dev_login_available=settings.auth_dev_mode,
         email_login_enabled=True,
+        invite_required=invitation_required(session, settings),
     )
 
 
@@ -198,8 +211,16 @@ def request_registration_verification_code(
     """发送注册用六位邮箱验证码。"""
 
     try:
+        # 先校验邀请码。无效时不能发信，也不能把验证码记下来。
+        validate_invitation(session, settings, payload.invite_code)
         code = prepare_verification_code(session, settings, payload.email)
         send_verification_code_email(settings, payload.email, code)
+    except (InvitationRequiredError, InvitationInvalidError) as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="邀请码无效或已被使用",
+        ) from error
     except EmailAlreadyRegisteredError as error:
         session.rollback()
         raise HTTPException(status_code=409, detail="该邮箱已被注册") from error
@@ -232,6 +253,8 @@ def register_with_email_route(
 
     try:
         ensure_email_available(session, payload.email)
+        # 邀请码必须在消费验证码之前校验，否则无效邀请会白白用掉验证码。
+        validate_invitation(session, settings, payload.invite_code)
         consume_verification_code(
             session,
             settings,
@@ -244,14 +267,64 @@ def register_with_email_route(
             payload.email,
             payload.password,
             payload.display_name,
+            payload.invite_code,
         )
     except EmailAlreadyRegisteredError as error:
         raise HTTPException(status_code=409, detail="该邮箱已被注册") from error
     except VerificationCodeInvalidError as error:
         raise HTTPException(status_code=400, detail="验证码无效或已过期") from error
+    except InvitationQuotaExceededError as error:
+        session.rollback()
+        raise HTTPException(status_code=400, detail="邀请机会已用完") from error
+    except (InvitationRequiredError, InvitationInvalidError) as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="邀请码无效或已被使用",
+        ) from error
     return EmailRegisterResponse(
         user=AuthUserResponse.model_validate(created),
     )
+
+
+@router.get(
+    "/auth/invitations",
+    response_model=InvitationStatusResponse,
+    tags=["auth"],
+)
+def read_invitation_status(
+    session: SessionDependency,
+    user_id: UserDependency,
+) -> InvitationStatusResponse:
+    """返回当前用户剩余的邀请名额。不返回邀请码明文。"""
+
+    status_value = get_invitation_status(session, user_id)
+    return InvitationStatusResponse(
+        remaining=status_value.remaining,
+        created_at=status_value.created_at,
+        used_at=status_value.used_at,
+        used_by_label=status_value.used_by_label,
+    )
+
+
+@router.post(
+    "/auth/invitations",
+    response_model=InvitationCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["auth"],
+)
+def create_invitation_route(
+    session: SessionDependency,
+    settings: SettingsDependency,
+    user_id: UserDependency,
+) -> InvitationCreateResponse:
+    """生成当前用户仅有的一次邀请码。明文只在这次响应中返回。"""
+
+    try:
+        created = create_invitation(session, settings, user_id)
+    except InvitationQuotaExceededError as error:
+        raise HTTPException(status_code=409, detail="邀请机会已用完") from error
+    return InvitationCreateResponse(code=created.code, created_at=created.created_at)
 
 
 @router.post("/auth/login", response_model=AuthSessionResponse, tags=["auth"])

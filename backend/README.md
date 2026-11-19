@@ -39,6 +39,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_AUTH_VERIFICATION_CODE_EXPIRE_MINUTES`：注册验证码有效分钟数，默认 10。
 - `MEMOISLE_AUTH_VERIFICATION_CODE_RESEND_SECONDS`：同一邮箱的重发间隔，默认 60 秒。
 - `MEMOISLE_AUTH_VERIFICATION_CODE_MAX_ATTEMPTS`：验证码最大错误次数，默认 5 次。
+- `MEMOISLE_AUTH_INVITE_REQUIRED`：是否启用邀请注册，默认 `true`。设为 `false` 时恢复为任何人都可以用邮箱注册。
 - `MEMOISLE_EMAIL_OUTBOX_DIRECTORY`：开发模式下未配置 SMTP 时保存 `.eml` 的目录。
 - `MEMOISLE_AUDIO_DIRECTORY`：原始录音的本地开发存储目录。
 - `MEMOISLE_IMAGE_DIRECTORY`：图片收藏原图与缩略图的本地开发存储目录，默认 `data/images`。
@@ -192,6 +193,23 @@ Android 自定义地址。令牌只在数据库保存 SHA-256 哈希，退出登
 验证码只保存哈希，默认 10 分钟有效，60 秒内不能重复发送，连续输错 5 次后失效。
 注册成功后邮箱立即标记为已验证。旧版本产生的未验证账号仍可通过
 `POST /auth/verify-email/request` 重新发送验证链接。
+
+邀请制默认开启。`id` 等于 `MEMOISLE_LOCAL_USER_ID` 的本地开发用户不算真实账号。
+库里还没有其他用户时，第一个注册者不需要邀请码；这是引导第一个账号的方式。
+两个请求同时注册这第一个账号时，可能都看到「还没有账号」，于是都不需要邀请码。
+出现第二个真实账号之后，发验证码和注册都必须带有效邀请码，否则返回 400
+「邀请码无效或已被使用」。邀请码会在消费验证码之前校验，避免无效邀请把验证码用掉。
+
+已登录用户通过 `POST /api/v1/auth/invitations` 生成自己仅有的 1 个邀请码。
+用过和还没用都占用这个名额，第二次生成返回 409。明文只在这次响应里出现，
+数据库只保存 HMAC 哈希。`GET /api/v1/auth/invitations` 返回剩余次数（0 或 1）、
+创建时间、使用时间和使用者昵称或打码邮箱，不返回明文。每个邀请码只能注册 1 个账号，
+消费使用条件更新，两个会话抢同一个码时只有一个成功。比对前会转成大写并去掉空白。
+
+Web 设置页的「邀请好友」可以生成邀请码，并复制带 `invite_code` 参数的注册链接。
+Android 注册页在需要邀请时填写邀请码，暂时不能生成邀请码，需要在 Web 端生成后把链接或邀请码交给对方。
+第三方登录在需要邀请时不能新建账号，已有账号的登录和绑定不受影响。
+`GET /api/v1/auth/providers` 的 `invite_required` 告诉客户端当前要不要邀请码。
 
 密码使用 PBKDF2-SHA256、随机盐和 600,000 次迭代保存；登录失败统一返回
 “邮箱或密码不正确”。同一邮箱在 15 分钟内连续失败 5 次后返回 429，并携带

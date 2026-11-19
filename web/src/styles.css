@@ -5412,6 +5412,29 @@ button.resource-user-tag:hover {
   gap: 16px;
 }
 
+.invite-friend-code {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invite-friend-code input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
+.invite-friend-link,
+.invite-friend-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.invite-friend-link {
+  overflow-wrap: anywhere;
+}
+
 .settings-section-heading h3 {
   margin: 0;
   font-size: 16px;

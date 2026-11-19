@@ -63,6 +63,7 @@ fun AuthScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
     var verificationCode by rememberSaveable { mutableStateOf("") }
+    var inviteCode by rememberSaveable { mutableStateOf("") }
     var displayName by rememberSaveable { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
     var showConfirmPassword by rememberSaveable { mutableStateOf(false) }
@@ -84,8 +85,13 @@ fun AuthScreen(
         ) {
             AuthBrand()
             Spacer(modifier = Modifier.height(22.dp))
+            val inviteRequired = state.providers?.inviteRequired == true
             Text(
-                text = if (isRegisterMode) "加入 MemoIsle" else "欢迎回到 MemoIsle",
+                text = when {
+                    isRegisterMode && inviteRequired -> "凭邀请码注册"
+                    isRegisterMode -> "加入 MemoIsle"
+                    else -> "欢迎回到 MemoIsle"
+                },
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
@@ -118,6 +124,8 @@ fun AuthScreen(
                     onVerificationCodeChange = {
                         verificationCode = it.filter(Char::isDigit).take(6)
                     },
+                    inviteCode = inviteCode,
+                    onInviteCodeChange = { inviteCode = it.take(32) },
                     password = password,
                     onPasswordChange = { password = it },
                     confirmPassword = confirmPassword,
@@ -136,6 +144,7 @@ fun AuthScreen(
                             confirmPassword,
                             verificationCode.trim(),
                             displayName.trim().ifEmpty { null },
+                            inviteCode.trim(),
                         )
                     } else {
                         viewModel.loginWithEmail(email.trim(), password)
@@ -248,6 +257,8 @@ private fun AuthForm(
     onDisplayNameChange: (String) -> Unit,
     verificationCode: String,
     onVerificationCodeChange: (String) -> Unit,
+    inviteCode: String,
+    onInviteCodeChange: (String) -> Unit,
     password: String,
     onPasswordChange: (String) -> Unit,
     confirmPassword: String,
@@ -261,6 +272,8 @@ private fun AuthForm(
     onSubmit: () -> Unit,
 ): Unit {
     val minimumPasswordLength = if (isRegisterMode) 8 else 1
+    val inviteRequired = isRegisterMode && state.providers?.inviteRequired == true
+    val inviteMissing = inviteRequired && inviteCode.isBlank()
     val emailError = email.isNotBlank() &&
         !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
     val verificationCodeError = isRegisterMode &&
@@ -275,6 +288,7 @@ private fun AuthForm(
         password.length >= minimumPasswordLength &&
         (!isRegisterMode || (
             confirmPassword == password &&
+                !inviteMissing &&
                 verificationCode.length == 6 &&
                 verificationCode.all { it.isDigit() }
             ))
@@ -310,6 +324,24 @@ private fun AuthForm(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             shape = RoundedCornerShape(10.dp),
         )
+        if (isRegisterMode && state.providers?.inviteRequired == true) {
+            OutlinedTextField(
+                value = inviteCode,
+                onValueChange = onInviteCodeChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("邀请码") },
+                placeholder = { Text("输入邀请码") },
+                singleLine = true,
+                isError = inviteMissing,
+                supportingText = if (inviteMissing) {
+                    { Text("请输入邀请码") }
+                } else {
+                    null
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                shape = RoundedCornerShape(10.dp),
+            )
+        }
         if (isRegisterMode) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -334,14 +366,14 @@ private fun AuthForm(
                     shape = RoundedCornerShape(10.dp),
                 )
                 OutlinedButton(
-                    onClick = { viewModel.requestVerificationCode(email.trim()) },
+                    onClick = { viewModel.requestVerificationCode(email.trim(), inviteCode.trim()) },
                     modifier = Modifier
                         .weight(0.42f)
                         .height(56.dp),
                     enabled = !state.isBusy &&
                         !state.isSendingVerificationCode &&
                         state.verificationCodeCooldownSeconds == 0 &&
-                        email.isNotBlank() && !emailError,
+                        email.isNotBlank() && !emailError && !inviteMissing,
                     contentPadding = PaddingValues(horizontal = 7.dp),
                     shape = RoundedCornerShape(10.dp),
                 ) {

@@ -54,6 +54,10 @@ function readAuthCallback(): { token: string | null; error: string | null } {
   return { token, error };
 }
 
+function readInviteCodeFromLocation(): string {
+  return new URL(window.location.href).searchParams.get("invite_code")?.trim() ?? "";
+}
+
 function readEmailAction(): {
   verificationToken: string | null;
   resetToken: string | null;
@@ -78,10 +82,13 @@ export default function AuthGate(): ReactNode {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [emailAuthMode, setEmailAuthMode] = useState<EmailAuthMode>("login");
+  const [emailAuthMode, setEmailAuthMode] = useState<EmailAuthMode>(() => (
+    readInviteCodeFromLocation() ? "register" : "login"
+  ));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState(readInviteCodeFromLocation);
   const [verificationCode, setVerificationCode] = useState("");
   const [codeSending, setCodeSending] = useState(false);
   const [codeCooldown, setCodeCooldown] = useState(0);
@@ -92,6 +99,7 @@ export default function AuthGate(): ReactNode {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const inviteRequired = providers?.invite_required === true;
 
   const loadProviders = useCallback(async (): Promise<void> => {
     setProviders(await getAuthProviders());
@@ -207,6 +215,14 @@ export default function AuthGate(): ReactNode {
       }
       if (
         emailAuthMode === "register" &&
+        inviteRequired &&
+        !inviteCode.trim()
+      ) {
+        setError("请输入邀请码");
+        return;
+      }
+      if (
+        emailAuthMode === "register" &&
         !/^\d{6}$/.test(verificationCode.trim())
       ) {
         setError("请输入 6 位邮箱验证码");
@@ -228,6 +244,7 @@ export default function AuthGate(): ReactNode {
             confirmPassword,
             verificationCode.trim(),
             displayName.trim() || undefined,
+            inviteRequired ? inviteCode.trim() : undefined,
           );
           setNotice("注册成功，请使用邮箱登录。");
           setEmailAuthMode("login");
@@ -259,6 +276,8 @@ export default function AuthGate(): ReactNode {
       displayName,
       email,
       emailAuthMode,
+      inviteCode,
+      inviteRequired,
       newPassword,
       password,
       resetToken,
@@ -271,7 +290,8 @@ export default function AuthGate(): ReactNode {
       busy ||
       codeSending ||
       codeCooldown > 0 ||
-      !email.trim()
+      !email.trim() ||
+      (inviteRequired && !inviteCode.trim())
     ) {
       return;
     }
@@ -279,7 +299,10 @@ export default function AuthGate(): ReactNode {
     setError("");
     setNotice("");
     try {
-      await requestVerificationCode(email.trim());
+      await requestVerificationCode(
+        email.trim(),
+        inviteRequired ? inviteCode.trim() : undefined,
+      );
       setCodeCooldown(60);
       setNotice("验证码已发送，请查收邮箱（10 分钟内有效）。");
     } catch (codeError) {
@@ -287,7 +310,7 @@ export default function AuthGate(): ReactNode {
     } finally {
       setCodeSending(false);
     }
-  }, [busy, codeCooldown, codeSending, email]);
+  }, [busy, codeCooldown, codeSending, email, inviteCode, inviteRequired]);
 
   const handleResendVerification = useCallback(async (): Promise<void> => {
     if (busy || !email.trim()) {
@@ -355,7 +378,7 @@ export default function AuthGate(): ReactNode {
   const isEmailMode = emailAuthMode === "login" || emailAuthMode === "register";
   const authHeading = {
     login: "欢迎回到 MemoIsle",
-    register: "加入 MemoIsle",
+    register: inviteRequired ? "凭邀请码注册" : "加入 MemoIsle",
     forgot: "找回你的资料库",
     reset: "设置新密码",
   }[emailAuthMode];
@@ -456,6 +479,21 @@ export default function AuthGate(): ReactNode {
             {emailInvalid && (
               <p className="auth-field-error">请输入有效的邮箱地址</p>
             )}
+            {emailAuthMode === "register" && inviteRequired && (
+              <label className="auth-field">
+                邀请码
+                <input
+                  type="text"
+                  value={inviteCode}
+                  onChange={(event) => setInviteCode(event.target.value)}
+                  required
+                  maxLength={32}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="输入邀请码"
+                />
+              </label>
+            )}
             {emailAuthMode === "register" && (
               <div className="auth-code-row">
                 <label className={`auth-field${verificationCodeInvalid ? " auth-field-invalid" : ""}`}>
@@ -483,7 +521,8 @@ export default function AuthGate(): ReactNode {
                     codeSending ||
                     codeCooldown > 0 ||
                     !email.trim() ||
-                    emailInvalid
+                    emailInvalid ||
+                    (inviteRequired && !inviteCode.trim())
                   }
                 >
                   {codeSending
