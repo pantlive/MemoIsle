@@ -102,8 +102,8 @@ def send_vault_code_email(
         )
     else:
         scope = (
-            f"验证成功后，这个 IP 上的这个浏览器在 {hours} 小时内可以打开密码库。"
-            "换 IP 或换浏览器需要重新验证。"
+            f"验证成功后，这个浏览器在 {hours} 小时内可以打开密码库。"
+            "换浏览器需要重新验证。"
         )
     body = (
         "你正在申请打开 MemoIsle 密码库。\n\n"

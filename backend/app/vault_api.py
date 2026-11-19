@@ -70,7 +70,7 @@ SessionDependency = Annotated[Session, Depends(get_session)]
 
 
 def _ip_user(request: Request, session: SessionDependency) -> AuthContext:
-    """登录，并且网页请求的 IP 在白名单里。"""
+    """登录；网页请求在配置了白名单时还要 IP 在名单里。"""
 
     return require_ip_user(request, session)
 
@@ -103,7 +103,7 @@ def _conflict(error: VaultVersionConflictError) -> HTTPException:
 
 @router.get("", response_model=VaultStatus)
 def read_vault_route(session: SessionDependency, auth: IpUser) -> VaultStatus:
-    """读取密码库状态和解锁所需的包裹参数。网页端先检查 IP 白名单。"""
+    """读取密码库状态和解锁所需的包裹参数。网页端配置了白名单时先检查 IP。"""
 
     return vault_status(session, auth.user_id)
 
@@ -248,7 +248,7 @@ def read_vault_access_route(
     session: SessionDependency,
     auth: IpUser,
 ) -> VaultAccessStatus:
-    """当前 IP 和浏览器上有没有授权。这个接口不发放授权，也不延长窗口。"""
+    """当前浏览器上有没有授权。这个接口不发放授权，也不延长窗口。"""
 
     described = describe_access(session, request.app.state.settings, auth, request)
     return _status_model(described)
@@ -321,7 +321,7 @@ def read_vault_security_route(
     session: SessionDependency,
     user_id: GrantUser,
 ) -> VaultSecurityRead:
-    """读取白名单和身份验证器是否已绑定。不返回密钥。"""
+    """读取可选的白名单和身份验证器是否已绑定。不返回密钥。"""
 
     settings = request.app.state.settings
     return VaultSecurityRead(
@@ -340,7 +340,10 @@ def update_vault_security_route(
     session: SessionDependency,
     user_id: GrantUser,
 ) -> VaultSecurityRead:
-    """修改用户追加的白名单。当前 IP 必须已经被允许，环境变量条目不会被删掉。"""
+    """修改用户追加的白名单。
+
+    配置了名单时当前 IP 必须已经被允许，环境变量条目不会被删掉。
+    """
 
     auth = resolve_auth(request, session)
     if auth.user_id != user_id:

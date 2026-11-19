@@ -392,7 +392,9 @@ def test_history_groups_entries_by_local_day(client: TestClient) -> None:
         },
     )
 
-    payload = client.get("/api/v1/browser-history?tz_offset=480").json()
+    payload = client.get(
+        "/api/v1/browser-history?from=2026-10-20&to=2026-10-21&tz_offset=480",
+    ).json()
     groups = payload["days"]
     assert [group["date"] for group in groups] == ["2026-10-21", "2026-10-20"]
     assert [group["count"] for group in groups] == [1, 2]

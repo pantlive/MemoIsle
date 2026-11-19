@@ -814,7 +814,6 @@ export default function VaultPanel() {
       {phase === "ip_blocked" && (
         <div className="state-panel error-state">
           <p>{formError || "当前网络不在密码库白名单中。"}</p>
-          <p>网页端只能从允许的 IP 打开密码库。环境变量里的白名单需要管理员配置，被拦住的地址不能在这里把自己加进去。</p>
           <button type="button" onClick={() => void refreshStatus()}>重试</button>
         </div>
       )}
@@ -824,7 +823,7 @@ export default function VaultPanel() {
           <h2>验证后才能打开密码库</h2>
           <p>
             这个浏览器需要每 {grantHours} 小时验证一次。验证码发到账号邮箱，也可以使用已绑定的身份验证器。
-            换 IP 或换浏览器需要重新验证。
+            换浏览器、退出登录或授权过期需要重新验证。
           </p>
           {totpAvailable && (
             <div className="vault-field-tools" role="group" aria-label="验证方式">
@@ -978,7 +977,7 @@ export default function VaultPanel() {
           <details className="vault-card vault-security">
             <summary>安全设置</summary>
             <p>
-              网页端每 {security?.web_grant_hours ?? grantHours} 小时重新验证，并且只能从白名单 IP 打开。
+              网页端每 {security?.web_grant_hours ?? grantHours} 小时重新验证，配置白名单后才限制 IP，留空不限制。
               手机端每 {security?.mobile_grant_hours ?? 24} 小时验证一次，不限制 IP。
             </p>
             <h3>身份验证器</h3>
@@ -1007,7 +1006,7 @@ export default function VaultPanel() {
               </form>
             )}
             <h3>网页 IP 白名单</h3>
-            <p>环境变量里的地址只读，设置页只能再追加。名单全部清空后，网页端会拒绝访问，直到管理员在环境变量里重新配置。</p>
+            <p>环境变量里的地址只读，设置页只能再追加。留空表示不限制。</p>
             <ul className="vault-readonly-list">
               {(security?.env_allowlist.length ?? 0) === 0
                 ? <li>环境变量里还没有地址</li>
