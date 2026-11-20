@@ -7,7 +7,7 @@ import {
   updateVaultSecurity,
   verifyVaultAccess,
 } from "../api";
-import { vaultGate } from "../vaultAccess";
+import { formatTotpSecret, vaultGate } from "../vaultAccess";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -27,6 +27,23 @@ describe("密码库门禁阶段", () => {
     expect(vaultGate("vault_step_up_required")).toBe("step_up");
     expect(vaultGate("vault_code_invalid")).toBeNull();
     expect(vaultGate(undefined)).toBeNull();
+  });
+});
+
+describe("身份验证器密钥分组", () => {
+  it("每 4 个字符空一格", () => {
+    expect(formatTotpSecret("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")).toBe(
+      "JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP",
+    );
+  });
+
+  it("长度不是 4 的倍数时最后一组保留余下字符", () => {
+    expect(formatTotpSecret("ABCDEFGHIJ")).toBe("ABCD EFGH IJ");
+    expect(formatTotpSecret("ABC")).toBe("ABC");
+  });
+
+  it("空串返回空串", () => {
+    expect(formatTotpSecret("")).toBe("");
   });
 });
 

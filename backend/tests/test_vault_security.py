@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from email import message_from_bytes
 from email.policy import default as email_default_policy
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 from app.models import User, VaultAccessGrant, VaultChallenge, VaultSecuritySetting
@@ -240,6 +241,134 @@ def test_totp_cannot_be_used_before_it_is_confirmed(
         secret,
         totp_at(secret, int(datetime.now(UTC).timestamp()) // 30 - 2),
     )
+
+
+def _now_code(secret: str) -> str:
+    return totp_at(secret, int(datetime.now(UTC).timestamp()) // 30)
+
+
+def _bind_totp(client: TestClient) -> str:
+    setup = client.post("/api/v1/vault/totp/setup")
+    assert setup.status_code == 200, setup.text
+    secret = setup.json()["secret"]
+    confirmed = client.post(
+        "/api/v1/vault/totp/confirm",
+        json={"code": _now_code(secret)},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    return secret
+
+
+def _verify_totp(client: TestClient, code: str) -> object:
+    client.cookies.clear()
+    return client.post(
+        "/api/v1/vault/access/verify",
+        json={"method": "totp", "code": code},
+    )
+
+
+def test_otpauth_uri_uses_fixed_account_name_without_email(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """扫码后身份验证器里显示 MemoIsle（密码库），不出现邮箱。"""
+
+    _use_ip(monkeypatch, WEB_IP)
+    _verify_email(vault_client)
+    setup = vault_client.post("/api/v1/vault/totp/setup")
+    assert setup.status_code == 200
+    uri = setup.json()["otpauth_uri"]
+    assert OWNER_EMAIL not in uri
+    assert quote(OWNER_EMAIL) not in uri
+    assert uri.startswith(f"otpauth://totp/{quote('MemoIsle:密码库')}?")
+    assert "issuer=MemoIsle" in uri
+    assert f"secret={setup.json()['secret']}" in uri
+
+
+def test_regenerating_without_confirm_keeps_old_totp_working(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已绑定后重新生成但不确认，旧动态码照常能换授权。"""
+
+    _use_ip(monkeypatch, WEB_IP)
+    _verify_email(vault_client)
+    old_secret = _bind_totp(vault_client)
+    regenerated = vault_client.post("/api/v1/vault/totp/setup")
+    assert regenerated.status_code == 200
+    new_secret = regenerated.json()["secret"]
+    assert new_secret != old_secret
+    assert vault_client.get("/api/v1/vault/security").json()["totp_enabled"] is True
+    assert new_secret not in _dump_secrets(vault_client)
+
+    granted = _verify_totp(vault_client, _now_code(old_secret))
+    assert granted.status_code == 200, granted.text
+    assert granted.json()["granted"] is True
+    assert granted.json()["totp_enabled"] is True
+
+
+def test_unconfirmed_new_secret_cannot_grant_access(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """还没确认的新密钥算出的动态码不能换授权。"""
+
+    _use_ip(monkeypatch, WEB_IP)
+    _verify_email(vault_client)
+    old_secret = _bind_totp(vault_client)
+    regenerated = vault_client.post("/api/v1/vault/totp/setup")
+    new_secret = regenerated.json()["secret"]
+    new_code = _now_code(new_secret)
+    if new_code == _now_code(old_secret):
+        pytest.skip("新旧密钥在当前时间片碰巧算出相同动态码")
+    denied = _verify_totp(vault_client, new_code)
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "vault_code_invalid"
+
+
+def test_confirming_new_secret_replaces_old_one(
+    vault_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """用新密钥的动态码确认后，旧动态码失效，新动态码可以换授权。"""
+
+    _use_ip(monkeypatch, WEB_IP)
+    _verify_email(vault_client)
+    old_secret = _bind_totp(vault_client)
+    regenerated = vault_client.post("/api/v1/vault/totp/setup")
+    new_secret = regenerated.json()["secret"]
+    old_code = _now_code(old_secret)
+    if old_code == _now_code(new_secret):
+        pytest.skip("新旧密钥在当前时间片碰巧算出相同动态码")
+    wrong = vault_client.post("/api/v1/vault/totp/confirm", json={"code": old_code})
+    assert wrong.status_code == 403
+    assert wrong.json()["detail"]["code"] == "vault_code_invalid"
+    confirmed = vault_client.post(
+        "/api/v1/vault/totp/confirm",
+        json={"code": _now_code(new_secret)},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["totp_enabled"] is True
+    with vault_client.app.state.database.session_factory() as session:
+        setting = session.get(
+            VaultSecuritySetting,
+            vault_client.app.state.settings.local_user_id,
+        )
+        assert setting is not None
+        assert setting.totp_pending_secret_cipher is None
+    again = vault_client.post(
+        "/api/v1/vault/totp/confirm",
+        json={"code": _now_code(new_secret)},
+    )
+    assert again.status_code == 400
+    assert again.json()["detail"]["code"] == "vault_totp_unavailable"
+
+    stale = _verify_totp(vault_client, old_code)
+    assert stale.status_code == 403
+    assert stale.json()["detail"]["code"] == "vault_code_invalid"
+    fresh = _verify_totp(vault_client, _now_code(new_secret))
+    assert fresh.status_code == 200, fresh.text
+    assert fresh.json()["granted"] is True
 
 
 def test_database_does_not_store_plaintext_ip_code_or_secret(
