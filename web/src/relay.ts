@@ -1,7 +1,19 @@
 /** 文件/文本中转的纯函数：大小校验、文案、倒计时。界面在 RelayPanel。 */
 
 import { RELAY_MAX_FILE_BYTES, RELAY_MAX_TEXT_BYTES } from "./api";
-import type { RelayDevice } from "./types";
+import type { RelayDevice, RelayItem } from "./types";
+
+const CLIPBOARD_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+  "image/svg+xml": "svg",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
 
 export const relayDeviceLabels: Record<RelayDevice, string> = {
   web: "网页",
@@ -42,4 +54,28 @@ export function formatRemaining(seconds: number): string {
   const minutes = Math.floor(whole / 60);
   const rest = whole % 60;
   return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function normalizeMime(value: string): string {
+  return value.split(";")[0].trim().toLowerCase();
+}
+
+/** 从 ClipboardItem.types 里挑第一个 image/*，有 png 时优先 png。 */
+export function pickClipboardImageType(types: readonly string[]): string | null {
+  const images = types.filter((type) => normalizeMime(type).startsWith("image/"));
+  if (images.length === 0) return null;
+  return images.find((type) => normalizeMime(type) === "image/png") ?? images[0];
+}
+
+/** 形如 clipboard-20261120-153000.png；未知 mime 一律用 png。 */
+export function clipboardImageFilename(mime: string, date: Date): string {
+  const ext = CLIPBOARD_IMAGE_EXTENSIONS[normalizeMime(mime)] ?? "png";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
+    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  return `clipboard-${stamp}.${ext}`;
+}
+
+export function isRelayImage(item: Pick<RelayItem, "kind" | "mime_type">): boolean {
+  return item.kind === "file" && Boolean(item.mime_type && normalizeMime(item.mime_type).startsWith("image/"));
 }

@@ -1,5 +1,6 @@
 package com.memoisle.app.data
 
+import java.util.Calendar
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -40,6 +41,7 @@ class RelayTest {
                 .put("text", JSONObject.NULL),
         )
         assertFalse(item.isText)
+        assertFalse(item.isImage)
         assertEquals("报告.pdf", item.filename)
         assertEquals("application/pdf", item.mimeType)
         assertEquals(21_000_000L, item.size)
@@ -68,5 +70,49 @@ class RelayTest {
         assertEquals("已过期", formatRelayRemaining(0))
         assertEquals("手机", relayDeviceLabel(RELAY_DEVICE_ANDROID))
         assertEquals("网页", relayDeviceLabel(RELAY_DEVICE_WEB))
+    }
+
+    @Test
+    fun detectsImageItemsAndClipboardNames() {
+        val image = RelayItem.fromJson(
+            JSONObject()
+                .put("id", "i1").put("kind", "file").put("source", "web").put("target", "android")
+                .put("filename", "shot.jpg").put("mime_type", "image/jpeg")
+                .put("size", 1200L).put("created_at", "2026-11-20T08:00:00Z")
+                .put("expires_at", "2026-11-20T08:10:00Z").put("expires_in", 600)
+                .put("text", JSONObject.NULL),
+        )
+        assertTrue(image.isImage)
+        assertFalse(image.isText)
+
+        val text = RelayItem.fromJson(
+            JSONObject()
+                .put("id", "t1").put("kind", "text").put("source", "web").put("target", "android")
+                .put("filename", JSONObject.NULL).put("mime_type", "image/png")
+                .put("size", 4L).put("created_at", "2026-11-20T08:00:00Z")
+                .put("expires_at", "2026-11-20T08:10:00Z").put("expires_in", 600)
+                .put("text", "hi"),
+        )
+        assertFalse(text.isImage)
+
+        assertEquals("png", relayImageExtension("image/png"))
+        assertEquals("jpg", relayImageExtension("image/jpeg"))
+        assertEquals("jpg", relayImageExtension("image/jpg"))
+        assertEquals("gif", relayImageExtension("IMAGE/GIF"))
+        assertEquals("webp", relayImageExtension("image/webp; charset=binary"))
+        assertEquals("png", relayImageExtension(null))
+        assertEquals("png", relayImageExtension("application/pdf"))
+
+        val calendar = Calendar.getInstance()
+        calendar.clear()
+        calendar.set(2026, Calendar.NOVEMBER, 20, 15, 30, 0)
+        assertEquals(
+            "clipboard-20261120-153000.png",
+            relayClipboardImageName("image/png", calendar.timeInMillis),
+        )
+        assertEquals(
+            "clipboard-20261120-153000.jpg",
+            relayClipboardImageName("image/jpeg", calendar.timeInMillis),
+        )
     }
 }

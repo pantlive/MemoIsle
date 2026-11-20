@@ -9624,7 +9624,7 @@ summary:focus-visible {
   .ledger-dialog { padding: 18px; }
 }
 
-/* 传输：网页与手机互传文字、小文件 */
+/* 传输：网页与手机互传文字、图片、小文件 */
 .relay-panel { display: grid; gap: 18px; min-width: 0; }
 .relay-panel .page-heading { margin-bottom: 0; }
 .relay-card { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); min-width: 0; }
