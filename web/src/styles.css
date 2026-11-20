@@ -6789,6 +6789,22 @@ button.template-node-copy {
   user-select: all;
 }
 
+.vault-totp-qr {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.vault-totp-secret {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .vault-readonly-list {
   margin: 0;
   padding-left: 18px;

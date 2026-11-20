@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.database import Database
@@ -189,7 +190,8 @@ def test_history_marks_saved_with_indexed_lookup(client: TestClient) -> None:
                 {
                     "page_url": "https://example.com/guide",
                     "page_title": "指南",
-                    "visited_at": "2026-10-20T08:00:00Z",
+                    # 列表默认只看最近 30 天，用相对时间免得测试过期。
+                    "visited_at": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
                 },
             ],
         },

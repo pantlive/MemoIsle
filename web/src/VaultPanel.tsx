@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import QRCode from "qrcode";
 
 import {
   ApiError,
@@ -63,7 +64,7 @@ import {
   touchVaultSession,
 } from "./vaultSession";
 import Icon from "./Icon";
-import { vaultGate } from "./vaultAccess";
+import { formatTotpSecret, vaultGate } from "./vaultAccess";
 
 const CLIPBOARD_CLEAR_MS = 30_000;
 const RESET_PHRASE = "清空密码库";
@@ -243,6 +244,8 @@ export default function VaultPanel() {
   const [allowlistText, setAllowlistText] = useState("");
   const [totpDraft, setTotpDraft] = useState<VaultTotpSetup | null>(null);
   const [totpCode, setTotpCode] = useState("");
+  const [totpQrVisible, setTotpQrVisible] = useState(false);
+  const [totpQrDataUrl, setTotpQrDataUrl] = useState("");
 
   useEffect(() => {
     if (!importState && !changeOpen) return;
@@ -494,13 +497,41 @@ export default function VaultPanel() {
     setBusy(true);
     setFormError("");
     try {
+      setTotpQrVisible(false);
+      setTotpQrDataUrl("");
       setTotpDraft(await setupVaultTotp());
       setTotpCode("");
-      setNotice("已生成新的身份验证器密钥。确认动态码之前，原来的动态码不能使用。");
+      setNotice("已生成新的身份验证器密钥。确认之前，原来的动态码继续有效。");
     } catch (error) {
       if (!applyGate(error)) setFormError(describe(error));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** 收起待确认的密钥和二维码，页面上不留密钥。后端未确认的密钥下次生成会被覆盖。 */
+  const clearTotpDraft = () => {
+    setTotpDraft(null);
+    setTotpCode("");
+    setTotpQrVisible(false);
+    setTotpQrDataUrl("");
+  };
+
+  /** 二维码只在本地生成，不经过任何在线服务。 */
+  const toggleTotpQr = async () => {
+    if (!totpDraft) return;
+    if (totpQrVisible) {
+      setTotpQrVisible(false);
+      setTotpQrDataUrl("");
+      return;
+    }
+    try {
+      const uri = totpDraft.otpauth_uri;
+      const dataUrl = await QRCode.toDataURL(uri, { errorCorrectionLevel: "M", margin: 2, width: 220 });
+      setTotpQrDataUrl(dataUrl);
+      setTotpQrVisible(true);
+    } catch {
+      setFormError("二维码生成失败，请手动输入密钥。");
     }
   };
 
@@ -511,8 +542,7 @@ export default function VaultPanel() {
     setFormError("");
     try {
       await confirmVaultTotp(totpCode.trim());
-      setTotpDraft(null);
-      setTotpCode("");
+      clearTotpDraft();
       setTotpAvailable(true);
       if (security) setSecurity({ ...security, totp_enabled: true });
       setNotice("身份验证器已绑定。之后可以用动态码代替邮箱验证码。");
@@ -987,9 +1017,27 @@ export default function VaultPanel() {
             </button>
             {totpDraft && (
               <form onSubmit={(event) => void handleConfirmTotp(event)}>
-                <p>把下面的密钥或链接加到身份验证器，再输入当前动态码确认。确认前不会启用。</p>
-                <p className="vault-secret-text">{totpDraft.secret}</p>
-                <p className="vault-secret-text">{totpDraft.otpauth_uri}</p>
+                <p>用身份验证器扫描二维码，或手动输入密钥，再输入当前动态码确认。确认之前，原来的动态码继续有效。</p>
+                <button type="button" aria-expanded={totpQrVisible} onClick={() => void toggleTotpQr()}>
+                  {totpQrVisible ? "隐藏二维码" : "显示二维码"}
+                </button>
+                {totpQrVisible && totpQrDataUrl && (
+                  <img
+                    className="vault-totp-qr"
+                    src={totpQrDataUrl}
+                    width={220}
+                    height={220}
+                    alt="身份验证器绑定二维码，用身份验证器 App 扫描"
+                  />
+                )}
+                <div className="vault-totp-secret">
+                  <p className="vault-secret-text">{formatTotpSecret(totpDraft.secret)}</p>
+                  <button type="button" onClick={() => void copyValue(totpDraft.secret, "密钥")}>复制密钥</button>
+                </div>
+                <details>
+                  <summary>无法扫码？查看链接</summary>
+                  <p className="vault-secret-text">{totpDraft.otpauth_uri}</p>
+                </details>
                 <label className="vault-field">
                   <span className="vault-field-label"><span>动态码</span></span>
                   <input
@@ -1002,6 +1050,9 @@ export default function VaultPanel() {
                 </label>
                 <button type="submit" className="primary" disabled={busy || totpCode.trim().length < 6}>
                   确认绑定
+                </button>
+                <button type="button" disabled={busy} onClick={clearTotpDraft}>
+                  取消
                 </button>
               </form>
             )}

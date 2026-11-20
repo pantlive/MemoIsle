@@ -626,6 +626,10 @@ class Database:
                         "ADD COLUMN alert_suppressed_count INTEGER "
                         "NOT NULL DEFAULT 0"
                     ),
+                    "totp_pending_secret_cipher": (
+                        "ALTER TABLE vault_security_setting "
+                        "ADD COLUMN totp_pending_secret_cipher TEXT"
+                    ),
                 }
                 for name, statement in security_migrations.items():
                     if name not in security_columns:

@@ -1330,6 +1330,11 @@ class VaultSecuritySetting(Base):
 
     user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     totp_secret_cipher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 重新生成但还没确认的新密钥（密文）。确认通过后才替换上面的正式密钥。
+    totp_pending_secret_cipher: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
     totp_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

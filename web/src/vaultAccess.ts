@@ -8,3 +8,9 @@ export function vaultGate(code: string | undefined): VaultGate | null {
   if (code === "vault_step_up_required") return "step_up";
   return null;
 }
+
+/** 身份验证器密钥每 4 个字符空一格，方便手动抄写。复制时仍用原始密钥。 */
+export function formatTotpSecret(secret: string): string {
+  const compact = secret.replace(/\s+/g, "");
+  return compact.match(/.{1,4}/g)?.join(" ") ?? "";
+}

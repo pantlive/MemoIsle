@@ -63,6 +63,8 @@ CODE_HASH_PURPOSE = "vault-access-code"
 TOTP_STEP_SECONDS = 30
 TOTP_DIGITS = 6
 TOTP_WINDOW = 1
+TOTP_ISSUER = "MemoIsle"
+TOTP_ACCOUNT_NAME = "密码库"
 
 
 class VaultAccessError(Exception):
@@ -930,6 +932,7 @@ def _ensure_setting(session: Session, user_id: str) -> VaultSecuritySetting:
         setting = VaultSecuritySetting(
             user_id=user_id,
             totp_secret_cipher=None,
+            totp_pending_secret_cipher=None,
             totp_enabled=False,
             ip_allowlist=[],
             totp_failure_count=0,
@@ -1056,6 +1059,20 @@ def _current_totp_secret(
         return None
 
 
+def _pending_totp_secret(
+    session: Session,
+    settings: Settings,
+    user_id: str,
+) -> str | None:
+    setting = security_setting(session, user_id)
+    if setting is None or not setting.totp_pending_secret_cipher:
+        return None
+    try:
+        return decrypt_credential(settings, setting.totp_pending_secret_cipher)
+    except CloudCredentialRejectedError:
+        return None
+
+
 def _totp_matches(
     session: Session,
     settings: Settings,
@@ -1073,19 +1090,23 @@ def begin_totp_setup(
     session: Session,
     auth: AuthContext,
 ) -> tuple[str, str]:
-    """生成密钥并加密保存，但要等确认动态码后才启用。"""
+    """生成新密钥，只存进待确认列。
+
+    正在用的密钥和启用状态都不动，确认之前原来的动态码继续有效。
+    重复生成只覆盖待确认的那个。
+    """
 
     settings = _settings(request)
     secret = generate_totp_secret()
     setting = _ensure_setting(session, auth.user_id)
-    setting.totp_secret_cipher = encrypt_credential(settings, secret)
-    setting.totp_enabled = False
+    setting.totp_pending_secret_cipher = encrypt_credential(settings, secret)
     session.commit()
-    user = session.get(User, auth.user_id)
-    account = (user.email if user and user.email else "vault").strip()
+    # 账户名固定，不把邮箱写进身份验证器 App。
+    label = quote(f"{TOTP_ISSUER}:{TOTP_ACCOUNT_NAME}")
     uri = (
-        f"otpauth://totp/MemoIsle:{quote(account)}"
-        f"?secret={secret}&issuer=MemoIsle&algorithm=SHA1&digits=6&period=30"
+        f"otpauth://totp/{label}"
+        f"?secret={secret}&issuer={quote(TOTP_ISSUER)}"
+        "&algorithm=SHA1&digits=6&period=30"
     )
     return secret, uri
 
@@ -1096,23 +1117,28 @@ def confirm_totp(
     auth: AuthContext,
     code: str,
 ) -> None:
-    """用当前密钥算出的动态码确认绑定。确认前不能拿它换授权。"""
+    """用待确认密钥算出的动态码确认绑定，通过后才替换正式密钥。"""
 
     settings = _settings(request)
     setting = security_setting(session, auth.user_id)
-    if setting is None or not setting.totp_secret_cipher:
+    pending = _pending_totp_secret(session, settings, auth.user_id)
+    if setting is None or pending is None:
         raise VaultAccessError(
             status.HTTP_400_BAD_REQUEST,
             "vault_totp_unavailable",
             "请先生成身份验证器密钥",
         )
-    if not _totp_matches(session, settings, auth.user_id, code):
+    if not verify_totp(pending, code):
         raise VaultAccessError(
             status.HTTP_403_FORBIDDEN,
             "vault_code_invalid",
             "动态码不正确，绑定尚未生效",
         )
+    setting.totp_secret_cipher = setting.totp_pending_secret_cipher
+    setting.totp_pending_secret_cipher = None
     setting.totp_enabled = True
+    setting.totp_failure_count = 0
+    setting.totp_failure_window_started_at = None
     session.commit()
 
 
