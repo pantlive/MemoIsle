@@ -29,6 +29,8 @@ import type {
   LedgerQuickResult,
   LedgerSummary,
   LinkHealthAction,
+  RelayDevice,
+  RelayItem,
   LinkHealthCenter,
   LinkHealthStatus,
   Memo,
@@ -969,6 +971,103 @@ export async function getLedgerSummary(month: string): Promise<LedgerSummary> {
 
 export async function listLedgerCategories(): Promise<LedgerCategoryUsage[]> {
   return request<LedgerCategoryUsage[]>("/ledger/categories");
+}
+
+/** 中转里网页这一端的设备名；发给手机时 target 为 android。 */
+export const RELAY_SELF: RelayDevice = "web";
+export const RELAY_PEER: RelayDevice = "android";
+/** 与服务端上限一致：文本 100 KB（UTF-8 字节），文件 20 MB。 */
+export const RELAY_MAX_TEXT_BYTES = 100 * 1024;
+export const RELAY_MAX_FILE_BYTES = 20 * 1024 * 1024;
+/** 长轮询每次最多等 25 秒，服务端上限也是 25。 */
+export const RELAY_WAIT_SECONDS = 25;
+
+export function relayFileUrl(filename: string, target: RelayDevice = RELAY_PEER): string {
+  const params = new URLSearchParams({ target, filename, source: RELAY_SELF });
+  return `${API_BASE_URL}/relay/file?${params}`;
+}
+
+/**
+ * 收件箱地址。knownIds 是界面上已经显示的条目：服务端列表与它相同时会等到
+ * 有新内容或有内容被取走才返回，列表里放着没处理的内容时也不会空转。
+ */
+export function relayInboxPath(
+  waitSeconds: number,
+  knownIds: readonly string[] = [],
+  device: RelayDevice = RELAY_SELF,
+): string {
+  const wait = Math.max(0, Math.min(RELAY_WAIT_SECONDS, Math.floor(waitSeconds)));
+  const params = new URLSearchParams({ device, wait: String(wait) });
+  if (knownIds.length > 0) {
+    params.set("known", knownIds.join(","));
+  }
+  return `/relay/inbox?${params}`;
+}
+
+export async function sendRelayText(text: string, target: RelayDevice = RELAY_PEER): Promise<RelayItem> {
+  return request<RelayItem>("/relay/text", {
+    method: "POST",
+    body: JSON.stringify({ text, target, source: RELAY_SELF }),
+  });
+}
+
+/** 文件以原始字节上传，不走 multipart；写法与 recognizeLedgerImage 一致。 */
+export async function sendRelayFile(file: File, target: RelayDevice = RELAY_PEER): Promise<RelayItem> {
+  const accessToken = getAccessToken();
+  const response = await fetch(relayFileUrl(file.name || "file", target), {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-MemoIsle-Client": "web",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: file,
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string } | Array<{ msg?: string }>;
+    } | null;
+    throw new ApiError(
+      readApiErrorDetail(payload?.detail, `发送失败（${response.status}）`),
+      response.status,
+    );
+  }
+  return (await response.json()) as RelayItem;
+}
+
+/** 长轮询收件箱：waitSeconds 为 0 时立即返回；signal 用于关闭面板时中断等待。 */
+export async function pollRelayInbox(
+  waitSeconds: number,
+  knownIds: readonly string[] = [],
+  signal?: AbortSignal,
+): Promise<RelayItem[]> {
+  return request<RelayItem[]>(relayInboxPath(waitSeconds, knownIds), { signal });
+}
+
+/** 取走一条内容（服务端随即删除），返回内容字节。 */
+export async function downloadRelayItem(id: string): Promise<Blob> {
+  const accessToken = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/relay/items/${encodeURIComponent(id)}/download`, {
+    headers: {
+      "X-MemoIsle-Client": "web",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAccessToken();
+    }
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new ApiError(payload?.detail ?? `下载失败（${response.status}）`, response.status);
+  }
+  return response.blob();
+}
+
+export async function discardRelayItem(id: string): Promise<void> {
+  await request<void>(`/relay/items/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function listQuickAccess(limit = 8): Promise<Memo[]> {

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -93,6 +94,7 @@ import androidx.core.content.ContextCompat
 import com.memoisle.app.MemoViewModel
 import com.memoisle.app.VaultViewModel
 import com.memoisle.app.LedgerViewModel
+import com.memoisle.app.RelayViewModel
 import com.memoisle.app.audio.SherpaOnnxSpeechToText
 import com.memoisle.app.audio.VoiceRecorder
 import com.memoisle.app.audio.VoiceRecording
@@ -131,6 +133,7 @@ fun MemoHomeScreen(
     viewModel: MemoViewModel,
     vaultViewModel: VaultViewModel,
     ledgerViewModel: LedgerViewModel,
+    relayViewModel: RelayViewModel,
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -172,6 +175,7 @@ fun MemoHomeScreen(
     var showInbox by rememberSaveable { mutableStateOf(false) }
     var showVault by rememberSaveable { mutableStateOf(false) }
     var showLedger by rememberSaveable { mutableStateOf(false) }
+    var showRelay by rememberSaveable { mutableStateOf(false) }
     var pendingPermanentDelete by remember { mutableStateOf<Memo?>(null) }
     var pendingMoveToTrash by remember { mutableStateOf<Memo?>(null) }
     var showReviewAnswer by rememberSaveable { mutableStateOf(false) }
@@ -596,6 +600,10 @@ fun MemoHomeScreen(
         if (activeType == TYPE_RESOURCE) viewModel.loadQuickAccess()
     }
 
+    if (showRelay) {
+        RelayScreen(viewModel = relayViewModel, onClose = { showRelay = false })
+        return
+    }
     if (showLedger) {
         LedgerScreen(viewModel = ledgerViewModel, onClose = { showLedger = false })
         return
@@ -672,6 +680,11 @@ fun MemoHomeScreen(
                         showAllMemos = false
                         selectedMemo = null
                     },
+                    onShowRelay = {
+                        showVault = false
+                        showLedger = false
+                        showRelay = true
+                    },
                     onRefresh = viewModel::refresh,
                     onExport = { exportLauncher.launch("memoisle-export.json") },
                     onLogout = ::requestLogout,
@@ -700,8 +713,8 @@ fun MemoHomeScreen(
                     showReviewAnswer = false
                 },
                 vaultReminderCount = vaultViewModel.lastReminderCount,
-                onShowVault = { showLedger = false; showVault = true },
-                onShowLedger = { showVault = false; showLedger = true },
+                onShowVault = { showLedger = false; showRelay = false; showVault = true },
+                onShowLedger = { showVault = false; showRelay = false; showLedger = true },
             )
         },
         floatingActionButton = {
@@ -1571,6 +1584,7 @@ private fun TopBarActions(
     isExporting: Boolean,
     onShowInbox: () -> Unit,
     onShowTrash: () -> Unit,
+    onShowRelay: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
     onLogout: () -> Unit,
@@ -1587,6 +1601,9 @@ private fun TopBarActions(
                 Icon(Icons.Outlined.Inbox, contentDescription = "收件箱，$inboxCount 条待整理")
             }
         }
+    }
+    IconButton(onClick = onShowRelay) {
+        Icon(Icons.Outlined.SwapHoriz, contentDescription = "传输：与网页互传文字和文件")
     }
     IconButton(onClick = onRefresh, enabled = !isRefreshing) {
         if (isRefreshing) {

@@ -37,6 +37,9 @@ class MainActivity : ComponentActivity() {
     private val ledgerViewModel: LedgerViewModel by viewModels {
         LedgerViewModel.factory((application as MemoIsleApplication).api)
     }
+    private val relayViewModel: RelayViewModel by viewModels {
+        RelayViewModel.factory((application as MemoIsleApplication).api)
+    }
     private var sharedText by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +61,7 @@ class MainActivity : ComponentActivity() {
                     // 退出登录后内存里不留解锁后的库密钥。
                     vaultViewModel.reset()
                     ledgerViewModel.reset()
+                    relayViewModel.reset()
                 }
             }
             MemoIsleTheme {
@@ -66,6 +70,7 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         vaultViewModel = vaultViewModel,
                         ledgerViewModel = ledgerViewModel,
+                        relayViewModel = relayViewModel,
                         sharedText = sharedText,
                         onSharedTextConsumed = { sharedText = null },
                         onLogout = authViewModel::logout,

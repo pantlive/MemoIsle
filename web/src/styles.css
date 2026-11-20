@@ -9607,3 +9607,29 @@ summary:focus-visible {
   .ledger-fields { grid-template-columns: minmax(0, 1fr); }
   .ledger-dialog { padding: 18px; }
 }
+
+/* 传输：网页与手机互传文字、小文件 */
+.relay-panel { display: grid; gap: 18px; min-width: 0; }
+.relay-panel .page-heading { margin-bottom: 0; }
+.relay-card { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); min-width: 0; }
+.relay-card h2 { margin: 0; font-size: 18px; }
+.relay-card h2 small { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.relay-panel textarea { width: 100%; min-height: 96px; resize: vertical; font: inherit; }
+.relay-panel button { display: inline-flex; align-items: center; gap: 6px; }
+.relay-panel button.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.relay-panel button:disabled { opacity: .55; cursor: not-allowed; }
+.relay-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.relay-drop { padding: 18px; border: 1px dashed var(--border); border-radius: 12px; text-align: center; color: var(--muted); font-size: 13px; }
+.relay-drop.active { border-color: var(--primary); color: var(--primary); }
+.relay-notice, .relay-error, .relay-empty { margin: 0; }
+.relay-error { color: var(--danger); }
+.relay-empty { padding: 24px 12px; text-align: center; color: var(--muted); }
+.relay-items { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.relay-item { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; }
+.relay-item-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.relay-item-info small { display: block; margin-bottom: 6px; color: var(--muted); }
+.relay-item-info pre { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; user-select: text; }
+@media (max-width: 600px) {
+  .relay-item { flex-wrap: wrap; gap: 10px; }
+  .relay-item .relay-actions { width: 100%; justify-content: flex-end; }
+}
