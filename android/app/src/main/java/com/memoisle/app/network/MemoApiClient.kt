@@ -1,5 +1,6 @@
 package com.memoisle.app.network
 
+import com.memoisle.app.data.AndroidRelease
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
@@ -953,6 +954,58 @@ class MemoApiClient(baseUrl: String) {
                 throw ApiException(statusCode, responseBody)
             }
             connection.inputStream.use { input -> input.copyTo(output) }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /** 读取服务端已发布的安装包版本；未发布（404）或内容不完整时返回 null。 */
+    fun getLatestAndroidRelease(): AndroidRelease? {
+        val body = try {
+            executeText("GET", "android/latest")
+        } catch (error: ApiException) {
+            if (error.statusCode == 404) return null
+            throw error
+        }
+        return AndroidRelease.fromJson(JSONObject(body.ifBlank { "{}" }))
+    }
+
+    /**
+     * 把已发布的安装包流式写到 [target]。只请求固定的下载接口，不跟随服务端给的任意地址。
+     * [onProgress] 在下载线程上回调已写入字节数和总字节数（未知时为 -1），可在其中抛出取消异常中止下载。
+     */
+    fun downloadApk(target: Path, onProgress: (downloaded: Long, total: Long) -> Unit) {
+        val connection = URL(normalizedBaseUrl + "android/download").openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("Accept", "application/vnd.android.package-archive")
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            val total = connection.contentLengthLong
+            target.parent?.let { Files.createDirectories(it) }
+            connection.inputStream.use { input ->
+                Files.newOutputStream(target).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var downloaded = 0L
+                    onProgress(0L, total)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        onProgress(downloaded, total)
+                    }
+                }
+            }
         } finally {
             connection.disconnect()
         }

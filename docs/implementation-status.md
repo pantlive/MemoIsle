@@ -135,6 +135,7 @@ Web / Android 搜索
 | GET | `/api/v1/health` | 健康检查 |
 | GET | `/api/v1/auth/providers` | 读取可用登录方式；第三方登录默认全部关闭 |
 | GET/HEAD | `/api/v1/android/download` | 公开下载签名 Android APK，支持断点续传 |
+| GET | `/api/v1/android/latest` | 公开读取已发布 APK 的版本号、SHA-256、大小和更新说明，供安卓端自动更新；未发布返回 404 |
 | POST | `/api/v1/auth/register` | 使用邮箱和密码注册 |
 | POST | `/api/v1/auth/login` | 使用邮箱和密码登录 |
 | POST | `/api/v1/auth/verification-code` | 发送六位邮箱注册验证码；需要邀请时先校验邀请码 |

@@ -101,6 +101,9 @@ curl --fail https://memo.17115859.xyz:9443/api/v1/health
 
 登录页、桌面顶栏和设置页的下载入口指向 `/api/v1/android/download`，无需登录。
 生产签名 APK 独立保存在 `/opt/memoisle/downloads/memoisle-android.apk`，由后端直接
-提供下载，支持 HEAD 和 Range。更换安装包时先完整上传为临时文件，再原子替换；
-不需要重启服务。网站发布时保留 `downloads`，私钥与签名配置只保存在构建机器，
+提供下载，支持 HEAD 和 Range。签名脚本同时生成的版本信息 `memoisle-android.json`
+要一起放到同一目录，安卓端通过公开接口 `/api/v1/android/latest` 读取它来提示自动更新；
+自定义位置可设置 `MEMOISLE_ANDROID_APK_METADATA_PATH`。缺少 JSON 或 JSON 里的大小
+与 APK 不一致时接口返回 404，手机端不提示更新。更换安装包时先完整上传为临时文件，
+再原子替换，先换 APK 再换 JSON；不需要重启服务。网站发布时保留 `downloads`，私钥与签名配置只保存在构建机器，
 不要上传到 Web 目录。构建与签名流程见 [Android 说明](../android/README.md#网站下载安装包)。

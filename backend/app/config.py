@@ -21,6 +21,8 @@ DEFAULT_IMAGE_DIRECTORY = PROJECT_ROOT.parent / "data" / "images"
 DEFAULT_SANOTTS_CACHE_DIRECTORY = PROJECT_ROOT.parent / "data" / "sanotts"
 DEFAULT_EMAIL_OUTBOX_DIRECTORY = PROJECT_ROOT.parent / "data" / "email_outbox"
 DEFAULT_ANDROID_APK_PATH = PROJECT_ROOT / "downloads" / "memoisle-android.apk"
+# 签名脚本在 APK 旁边生成的版本信息文件名。
+ANDROID_APK_METADATA_FILENAME = "memoisle-android.json"
 DEFAULT_WORD_DICTIONARY_BASE_URL = (
     "https://freedictionaryapi.com/api/v1/entries/en"
 )
@@ -241,6 +243,8 @@ class Settings:
     word_bilingual_dictionary_url: str = DEFAULT_WORD_BILINGUAL_DICTIONARY_URL
     word_bilingual_suggest_url: str = DEFAULT_WORD_BILINGUAL_SUGGEST_URL
     android_apk_path: Path = DEFAULT_ANDROID_APK_PATH
+    # 安卓安装包版本信息；未设置时使用 APK 同目录的 memoisle-android.json。
+    android_apk_metadata_path: Path | None = None
     # 网页密码库授权固定 4 小时，手机 24 小时；读数据不会延长。
     vault_web_grant_hours: int = 4
     vault_mobile_grant_hours: int = 24
@@ -349,6 +353,11 @@ class Settings:
         return cls(
             android_apk_path=Path(
                 os.environ.get("MEMOISLE_ANDROID_APK_PATH", DEFAULT_ANDROID_APK_PATH),
+            ),
+            android_apk_metadata_path=(
+                Path(os.environ["MEMOISLE_ANDROID_APK_METADATA_PATH"])
+                if os.environ.get("MEMOISLE_ANDROID_APK_METADATA_PATH")
+                else None
             ),
             database_url=database_url,
             cors_origins=cors_origins,
