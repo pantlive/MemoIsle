@@ -36,7 +36,7 @@
                     android:path="/callback" />
             </intent-filter>
         </activity>
-        <!-- 只开放 cache/updates/，把下载好的更新包交给系统安装器；authority 带 applicationId，debug 包不冲突。 -->
+        <!-- 开放 cache/updates/ 与 cache/relay_clipboard/；authority 带 applicationId，debug 包不冲突。 -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.updates"

@@ -1,5 +1,8 @@
 package com.memoisle.app.data
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.json.JSONObject
 
@@ -29,6 +32,8 @@ data class RelayItem(
     val text: String?,
 ) {
     val isText: Boolean get() = kind == "text"
+    val isImage: Boolean get() = kind == "file" && mimeType.orEmpty().substringBefore(';')
+        .trim().startsWith("image/", ignoreCase = true)
 
     companion object {
         fun fromJson(json: JSONObject): RelayItem = RelayItem(
@@ -82,3 +87,27 @@ fun formatRelayRemaining(seconds: Long): String {
     if (seconds <= 0) return "已过期"
     return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 }
+
+fun relayImageExtension(mime: String?): String = when (
+    mime.orEmpty().substringBefore(';').trim().lowercase(Locale.ROOT)
+) {
+    "image/png" -> "png"
+    "image/jpeg", "image/jpg" -> "jpg"
+    "image/gif" -> "gif"
+    "image/webp" -> "webp"
+    "image/bmp" -> "bmp"
+    "image/svg+xml" -> "svg"
+    "image/heic" -> "heic"
+    "image/heif" -> "heif"
+    else -> "png"
+}
+
+fun relayClipboardImageName(mimeType: String?, timeMillis: Long): String {
+    val stamp = Instant.ofEpochMilli(timeMillis)
+        .atZone(ZoneId.systemDefault())
+        .format(CLIPBOARD_IMAGE_TIME)
+    return "clipboard-$stamp.${relayImageExtension(mimeType)}"
+}
+
+private val CLIPBOARD_IMAGE_TIME: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT)

@@ -10,7 +10,10 @@ import {
   sendRelayText,
 } from "../api";
 import { isStandaloneView, readAppRoute, routeHref } from "../appRoute";
-import { formatBytes, formatRemaining, relayFileError, relayTextError } from "../relay";
+import {
+  clipboardImageFilename, formatBytes, formatRemaining, isRelayImage, pickClipboardImageType,
+  relayFileError, relayTextError,
+} from "../relay";
 import { navigation } from "../workspaceViews";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -116,5 +119,34 @@ describe("传输本地校验与文案", () => {
     expect(formatRemaining(599.2)).toBe("10:00");
     expect(formatRemaining(61)).toBe("1:01");
     expect(formatRemaining(0)).toBe("已过期");
+  });
+});
+
+describe("剪贴板图片", () => {
+  it("有图时挑 image/*，没图返回 null，png 优先", () => {
+    expect(pickClipboardImageType(["text/plain", "text/html"])).toBeNull();
+    expect(pickClipboardImageType([])).toBeNull();
+    expect(pickClipboardImageType(["image/jpeg"])).toBe("image/jpeg");
+    expect(pickClipboardImageType(["text/plain", "image/webp"])).toBe("image/webp");
+    expect(pickClipboardImageType(["image/jpeg", "image/png"])).toBe("image/png");
+    expect(pickClipboardImageType(["image/png", "image/jpeg"])).toBe("image/png");
+    expect(pickClipboardImageType(["image/png; charset=binary", "image/jpeg"])).toBe("image/png; charset=binary");
+  });
+
+  it("按 mime 生成 clipboard-时间戳.扩展名，未知类型用 png", () => {
+    const at = new Date(2026, 10, 20, 15, 30, 0);
+    expect(clipboardImageFilename("image/png", at)).toBe("clipboard-20261120-153000.png");
+    expect(clipboardImageFilename("image/jpeg", at)).toBe("clipboard-20261120-153000.jpg");
+    expect(clipboardImageFilename("image/webp", new Date(2026, 0, 2, 9, 5, 7))).toBe("clipboard-20260102-090507.webp");
+    expect(clipboardImageFilename("image/unknown", at)).toBe("clipboard-20261120-153000.png");
+    expect(clipboardImageFilename("IMAGE/GIF; charset=binary", at)).toBe("clipboard-20261120-153000.gif");
+  });
+
+  it("文件且 mime 以 image/ 开头才算图片", () => {
+    expect(isRelayImage({ kind: "file", mime_type: "image/jpeg" })).toBe(true);
+    expect(isRelayImage({ kind: "file", mime_type: "image/png; charset=binary" })).toBe(true);
+    expect(isRelayImage({ kind: "file", mime_type: "application/pdf" })).toBe(false);
+    expect(isRelayImage({ kind: "file", mime_type: null })).toBe(false);
+    expect(isRelayImage({ kind: "text", mime_type: "image/png" })).toBe(false);
   });
 });

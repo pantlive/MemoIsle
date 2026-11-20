@@ -15,6 +15,7 @@ import com.memoisle.app.data.RELAY_WAIT_SECONDS
 import com.memoisle.app.data.RelayItem
 import com.memoisle.app.data.formatRelayBytes
 import com.memoisle.app.data.relayFileError
+import com.memoisle.app.data.relayImageExtension
 import com.memoisle.app.data.relayTextError
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
@@ -26,6 +27,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Locale
 
 data class RelayUiState(
     val items: List<RelayItem> = emptyList(),
@@ -40,7 +43,7 @@ data class RelayUiState(
 )
 
 /**
- * 手机与网页互传文字或小文件。服务端只在内存里转发，取走即删，10 分钟内有效。
+ * 手机与网页互传文字、图片或小文件。服务端只在内存里转发，取走即删，10 分钟内有效。
  * 界面可见期间循环长轮询收件箱；退出登录时 [reset]。
  */
 class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
@@ -108,13 +111,18 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
     }
 
     /** 读系统文件选择器选中的文件并发送；先查大小，超过 20 MB 不读入内存。 */
-    fun sendFile(uri: Uri, contentResolver: ContentResolver) {
+    fun sendFile(uri: Uri, contentResolver: ContentResolver, fallbackName: String? = null) {
         runAction(sending = true) {
-            val (name, size) = withContext(Dispatchers.IO) { queryNameAndSize(contentResolver, uri) }
+            val (queriedName, size) = withContext(Dispatchers.IO) { queryNameAndSize(contentResolver, uri) }
+            val name = resolveFileName(queriedName, fallbackName)
             relayFileError(name, size)?.let { throw IllegalArgumentException(it) }
             val bytes = withContext(Dispatchers.IO) { readLimited(contentResolver, uri, name) }
             relayFileError(name, bytes.size.toLong())?.let { throw IllegalArgumentException(it) }
-            val mimeType = contentResolver.getType(uri)
+            val queriedMime = contentResolver.getType(uri)?.ifBlank { null }
+            val mimeType = when {
+                queriedMime?.startsWith("image/") == true -> queriedMime
+                else -> mimeFromFileName(name) ?: queriedMime
+            }
             withContext(Dispatchers.IO) { api.sendRelayFile(bytes, name, mimeType) }
             uiState = uiState.copy(message = "「$name」（${formatRelayBytes(bytes.size.toLong())}）已发给网页，10 分钟内有效。")
         }
@@ -137,6 +145,40 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
             }
             removeLocal(item.id)
             uiState = uiState.copy(message = "已保存「${item.filename ?: "file"}」，服务端已删除这份内容。")
+        }
+    }
+
+    /**
+     * 把图片下载到 [cacheDir]/relay_clipboard/，取走即删。
+     * 写入前清掉该目录旧文件。成功后 [onReady] 把文件交给界面写入系统剪贴板。
+     */
+    fun copyImage(item: RelayItem, cacheDir: File, onReady: (File) -> Unit) {
+        runAction(busyId = item.id, onNotFound = { removeLocal(item.id) }) {
+            val file = withContext(Dispatchers.IO) { writeClipboardCache(cacheDir, item) }
+            removeLocal(item.id)
+            onReady(file)
+            if (uiState.error == null) {
+                uiState = uiState.copy(message = "图片已复制到剪贴板，服务端已删除。")
+            }
+        }
+    }
+
+    /** 剪贴板写入失败时，把已经取走的本地文件保存到用户选的位置。 */
+    fun saveCachedFile(file: File, uri: Uri, contentResolver: ContentResolver, displayName: String) {
+        runAction {
+            try {
+                withContext(Dispatchers.IO) {
+                    val output = contentResolver.openOutputStream(uri, "w")
+                        ?: throw java.io.IOException("无法写入所选位置")
+                    output.use { out -> file.inputStream().use { input -> input.copyTo(out) } }
+                }
+            } catch (error: Exception) {
+                withContext(Dispatchers.IO) {
+                    runCatching { DocumentsContract.deleteDocument(contentResolver, uri) }
+                }
+                throw error
+            }
+            uiState = uiState.copy(message = "无法写入剪贴板，已保存「$displayName」。")
         }
     }
 
@@ -200,6 +242,44 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         }
     }
 
+    private fun resolveFileName(queriedName: String, fallbackName: String?): String {
+        if (fallbackName.isNullOrBlank()) return queriedName.ifBlank { "file" }
+        if (queriedName.isBlank() || queriedName == "file") return fallbackName
+        val dot = queriedName.lastIndexOf('.')
+        if (dot <= 0 || dot == queriedName.lastIndex) return fallbackName
+        return queriedName
+    }
+
+    private fun mimeFromFileName(name: String): String? = when (
+        name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    ) {
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "bmp" -> "image/bmp"
+        "svg" -> "image/svg+xml"
+        "heic" -> "image/heic"
+        "heif" -> "image/heif"
+        else -> null
+    }
+
+    private fun writeClipboardCache(cacheDir: File, item: RelayItem): File {
+        val directory = File(cacheDir, CLIPBOARD_DIRECTORY)
+        if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory) {
+            throw java.io.IOException("无法准备剪贴板缓存目录")
+        }
+        directory.listFiles()?.forEach { old -> old.delete() }
+        val target = File(directory, "${item.id}.${relayImageExtension(item.mimeType)}")
+        try {
+            target.outputStream().use { api.downloadRelayItem(item.id, it) }
+        } catch (error: Exception) {
+            target.delete()
+            throw error
+        }
+        return target
+    }
+
     private fun queryNameAndSize(contentResolver: ContentResolver, uri: Uri): Pair<String, Long?> {
         val projection = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
         val row = runCatching {
@@ -252,6 +332,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
     companion object {
         private const val RETRY_BASE_MS = 2_000L
         private const val RETRY_MAX_MS = 30_000L
+        const val CLIPBOARD_DIRECTORY = "relay_clipboard"
         fun factory(api: MemoApiClient): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = RelayViewModel(api) as T
