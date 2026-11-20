@@ -265,7 +265,7 @@ class MemoApiClient(baseUrl: String) {
     fun downloadUserData(output: OutputStream): Unit {
         val connection = URL(normalizedBaseUrl + "exports/json")
             .openConnection() as HttpURLConnection
-            connection.applyMemoIsleHeaders()
+        connection.applyMemoIsleHeaders()
         try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 10_000
@@ -526,7 +526,7 @@ class MemoApiClient(baseUrl: String) {
         }
         val connection = URL(normalizedBaseUrl + "speech/tts")
             .openConnection() as HttpURLConnection
-            connection.applyMemoIsleHeaders()
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 8_000
@@ -600,7 +600,7 @@ class MemoApiClient(baseUrl: String) {
     fun downloadAudio(memoId: String, target: Path): Path {
         val connection = URL(normalizedBaseUrl + "memos/$memoId/audio")
             .openConnection() as HttpURLConnection
-            connection.applyMemoIsleHeaders()
+        connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 10_000
