@@ -45,6 +45,7 @@ import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -137,6 +138,10 @@ fun MemoHomeScreen(
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onLogout: () -> Unit = {},
+    updateCheckMessage: String? = null,
+    isCheckingUpdate: Boolean = false,
+    onCheckUpdate: () -> Unit = {},
+    onUpdateMessageShown: () -> Unit = {},
 ) {
     val memos by viewModel.memos.collectAsState()
     val uiState = viewModel.uiState
@@ -152,6 +157,13 @@ fun MemoHomeScreen(
         if (uri != null) {
             viewModel.exportUserData(uri, context.contentResolver)
         }
+    }
+    // 手动「检查更新」的结果：已是最新或检查失败。
+    LaunchedEffect(updateCheckMessage) {
+        val message = updateCheckMessage ?: return@LaunchedEffect
+        onUpdateMessageShown()
+        // 放到外层作用域显示：上面清掉消息会让本 effect 重启，不能让它取消 Snackbar。
+        coroutineScope.launch { snackbarHostState.showSnackbar(message) }
     }
     var draft by rememberSaveable { mutableStateOf("") }
     var selectedMemo by remember { mutableStateOf<Memo?>(null) }
@@ -666,6 +678,7 @@ fun MemoHomeScreen(
                     isRefreshing = uiState.isRefreshing,
                     isSaving = uiState.isSaving,
                     isExporting = uiState.isExporting,
+                    isCheckingUpdate = isCheckingUpdate,
                     onShowInbox = {
                         showInbox = true
                         showTrash = false
@@ -686,6 +699,7 @@ fun MemoHomeScreen(
                         showRelay = true
                     },
                     onRefresh = viewModel::refresh,
+                    onCheckUpdate = onCheckUpdate,
                     onExport = { exportLauncher.launch("memoisle-export.json") },
                     onLogout = ::requestLogout,
                 )
@@ -1573,7 +1587,7 @@ fun MemoHomeScreen(
     }
 }
 
-/** 顶栏右侧：收件箱（带待整理数）、同步，以及收纳回收站、导出和退出的菜单。 */
+/** 顶栏右侧：收件箱（带待整理数）、同步，以及收纳回收站、检查更新、导出和退出的菜单。 */
 @Composable
 private fun TopBarActions(
     inboxCount: Int,
@@ -1582,10 +1596,12 @@ private fun TopBarActions(
     isRefreshing: Boolean,
     isSaving: Boolean,
     isExporting: Boolean,
+    isCheckingUpdate: Boolean,
     onShowInbox: () -> Unit,
     onShowTrash: () -> Unit,
     onShowRelay: () -> Unit,
     onRefresh: () -> Unit,
+    onCheckUpdate: () -> Unit,
     onExport: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -1637,6 +1653,15 @@ private fun TopBarActions(
                     },
                 )
             }
+            DropdownMenuItem(
+                text = { Text(if (isCheckingUpdate) "检查中…" else "检查更新") },
+                leadingIcon = { Icon(Icons.Outlined.SystemUpdate, contentDescription = null) },
+                enabled = !isCheckingUpdate,
+                onClick = {
+                    menuOpen = false
+                    onCheckUpdate()
+                },
+            )
             DropdownMenuItem(
                 text = { Text(if (isExporting) "导出中…" else "导出数据") },
                 leadingIcon = { Icon(Icons.Outlined.FileDownload, contentDescription = null) },

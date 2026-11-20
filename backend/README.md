@@ -44,6 +44,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_AUDIO_DIRECTORY`：原始录音的本地开发存储目录。
 - `MEMOISLE_IMAGE_DIRECTORY`：图片收藏原图与缩略图的本地开发存储目录，默认 `data/images`。
 - `MEMOISLE_ANDROID_APK_PATH`：公开下载的已签名 Android APK 路径，默认仓库根目录下 `downloads/memoisle-android.apk`；`GET/HEAD /api/v1/android/download` 无需登录，支持 Range 断点续传，未发布时返回 404。
+- `MEMOISLE_ANDROID_APK_METADATA_PATH`：安卓安装包版本信息 JSON（由 `android/scripts/sign-release.py` 生成）路径，默认与 APK 同目录的 `memoisle-android.json`。`GET /api/v1/android/latest` 无需登录，返回 `version_code`、`version_name`、`sha256`、`size`、`release_notes` 和相对下载地址 `download_url`（`android/download`）；APK 或 JSON 缺失、字段不全或 `size` 与实际 APK 大小不一致时返回 404，响应带 `Cache-Control: no-cache`。
 - `MEMOISLE_LLM_BASE_URL`：OpenAI 兼容接口地址（例如 DeepSeek 的 `https://api.deepseek.com/v1`）；用于会议总结。
 - `MEMOISLE_LLM_API_KEY`：OpenAI 兼容接口密钥；本地无需鉴权的模型服务可留空。
 - `MEMOISLE_LLM_MODEL`：会议总结使用的模型名称，例如 `deepseek-chat`。

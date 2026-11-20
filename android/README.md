@@ -39,6 +39,7 @@ R8 删除 Room 无参构造方法导致的启动闪退。发布时必须实际�
 不会覆盖 R8 反射入口的裁剪行为。检查 `adb logcat -b crash`，并确认登录页出现且
 `/api/v1/auth/providers` 请求成功后，再替换网站下载包。
 `0.1.4` 更新了首页、资料详情和密码库界面，统一图标、排版、类型配色与返回交互。
+`0.1.5` 起支持应用内自动更新，见下方「应用内更新」。
 
 构建后使用 `scripts/sign-release.py` 签名。签名配置 JSON 需放在仓库外的私有目录，
 包含 `keystore`、`alias`、`store_password` 和 `key_password`；密钥与配置文件权限
@@ -49,14 +50,38 @@ R8 删除 Room 无参构造方法导致的启动闪退。发布时必须实际�
   -PMEMOISLE_API_BASE_URL=https://memo.17115859.xyz:9443/api/v1/
 python scripts/sign-release.py \
   --signing-config /private/path/signing.json \
-  --api-base-url https://memo.17115859.xyz:9443/api/v1/
+  --api-base-url https://memo.17115859.xyz:9443/api/v1/ \
+  --release-notes "本次更新的说明"
 ```
 
 脚本核对 APK 内的 API 地址，按 16 KB 对齐后签名并验证，输出
 `app/build/outputs/apk/release/memoisle-android.apk`。私钥和签名密码不进入安装包或仓库。
-将签名 APK 上传到服务器 `/opt/memoisle/downloads/memoisle-android.apk`，源码更新时
-保留该目录。自定义路径可设置后端环境变量 `MEMOISLE_ANDROID_APK_PATH`。
+签名验证通过后，脚本用 build-tools 里的 `aapt2 dump badging` 读出 versionCode 和
+versionName，并在 APK 同目录生成版本信息 `memoisle-android.json`，内容只有
+`versionCode`、`versionName`、`sha256`、`size` 和 `notes`（来自可选参数 `--release-notes`），
+不含任何签名信息。
+
+把 **APK 和 JSON 一起**上传到服务器 `/opt/memoisle/downloads/`（即
+`memoisle-android.apk` 与 `memoisle-android.json`），源码更新时保留该目录。
+建议先上传 APK，再上传 JSON：两者大小对不上时后端按「未发布」处理，手机不会提示更新。
+自定义路径可设置后端环境变量 `MEMOISLE_ANDROID_APK_PATH` 和
+`MEMOISLE_ANDROID_APK_METADATA_PATH`。
 首次在手机安装时，按 Android 提示允许当前浏览器安装应用。
+
+## 应用内更新
+
+- 后端 `GET /api/v1/android/latest` 公开返回已发布 APK 的版本信息；APK 或 JSON 缺失、
+  字段不全、大小不一致时返回 404，客户端静默当作没有更新。
+- Release 包登录后自动检查，每 24 小时最多一次（时间记在本机偏好存储，请求失败不计）；
+  Debug 包不自动检查。顶栏「⋯ → 检查更新」可随时手动检查，已是最新时提示当前版本。
+- 服务端 versionCode 比本机大时弹出提示，展示版本号、更新说明，按钮为「更新 / 稍后 / 忽略此版本」。
+  「忽略此版本」后自动检查不再提示该版本，手动检查仍会提示。
+- 点「更新」后下载到应用缓存 `cache/updates/` 的临时文件，大小和 SHA-256 与服务端一致才改名保存；
+  校验失败时删除临时文件并提示失败，不会安装。
+- 下载完成后通过 FileProvider（authority 为 `<applicationId>.updates`）交给系统安装器，
+  由用户确认安装；普通应用无法静默安装。首次更新需在系统设置里允许 MemoIsle「安装未知应用」，
+  授权后返回应用会继续安装。启动时会清理旧的和下载中断的更新包。
+- 新版本必须用同一签名密钥并递增 `versionCode`，否则系统会拒绝覆盖安装。
 
 ## 当前功能
 

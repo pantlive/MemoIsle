@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自动更新只需要把 cache/updates/ 下校验过的 APK 交给系统安装器，不开放其他目录。 -->
+<paths>
+    <cache-path
+        name="updates"
+        path="updates/" />
+</paths>
