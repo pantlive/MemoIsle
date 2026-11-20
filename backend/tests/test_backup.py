@@ -31,6 +31,7 @@ def make_settings(root: Path) -> Settings:
         cloud_credential_secret="backup-test-secret",
         audio_directory=root / "audio",
         image_directory=root / "images",
+        forget_directory=root / "forget",
         resource_enrichment_enabled=False,
         resource_health_monitor_enabled=False,
         word_dictionary_enabled=False,
@@ -73,6 +74,8 @@ def live(tmp_path: Path):
     (root / ".memoisle-model.key").write_text("model-key-content", encoding="utf-8")
     settings.audio_directory.mkdir()
     (settings.audio_directory / "a.m4a").write_bytes(b"audio")
+    settings.forget_directory.mkdir()
+    (settings.forget_directory / "note.bin").write_bytes(b"forget")
     yield settings, database, root
     database.dispose()
 
@@ -87,6 +90,7 @@ def test_backup_includes_committed_data_keys_and_media(live, tmp_path: Path) -> 
     assert (result.directory / ".memoisle-auth.key").read_text() == "auth-key-content"
     assert (result.directory / ".memoisle-model.key").read_text() == "model-key-content"
     assert (result.directory / "audio" / "a.m4a").read_bytes() == b"audio"
+    assert (result.directory / "forget" / "note.bin").read_bytes() == b"forget"
     assert (result.directory / ".memoisle-auth.key").stat().st_mode & 0o777 == 0o600
     assert result.missing_keys == []
     verify_backup(result.directory)
@@ -125,11 +129,15 @@ def test_restore_round_trip_keeps_old_data_aside(live, tmp_path: Path) -> None:
 
     add_memo(database, "备份之后的改动")
     (root / ".memoisle-auth.key").write_text("rotated", encoding="utf-8")
+    (settings.forget_directory / "note.bin").write_bytes(b"changed")
     database.dispose()
 
     kept = restore_backup(settings, backup.directory)
 
     assert titles(root / "memoisle.db") == ["原始数据"]
+    assert (settings.forget_directory / "note.bin").read_bytes() == b"forget"
+    assert kept is not None
+    assert (kept / "forget" / "note.bin").read_bytes() == b"changed"
     assert (root / ".memoisle-auth.key").read_text() == "auth-key-content"
     # 留底目录里是恢复前的数据，可以手动换回。
     assert kept is not None

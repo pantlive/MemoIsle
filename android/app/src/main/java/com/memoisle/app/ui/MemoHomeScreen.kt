@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
@@ -94,6 +95,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.memoisle.app.MemoViewModel
 import com.memoisle.app.VaultViewModel
+import com.memoisle.app.ForgetViewModel
 import com.memoisle.app.LedgerViewModel
 import com.memoisle.app.RelayViewModel
 import com.memoisle.app.audio.SherpaOnnxSpeechToText
@@ -135,6 +137,7 @@ fun MemoHomeScreen(
     vaultViewModel: VaultViewModel,
     ledgerViewModel: LedgerViewModel,
     relayViewModel: RelayViewModel,
+    forgetViewModel: ForgetViewModel,
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -188,6 +191,7 @@ fun MemoHomeScreen(
     var showVault by rememberSaveable { mutableStateOf(false) }
     var showLedger by rememberSaveable { mutableStateOf(false) }
     var showRelay by rememberSaveable { mutableStateOf(false) }
+    var showForget by rememberSaveable { mutableStateOf(false) }
     var pendingPermanentDelete by remember { mutableStateOf<Memo?>(null) }
     var pendingMoveToTrash by remember { mutableStateOf<Memo?>(null) }
     var showReviewAnswer by rememberSaveable { mutableStateOf(false) }
@@ -612,6 +616,10 @@ fun MemoHomeScreen(
         if (activeType == TYPE_RESOURCE) viewModel.loadQuickAccess()
     }
 
+    if (showForget) {
+        ForgetScreen(viewModel = forgetViewModel, onClose = { showForget = false })
+        return
+    }
     if (showRelay) {
         RelayScreen(viewModel = relayViewModel, onClose = { showRelay = false })
         return
@@ -696,6 +704,7 @@ fun MemoHomeScreen(
                     onShowRelay = {
                         showVault = false
                         showLedger = false
+                        showForget = false
                         showRelay = true
                     },
                     onRefresh = viewModel::refresh,
@@ -727,8 +736,9 @@ fun MemoHomeScreen(
                     showReviewAnswer = false
                 },
                 vaultReminderCount = vaultViewModel.lastReminderCount,
-                onShowVault = { showLedger = false; showRelay = false; showVault = true },
-                onShowLedger = { showVault = false; showRelay = false; showLedger = true },
+                onShowVault = { showLedger = false; showRelay = false; showForget = false; showVault = true },
+                onShowLedger = { showVault = false; showRelay = false; showForget = false; showLedger = true },
+                onShowForget = { showVault = false; showLedger = false; showRelay = false; showForget = true },
             )
         },
         floatingActionButton = {
@@ -1763,6 +1773,7 @@ private fun MemoBottomNavigation(
     vaultReminderCount: Int,
     onShowVault: () -> Unit,
     onShowLedger: () -> Unit,
+    onShowForget: () -> Unit,
 ) {
     val homeSelected = !showAllMemos && !showReview && !showTrash && !showInbox
     val librarySelected = showAllMemos && !showReview && !showTrash && !showInbox
@@ -1798,6 +1809,13 @@ private fun MemoBottomNavigation(
             onClick = onShowLedger,
             icon = { Icon(Icons.Outlined.AccountBalanceWallet, contentDescription = null) },
             label = { Text("记账") },
+            colors = memoNavigationColors(),
+        )
+        NavigationBarItem(
+            selected = false,
+            onClick = onShowForget,
+            icon = { Icon(Icons.AutoMirrored.Outlined.StickyNote2, contentDescription = null) },
+            label = { Text("易忘") },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(

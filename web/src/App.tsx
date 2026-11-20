@@ -189,6 +189,7 @@ const ShortcutHelpDialog = lazyComponent(() => import("./ShortcutHelpDialog"));
 const VaultPanel = lazyComponent(() => import("./VaultPanel"), <p className="vault-loading" role="status">正在打开密码库…</p>);
 const LedgerPanel = lazyComponent(() => import("./LedgerPanel"), <p role="status">正在打开记账…</p>);
 const RelayPanel = lazyComponent(() => import("./RelayPanel"), <p role="status">正在打开传输…</p>);
+const ForgetPanel = lazyComponent(() => import("./ForgetPanel"), <p role="status">正在打开易忘事项…</p>);
 const CategoryTemplatePanel = lazyComponent(() => import("./CategoryTemplatePanel"));
 const ImageOrganizationPanel = lazyComponent(() => import("./ImageOrganizationPanel"));
 const WeeklyDigest = lazyComponent(() => import("./WeeklyDigest"));
@@ -365,10 +366,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const [vaultOpen, setVaultOpen] = useState(initialRoute.view === "vault");
   const [ledgerOpen, setLedgerOpen] = useState(initialRoute.view === "ledger");
   const [relayOpen, setRelayOpen] = useState(initialRoute.view === "relay");
+  const [forgetOpen, setForgetOpen] = useState(initialRoute.view === "forget");
   const ledgerOpenRef = useRef(ledgerOpen);
   ledgerOpenRef.current = ledgerOpen;
   const relayOpenRef = useRef(relayOpen);
   relayOpenRef.current = relayOpen;
+  const forgetOpenRef = useRef(forgetOpen);
+  forgetOpenRef.current = forgetOpen;
   const vaultReminderCount = useVaultReminderCount();
   const vaultOpenRef = useRef(vaultOpen);
   vaultOpenRef.current = vaultOpen;
@@ -1115,6 +1119,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setVaultOpen(false);
     setLedgerOpen(false);
     setRelayOpen(false);
+    setForgetOpen(false);
     if (type === activeType) {
       return;
     }
@@ -1308,6 +1313,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setVaultOpen(false);
     setLedgerOpen(false);
     setRelayOpen(false);
+    setForgetOpen(false);
     if (
       activeType === "all" ||
       activeType === "inbox" ||
@@ -1674,7 +1680,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         return;
       }
       // 独立页面不响应内容列表的单键快捷键，避免误触。
-      if (vaultOpenRef.current || ledgerOpenRef.current || relayOpenRef.current) {
+      if (vaultOpenRef.current || ledgerOpenRef.current || relayOpenRef.current || forgetOpenRef.current) {
         return;
       }
       if (activeTypeRef.current === "resource" && resourceListKeyRef.current(event)) {
@@ -1730,10 +1736,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   // 所以后退/前进恢复出的状态不会再压一条历史。
   useEffect(() => {
     writeAppRoute({
-      view: relayOpen ? "relay" : ledgerOpen ? "ledger" : vaultOpen ? "vault" : activeType,
-      item: vaultOpen || ledgerOpen || relayOpen ? null : selectedId,
+      view: forgetOpen ? "forget" : relayOpen ? "relay" : ledgerOpen ? "ledger" : vaultOpen ? "vault" : activeType,
+      item: vaultOpen || ledgerOpen || relayOpen || forgetOpen ? null : selectedId,
     });
-  }, [activeType, selectedId, vaultOpen, ledgerOpen, relayOpen]);
+  }, [activeType, selectedId, vaultOpen, ledgerOpen, relayOpen, forgetOpen]);
 
   useEffect(() => {
     if (selectedId !== linkedMemoIdRef.current) {
@@ -1768,7 +1774,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       openResourcePreview(memo);
       return;
     }
-    if (memo.type !== activeType || vaultOpen || ledgerOpen || relayOpen) {
+    if (memo.type !== activeType || vaultOpen || ledgerOpen || relayOpen || forgetOpen) {
       switchType(memo.type);
     }
     linkedMemoIdRef.current = memo.id;
@@ -1785,9 +1791,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setVaultOpen(route.view === "vault");
       setLedgerOpen(route.view === "ledger");
       setRelayOpen(route.view === "relay");
+      setForgetOpen(route.view === "forget");
       return;
     }
-    if (route.view !== activeType || vaultOpen || ledgerOpen || relayOpen) {
+    if (route.view !== activeType || vaultOpen || ledgerOpen || relayOpen || forgetOpen) {
       switchType(route.view);
     }
     if (route.item && route.item !== selectedId) {
@@ -1821,6 +1828,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setVaultOpen(false);
       setLedgerOpen(false);
       setRelayOpen(false);
+      setForgetOpen(false);
     }
     if (
       value.trim() &&
@@ -3880,9 +3888,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 ? ledgerOpen
                 : item.action === "relay"
                   ? relayOpen
-                  : item.action === "history"
-                    ? browserHistoryOpen
-                    : !vaultOpen && !ledgerOpen && !relayOpen && item.view === activeType;
+                  : item.action === "forget"
+                    ? forgetOpen
+                    : item.action === "history"
+                      ? browserHistoryOpen
+                      : !vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && item.view === activeType;
             return (
               <Fragment key={item.label}>
               {item.group && <span className="nav-group" aria-hidden="true">{item.group}</span>}
@@ -3902,17 +3912,26 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     setSelectedId(null);
                     setLedgerOpen(false);
                     setRelayOpen(false);
+                    setForgetOpen(false);
                     setVaultOpen(true);
                   } else if (item.action === "ledger") {
                     setSelectedId(null);
                     setVaultOpen(false);
                     setRelayOpen(false);
+                    setForgetOpen(false);
                     setLedgerOpen(true);
                   } else if (item.action === "relay") {
                     setSelectedId(null);
                     setVaultOpen(false);
                     setLedgerOpen(false);
+                    setForgetOpen(false);
                     setRelayOpen(true);
+                  } else if (item.action === "forget") {
+                    setSelectedId(null);
+                    setVaultOpen(false);
+                    setLedgerOpen(false);
+                    setRelayOpen(false);
+                    setForgetOpen(true);
                   } else if (item.action === "history") {
                     setBrowserHistoryOpen(true);
                   }
@@ -4040,7 +4059,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             />
           </div>
           <button
-            className={`trash-shortcut${!vaultOpen && !ledgerOpen && !relayOpen && activeType === "inbox" ? " active" : ""}`}
+            className={`trash-shortcut${!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "inbox" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("inbox")}
             aria-label="收件箱"
@@ -4048,7 +4067,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             <Icon name="inbox" size={18} /><span className="top-bar-label">收件箱</span>
           </button>
           <button
-            className={`trash-shortcut${!vaultOpen && !ledgerOpen && !relayOpen && activeType === "trash" ? " active" : ""}`}
+            className={`trash-shortcut${!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "trash" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("trash")}
             aria-label="回收站"
@@ -4062,6 +4081,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               setSelectedId(null);
               setLedgerOpen(false);
               setRelayOpen(false);
+              setForgetOpen(false);
               setVaultOpen(true);
             }}
             aria-label={vaultReminderCount > 0 ? `密码库，${vaultReminderCount} 条提醒` : "密码库"}
@@ -4071,13 +4091,19 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           </button>
           <button className={`trash-shortcut${ledgerOpen ? " active" : ""}`} type="button"
             aria-label="记账" onClick={() => {
-              setSelectedId(null); setVaultOpen(false); setRelayOpen(false); setLedgerOpen(true);
+              setSelectedId(null); setVaultOpen(false); setRelayOpen(false); setForgetOpen(false); setLedgerOpen(true);
             }}>
             <Icon name="ledger" size={18} /><span className="top-bar-label">记账</span>
           </button>
+          <button className={`trash-shortcut${forgetOpen ? " active" : ""}`} type="button"
+            aria-label="易忘事项" onClick={() => {
+              setSelectedId(null); setVaultOpen(false); setLedgerOpen(false); setRelayOpen(false); setForgetOpen(true);
+            }}>
+            <Icon name="forget" size={18} /><span className="top-bar-label">易忘事项</span>
+          </button>
           <button className={`trash-shortcut${relayOpen ? " active" : ""}`} type="button"
             aria-label="传输" onClick={() => {
-              setSelectedId(null); setVaultOpen(false); setLedgerOpen(false); setRelayOpen(true);
+              setSelectedId(null); setVaultOpen(false); setLedgerOpen(false); setForgetOpen(false); setRelayOpen(true);
             }}>
             <Icon name="swap" size={18} /><span className="top-bar-label">传输</span>
           </button>
@@ -4092,7 +4118,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         </header>
 
         <main className="main-content">
-          {relayOpen ? <RelayPanel /> : ledgerOpen ? <LedgerPanel /> : vaultOpen ? <VaultPanel /> : <>
+          {forgetOpen ? <ForgetPanel /> : relayOpen ? <RelayPanel /> : ledgerOpen ? <LedgerPanel /> : vaultOpen ? <VaultPanel /> : <>
           <div className="page-heading">
             {activeType === "all" ? (
               <div>
@@ -5723,15 +5749,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       )}
 
       <nav className="mobile-navigation" aria-label="移动端主导航">
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>首页</span></button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>首页</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
           <Icon name="link" size={20} />
           <span>资料</span>
         </button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>图片</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>图片</span></button>
         <button className="mobile-create" onClick={focusCapture}><Icon name="plus" size={20} /><span>新建</span></button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>灵感</span></button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>单词</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>灵感</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>单词</span></button>
       </nav>
     </div>
   );

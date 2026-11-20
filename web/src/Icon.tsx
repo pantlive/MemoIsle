@@ -14,6 +14,7 @@ const paths = {
   trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
   vault: <><rect x="4" y="3" width="16" height="18" rx="2" /><circle cx="12" cy="12" r="3" /><path d="m12 9 1-2m2 5h2m-5 3-1 2m-2-5H7" /></>,
   ledger: <><path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5-2 1.5-2.5-1.5L5 21Z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
+  forget: <><path d="M6 3h8l4 4v14H6Z" /><path d="M14 3v4h4M9 12h6M9 16h4" /></>,
   settings: <><path d="m9 3-.5 3-2 1-3-.5-2 3L4 12l-2.5 2.5 2 3 3-.5 2 1L9 21h6l.5-3 2-1 3 .5 2-3L20 12l2.5-2.5-2-3-3 .5-2-1L15 3Z" /><circle cx="12" cy="12" r="3" /></>,
   collection: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
   list: <><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></>,

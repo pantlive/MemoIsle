@@ -36,9 +36,19 @@ describe("readAppRoute", () => {
     expect(readAppRoute("?view=ledger&item=abc")).toEqual({ view: "ledger", item: null });
   });
 
-  it("marks only vault and ledger as standalone pages", () => {
+  it("opens the forget page without an item", () => {
+    expect(readAppRoute("?view=forget")).toEqual({ view: "forget", item: null });
+    expect(readAppRoute("?view=forget&item=abc")).toEqual({ view: "forget", item: null });
+    expect(routeHref("https://x.test/?view=word&item=m1&keep=1", { view: "forget", item: "m1" })).toBe(
+      "/?view=forget&keep=1",
+    );
+  });
+
+  it("marks vault, ledger, relay and forget as standalone pages", () => {
     expect(isStandaloneView("vault")).toBe(true);
     expect(isStandaloneView("ledger")).toBe(true);
+    expect(isStandaloneView("relay")).toBe(true);
+    expect(isStandaloneView("forget")).toBe(true);
     expect(isStandaloneView("resource")).toBe(false);
     expect(isStandaloneView("all")).toBe(false);
   });

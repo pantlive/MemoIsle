@@ -6,7 +6,7 @@
   服务运行中也能执行，不需要停机，也不会读到写了一半的页。
 - 两个密钥文件：``.memoisle-auth.key``（登录会话与云盘凭据）和
   ``.memoisle-model.key``（模型服务凭据）。丢了它们，库里加密的凭据就再也解不开。
-- 可选的录音、图片目录。
+- 可选的录音、图片和易忘事项附件目录。
 - ``manifest.json``：记录来源路径、时间与各文件的 SHA-256，恢复前先校验。
 """
 
@@ -33,6 +33,16 @@ MANIFEST_VERSION = 1
 
 class BackupError(RuntimeError):
     """备份或恢复无法完成。"""
+
+
+def _media_directories(settings: Settings) -> tuple[tuple[str, Path], ...]:
+    """随备份带走的本地附件目录。"""
+
+    return (
+        ("audio", settings.audio_directory),
+        ("images", settings.image_directory),
+        ("forget", settings.forget_directory),
+    )
 
 
 @dataclass(frozen=True)
@@ -121,10 +131,7 @@ def create_backup(
                 missing_keys.append(name)
 
         if include_media:
-            for label, directory in (
-                ("audio", settings.audio_directory),
-                ("images", settings.image_directory),
-            ):
+            for label, directory in _media_directories(settings):
                 if directory.is_dir():
                     shutil.copytree(directory, staging / label)
                     files.update(_hash_tree(staging / label, label))
@@ -195,10 +202,7 @@ def restore_backup(settings: Settings, backup_directory: Path) -> Path | None:
     for name, path in _key_files(settings).items():
         if (backup_directory / name).is_file():
             targets.append((backup_directory / name, path))
-    for label, directory in (
-        ("audio", settings.audio_directory),
-        ("images", settings.image_directory),
-    ):
+    for label, directory in _media_directories(settings):
         if (backup_directory / label).is_dir():
             targets.append((backup_directory / label, directory))
 

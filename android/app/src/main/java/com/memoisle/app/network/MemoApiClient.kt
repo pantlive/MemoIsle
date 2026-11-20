@@ -1,6 +1,8 @@
 package com.memoisle.app.network
 
 import com.memoisle.app.data.AndroidRelease
+import com.memoisle.app.data.ForgetItem
+import com.memoisle.app.data.ForgetItemInput
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
@@ -872,6 +874,93 @@ class MemoApiClient(baseUrl: String) {
     fun listLedgerCategories(): List<LedgerCategoryUsage> {
         val rows = JSONArray(executeText("GET", "ledger/categories"))
         return List(rows.length()) { LedgerCategoryUsage.fromJson(rows.getJSONObject(it)) }
+    }
+
+    /** 易忘事项只在线读写，不进入备忘录的离线数据库。 */
+    fun listForgetItems(query: String = ""): List<ForgetItem> {
+        val path = if (query.isBlank()) {
+            "forget/items?limit=2000"
+        } else {
+            "forget/items?limit=2000&q=${URLEncoder.encode(query, "UTF-8")}"
+        }
+        val rows = JSONArray(executeText("GET", path))
+        return List(rows.length()) { ForgetItem.fromJson(rows.getJSONObject(it)) }
+    }
+
+    fun createForgetItem(input: ForgetItemInput): ForgetItem =
+        ForgetItem.fromJson(execute("POST", "forget/items", input.toJson()))
+
+    fun updateForgetItem(id: String, input: ForgetItemInput, expectedVersion: Int): ForgetItem =
+        ForgetItem.fromJson(
+            execute("PUT", "forget/items/$id", input.toJson().put("expected_version", expectedVersion)),
+        )
+
+    fun deleteForgetItem(id: String, expectedVersion: Int) {
+        executeText("DELETE", "forget/items/$id?expected_version=$expectedVersion")
+    }
+
+    /** 原始字节上传一个附件。文件名放在 X-Filename，超限时服务端返回 413。 */
+    fun uploadForgetAttachment(
+        itemId: String,
+        bytes: ByteArray,
+        name: String,
+        mimeType: String?,
+    ): ForgetItem {
+        require(bytes.isNotEmpty()) { "附件内容不能为空" }
+        val connection = URL(normalizedBaseUrl + "forget/items/$itemId/attachments")
+            .openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty(
+                "Content-Type",
+                mimeType?.ifBlank { null } ?: "application/octet-stream",
+            )
+            connection.setRequestProperty(
+                "X-Filename",
+                URLEncoder.encode(name.ifBlank { "file" }, "UTF-8"),
+            )
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.outputStream.use { output -> output.write(bytes) }
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (statusCode !in 200..299) throw ApiException(statusCode, responseBody)
+            ForgetItem.fromJson(JSONObject(responseBody))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun downloadForgetAttachment(itemId: String, attachmentId: String, output: OutputStream) {
+        val connection = URL(normalizedBaseUrl + "forget/items/$itemId/attachments/$attachmentId")
+            .openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("Accept", "*/*")
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            connection.inputStream.use { input -> input.copyTo(output) }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun deleteForgetAttachment(itemId: String, attachmentId: String) {
+        executeText("DELETE", "forget/items/$itemId/attachments/$attachmentId")
     }
 
     /** 发一段文字给网页端；服务端只在内存里暂放，10 分钟内有效。 */
