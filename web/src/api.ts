@@ -1,3 +1,4 @@
+import type { ForgetItem, ForgetItemInput } from "./forget";
 import type {
   AuthProvidersResponse,
   InvitationCreateResponse,
@@ -971,6 +972,93 @@ export async function getLedgerSummary(month: string): Promise<LedgerSummary> {
 
 export async function listLedgerCategories(): Promise<LedgerCategoryUsage[]> {
   return request<LedgerCategoryUsage[]>("/ledger/categories");
+}
+
+export async function listForgetItems(query = ""): Promise<ForgetItem[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  const suffix = params.toString();
+  return request<ForgetItem[]>(`/forget/items${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function createForgetItem(input: ForgetItemInput): Promise<ForgetItem> {
+  return request<ForgetItem>("/forget/items", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateForgetItem(
+  id: string,
+  input: ForgetItemInput,
+  expectedVersion: number,
+): Promise<ForgetItem> {
+  return request<ForgetItem>(`/forget/items/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...input, expected_version: expectedVersion }),
+  });
+}
+
+export async function deleteForgetItem(id: string, expectedVersion: number): Promise<void> {
+  return request<void>(
+    `/forget/items/${encodeURIComponent(id)}?expected_version=${expectedVersion}`,
+    { method: "DELETE" },
+  );
+}
+
+async function forgetBinary(path: string, init: RequestInit, fallback: string): Promise<Response> {
+  const accessToken = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "X-MemoIsle-Client": "web",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...init.headers,
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 401) clearAccessToken();
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string } | Array<{ msg?: string }>;
+    } | null;
+    throw new ApiError(readApiErrorDetail(payload?.detail, fallback), response.status);
+  }
+  return response;
+}
+
+/** 附件以原始字节上传，原始文件名放在 URL 编码的 X-Filename 里。 */
+export async function uploadForgetAttachment(itemId: string, file: File): Promise<ForgetItem> {
+  const response = await forgetBinary(
+    `/forget/items/${encodeURIComponent(itemId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-Filename": encodeURIComponent(file.name || "file"),
+      },
+      body: file,
+    },
+    `上传失败（附件）`,
+  );
+  return (await response.json()) as ForgetItem;
+}
+
+/** 带登录态取回附件字节，供缩略图和下载使用。 */
+export async function downloadForgetAttachment(itemId: string, attachmentId: string): Promise<Blob> {
+  const response = await forgetBinary(
+    `/forget/items/${encodeURIComponent(itemId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { headers: {} },
+    "下载失败",
+  );
+  return response.blob();
+}
+
+export async function deleteForgetAttachment(itemId: string, attachmentId: string): Promise<void> {
+  await request<void>(
+    `/forget/items/${encodeURIComponent(itemId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { method: "DELETE" },
+  );
 }
 
 /** 中转里网页这一端的设备名；发给手机时 target 为 android。 */

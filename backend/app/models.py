@@ -20,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.schemas import MemoStatus, MemoType
@@ -1522,3 +1522,70 @@ class BookmarkFolderOverride(Base):
         nullable=False,
         default=utc_now,
     )
+
+
+class ForgetItem(Base):
+    """易忘事项：一段文字，可再挂多张图片和多个文件。
+
+    直接删除，不进回收站。版本号用于防止两端同时改文字时互相覆盖。
+    """
+
+    __tablename__ = "forget_item"
+    __table_args__ = (
+        Index("ix_forget_item_user_updated", "user_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # ORM 把版本放入 UPDATE/DELETE 条件，防止同时读取旧版本后相互覆盖。
+    __mapper_args__ = {"version_id_col": version, "version_id_generator": False}
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+    attachments: Mapped[list[ForgetAttachment]] = relationship(
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="ForgetAttachment.position",
+    )
+
+
+class ForgetAttachment(Base):
+    """易忘事项的一个附件。kind 为 image 或 file，磁盘名由服务端生成。"""
+
+    __tablename__ = "forget_attachment"
+    __table_args__ = (
+        Index("ix_forget_attachment_item_position", "item_id", "position"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    item_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("forget_item.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    storage_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    mime: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    item: Mapped[ForgetItem] = relationship(back_populates="attachments")

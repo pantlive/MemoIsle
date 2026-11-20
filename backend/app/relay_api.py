@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Annotated, Literal
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.content_disposition import content_disposition as _content_disposition
 from app.dependencies import get_current_user_id, get_session
 from app.relay_service import (
     MAX_FILE_BYTES,
@@ -115,12 +115,6 @@ async def _read_limited_body(request: Request) -> bytes:
             raise _http_error(RelayTooLargeError("文件不能超过 20 MB"))
         chunks.append(chunk)
     return b"".join(chunks)
-
-
-def _content_disposition(filename: str) -> str:
-    ascii_name = filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
-    ascii_name = ascii_name.replace('"', "").replace("\\", "")
-    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
 
 
 @router.post(

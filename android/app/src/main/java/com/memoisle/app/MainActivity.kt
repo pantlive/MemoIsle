@@ -44,6 +44,9 @@ class MainActivity : ComponentActivity() {
     private val relayViewModel: RelayViewModel by viewModels {
         RelayViewModel.factory((application as MemoIsleApplication).api)
     }
+    private val forgetViewModel: ForgetViewModel by viewModels {
+        ForgetViewModel.factory((application as MemoIsleApplication).api)
+    }
     private val appUpdater: AppUpdater by lazy {
         AppUpdater(applicationContext, (application as MemoIsleApplication).api)
     }
@@ -80,6 +83,7 @@ class MainActivity : ComponentActivity() {
                     vaultViewModel.reset()
                     ledgerViewModel.reset()
                     relayViewModel.reset()
+                    forgetViewModel.reset()
                     updateViewModel.dismiss()
                 }
             }
@@ -96,6 +100,7 @@ class MainActivity : ComponentActivity() {
                         vaultViewModel = vaultViewModel,
                         ledgerViewModel = ledgerViewModel,
                         relayViewModel = relayViewModel,
+                        forgetViewModel = forgetViewModel,
                         sharedText = sharedText,
                         onSharedTextConsumed = { sharedText = null },
                         onLogout = authViewModel::logout,

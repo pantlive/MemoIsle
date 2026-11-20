@@ -43,6 +43,7 @@ uvicorn app.main:app --app-dir backend --reload
 - `MEMOISLE_EMAIL_OUTBOX_DIRECTORY`：开发模式下未配置 SMTP 时保存 `.eml` 的目录。
 - `MEMOISLE_AUDIO_DIRECTORY`：原始录音的本地开发存储目录。
 - `MEMOISLE_IMAGE_DIRECTORY`：图片收藏原图与缩略图的本地开发存储目录，默认 `data/images`。
+- `MEMOISLE_FORGET_DIRECTORY`：易忘事项附件的本地开发存储目录，默认 `data/forget`。按账号分子目录存放，文件名由服务端随机生成。
 - `MEMOISLE_ANDROID_APK_PATH`：公开下载的已签名 Android APK 路径，默认仓库根目录下 `downloads/memoisle-android.apk`；`GET/HEAD /api/v1/android/download` 无需登录，支持 Range 断点续传，未发布时返回 404。
 - `MEMOISLE_ANDROID_APK_METADATA_PATH`：安卓安装包版本信息 JSON（由 `android/scripts/sign-release.py` 生成）路径，默认与 APK 同目录的 `memoisle-android.json`。`GET /api/v1/android/latest` 无需登录，返回 `version_code`、`version_name`、`sha256`、`size`、`release_notes` 和相对下载地址 `download_url`（`android/download`）；APK 或 JSON 缺失、字段不全或 `size` 与实际 APK 大小不一致时返回 404，响应带 `Cache-Control: no-cache`。
 - `MEMOISLE_LLM_BASE_URL`：OpenAI 兼容接口地址（例如 DeepSeek 的 `https://api.deepseek.com/v1`）；用于会议总结。
@@ -388,7 +389,7 @@ Heart-Plan 的方式调用 `message +send`，取得确认令牌后自动带令�
 ```bash
 # 备份：服务运行中即可执行，用 SQLite 的 VACUUM INTO 生成一致快照
 python backend/scripts/backup.py create --to /mnt/backup/memoisle --keep 14
-# 只备份数据库与密钥，不带录音和图片
+# 只备份数据库与密钥，不带录音、图片和易忘事项附件
 python backend/scripts/backup.py create --to /mnt/backup/memoisle --no-media
 # 校验：按 manifest 里的 SHA-256 检查每个文件，并做 SQLite 完整性检查
 python backend/scripts/backup.py verify /mnt/backup/memoisle/memoisle-backup-20261022T030000Z

@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = PROJECT_ROOT.parent / "data" / "memoisle.db"
 DEFAULT_AUDIO_DIRECTORY = PROJECT_ROOT.parent / "data" / "audio"
 DEFAULT_IMAGE_DIRECTORY = PROJECT_ROOT.parent / "data" / "images"
+DEFAULT_FORGET_DIRECTORY = PROJECT_ROOT.parent / "data" / "forget"
 DEFAULT_SANOTTS_CACHE_DIRECTORY = PROJECT_ROOT.parent / "data" / "sanotts"
 DEFAULT_EMAIL_OUTBOX_DIRECTORY = PROJECT_ROOT.parent / "data" / "email_outbox"
 DEFAULT_ANDROID_APK_PATH = PROJECT_ROOT / "downloads" / "memoisle-android.apk"
@@ -142,6 +143,7 @@ class Settings:
     local_user_id: str
     audio_directory: Path
     image_directory: Path = DEFAULT_IMAGE_DIRECTORY
+    forget_directory: Path = DEFAULT_FORGET_DIRECTORY
     tts_enabled: bool = True
     tts_provider: TtsProvider = "auto"
     sanotts_voice: str = "amy"
@@ -316,6 +318,9 @@ class Settings:
         image_directory = Path(
             os.environ.get("MEMOISLE_IMAGE_DIRECTORY", DEFAULT_IMAGE_DIRECTORY),
         )
+        forget_directory = Path(
+            os.environ.get("MEMOISLE_FORGET_DIRECTORY", DEFAULT_FORGET_DIRECTORY),
+        )
         sanotts_cache_directory = Path(
             os.environ.get(
                 "MEMOISLE_SANOTTS_CACHE_DIRECTORY",
@@ -465,6 +470,7 @@ class Settings:
             oauth_login_enabled=oauth_login_enabled,
             audio_directory=audio_directory,
             image_directory=image_directory,
+            forget_directory=forget_directory,
             tts_enabled=environment_flag("MEMOISLE_TTS_ENABLED", True),
             tts_provider=tts_provider,
             sanotts_voice=os.environ.get("MEMOISLE_SANOTTS_VOICE", "amy").strip(),

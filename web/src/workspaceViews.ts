@@ -17,7 +17,7 @@ export interface NavigationItem {
   /** 导航统一使用内联 SVG 图标。 */
   icon: IconName;
   view?: ActiveView;
-  action?: "health" | "settings" | "vault" | "ledger" | "relay" | "history";
+  action?: "health" | "settings" | "vault" | "ledger" | "relay" | "forget" | "history";
   /** 分组的第一项带上组名，侧栏在它上方显示小标题。 */
   group?: string;
 }
@@ -34,6 +34,7 @@ export const navigation: NavigationItem[] = [
   { label: "浏览历史", icon: "history", action: "history" },
   { label: "密码库", icon: "vault", action: "vault" },
   { label: "记账", icon: "ledger", action: "ledger" },
+  { label: "易忘事项", icon: "forget", action: "forget" },
   { label: "传输", icon: "swap", action: "relay" },
   { label: "回收站", icon: "trash", view: "trash" },
   { label: "设置", icon: "settings", action: "settings" },

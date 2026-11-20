@@ -14,6 +14,7 @@ from app.bookmark_service import run_pending_bookmark_imports
 from app.config import Settings
 from app.database import Database
 from app.ebook_service import run_pending_ebook_jobs
+from app.forget_api import router as forget_router
 from app.image_ocr_service import run_pending_image_ocr
 from app.image_organization_service import image_organization_loop
 from app.ledger_api import router as ledger_router
@@ -132,6 +133,7 @@ def create_app(
     application.include_router(vault_router, prefix="/api/v1")
     application.include_router(ledger_router, prefix="/api/v1")
     application.include_router(relay_router, prefix="/api/v1")
+    application.include_router(forget_router, prefix="/api/v1")
     return application
 
 

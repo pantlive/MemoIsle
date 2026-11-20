@@ -2,7 +2,7 @@
 
     # 备份（服务运行中即可执行）
     python backend/scripts/backup.py create --to /mnt/backup/memoisle
-    # 只备份数据库与密钥，不带录音和图片
+    # 只备份数据库与密钥，不带录音、图片和易忘事项附件
     python backend/scripts/backup.py create --to /mnt/backup/memoisle --no-media
     # 只保留最近 14 份
     python backend/scripts/backup.py create --to /mnt/backup/memoisle --keep 14
@@ -52,7 +52,11 @@ def main() -> int:
 
     create = commands.add_parser("create", help="生成一份备份")
     create.add_argument("--to", type=Path, required=True, help="备份存放目录")
-    create.add_argument("--no-media", action="store_true", help="不备份录音和图片")
+    create.add_argument(
+        "--no-media",
+        action="store_true",
+        help="不备份录音、图片和易忘事项附件",
+    )
     create.add_argument(
         "--keep",
         type=int,

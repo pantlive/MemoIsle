@@ -17,15 +17,16 @@ export const ROUTE_VIEWS = [
   "vault",
   "ledger",
   "relay",
+  "forget",
 ] as const;
 
 export type RouteView = (typeof ROUTE_VIEWS)[number];
 
-/** 密码库、记账、传输是独立页面，不承载条目选择。 */
-export type StandaloneView = Extract<RouteView, "vault" | "ledger" | "relay">;
+/** 密码库、记账、传输、易忘事项是独立页面，不承载条目选择。 */
+export type StandaloneView = Extract<RouteView, "vault" | "ledger" | "relay" | "forget">;
 
 export function isStandaloneView(view: RouteView): view is StandaloneView {
-  return view === "vault" || view === "ledger" || view === "relay";
+  return view === "vault" || view === "ledger" || view === "relay" || view === "forget";
 }
 
 export interface AppRoute {

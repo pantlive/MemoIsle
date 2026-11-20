@@ -2806,3 +2806,97 @@ class LedgerQuickCreate(BaseModel):
         """与流水日期同样的年份范围。"""
 
         return _ledger_date_in_range(value)
+
+
+FORGET_TITLE_MAX_LENGTH = 100
+FORGET_CONTENT_MAX_LENGTH = 10_000
+ForgetAttachmentKind = Literal["image", "file"]
+
+
+def _forget_text(value: object, limit: int, name: str) -> str:
+    """去掉首尾空白，并限制字数。空文本允许，用来只收藏附件。"""
+
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{name}必须是文本")
+    cleaned = value.strip()
+    if len(cleaned) > limit:
+        raise ValueError(f"{name}最多 {limit} 个字")
+    return cleaned
+
+
+class ForgetItemFields(BaseModel):
+    """一条易忘事项的文字。标题和正文都可以先空着，再补图片或文件。"""
+
+    title: str = ""
+    content: str = ""
+    pinned: bool = False
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def validate_title(cls, value: object) -> str:
+        """标题最多 100 字。"""
+
+        return _forget_text(value, FORGET_TITLE_MAX_LENGTH, "标题")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def validate_content(cls, value: object) -> str:
+        """正文最多 1 万字。"""
+
+        return _forget_text(value, FORGET_CONTENT_MAX_LENGTH, "正文")
+
+
+class ForgetItemCreate(ForgetItemFields):
+    """新建一条易忘事项。"""
+
+
+class ForgetItemUpdate(ForgetItemFields):
+    """整条替换文字，带上读取时的版本号。"""
+
+    expected_version: int = Field(ge=1)
+
+
+class ForgetAttachmentRead(BaseModel):
+    """返回给客户端的一个附件。不包含磁盘上的存储名。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: ForgetAttachmentKind
+    original_name: str
+    mime: str
+    size: int
+    sha256: str
+    position: int
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_time(self, value: datetime) -> str:
+        """统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class ForgetItemRead(BaseModel):
+    """返回给客户端的一条易忘事项，内嵌附件列表。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    content: str
+    pinned: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    attachments: list[ForgetAttachmentRead] = Field(default_factory=list)
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_time(self, value: datetime) -> str:
+        """统一输出 UTC。"""
+
+        resolved = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return resolved.astimezone(UTC).isoformat().replace("+00:00", "Z")
