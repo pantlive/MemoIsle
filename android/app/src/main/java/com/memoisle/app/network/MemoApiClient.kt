@@ -9,6 +9,10 @@ import com.memoisle.app.data.LedgerSummary
 import com.memoisle.app.data.LedgerCategoryUsage
 import com.memoisle.app.data.MemoDeletion
 import com.memoisle.app.data.MemoSyncCursor
+import com.memoisle.app.data.RELAY_DEVICE_ANDROID
+import com.memoisle.app.data.RELAY_DEVICE_WEB
+import com.memoisle.app.data.RELAY_WAIT_SECONDS
+import com.memoisle.app.data.RelayItem
 import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
@@ -869,18 +873,112 @@ class MemoApiClient(baseUrl: String) {
         return List(rows.length()) { LedgerCategoryUsage.fromJson(rows.getJSONObject(it)) }
     }
 
+    /** 发一段文字给网页端；服务端只在内存里暂放，10 分钟内有效。 */
+    fun sendRelayText(text: String, target: String = RELAY_DEVICE_WEB): RelayItem = RelayItem.fromJson(
+        execute(
+            "POST",
+            "relay/text",
+            JSONObject().put("text", text).put("target", target).put("source", RELAY_DEVICE_ANDROID),
+        ),
+    )
+
+    /** 以原始字节上传一个小文件（不超过 20 MB），服务端超限返回 413、待接收过多返回 429。 */
+    fun sendRelayFile(
+        bytes: ByteArray,
+        name: String,
+        mimeType: String?,
+        target: String = RELAY_DEVICE_WEB,
+    ): RelayItem {
+        require(bytes.isNotEmpty()) { "文件内容不能为空" }
+        val query = "target=" + URLEncoder.encode(target, "UTF-8") +
+            "&source=" + RELAY_DEVICE_ANDROID +
+            "&filename=" + URLEncoder.encode(name.ifBlank { "file" }, "UTF-8")
+        val connection = URL(normalizedBaseUrl + "relay/file?$query").openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", mimeType?.ifBlank { null } ?: "application/octet-stream")
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.outputStream.use { output -> output.write(bytes) }
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (statusCode !in 200..299) {
+                throw ApiException(statusCode, responseBody)
+            }
+            RelayItem.fromJson(JSONObject(responseBody))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * 长轮询收件箱：列表与 [knownIds] 相同时服务端最多等 [waitSeconds] 秒，
+     * 有新内容或有内容被取走时立刻返回。readTimeout 留出余量，不会先于服务端超时。
+     */
+    fun pollRelayInbox(waitSeconds: Int, knownIds: Collection<String> = emptyList()): List<RelayItem> {
+        val wait = waitSeconds.coerceIn(0, RELAY_WAIT_SECONDS)
+        val query = buildString {
+            append("device=").append(RELAY_DEVICE_ANDROID).append("&wait=").append(wait)
+            if (knownIds.isNotEmpty()) {
+                append("&known=").append(URLEncoder.encode(knownIds.joinToString(","), "UTF-8"))
+            }
+        }
+        val rows = JSONArray(
+            executeText("GET", "relay/inbox?$query", readTimeoutMs = (wait + 15) * 1_000),
+        )
+        return List(rows.length()) { RelayItem.fromJson(rows.getJSONObject(it)) }
+    }
+
+    /** 取走一条内容写到 [output]；服务端随即删除，再取返回 404。 */
+    fun downloadRelayItem(id: String, output: OutputStream) {
+        val connection = URL(normalizedBaseUrl + "relay/items/${URLEncoder.encode(id, "UTF-8")}/download")
+            .openConnection() as HttpURLConnection
+        connection.applyMemoIsleHeaders()
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("Accept", "*/*")
+            val statusCode = connection.responseCode
+            if (statusCode !in 200..299) {
+                val responseBody = connection.errorStream
+                    ?.bufferedReader(Charsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
+                throw ApiException(statusCode, responseBody)
+            }
+            connection.inputStream.use { input -> input.copyTo(output) }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun discardRelayItem(id: String) {
+        executeText("DELETE", "relay/items/${URLEncoder.encode(id, "UTF-8")}")
+    }
+
     private fun execute(method: String, path: String, body: JSONObject? = null): JSONObject {
         // 204 等空响应按空对象处理。
         return JSONObject(executeText(method, path, body).ifBlank { "{}" })
     }
 
-    private fun executeText(method: String, path: String, body: JSONObject? = null): String {
+    private fun executeText(
+        method: String,
+        path: String,
+        body: JSONObject? = null,
+        readTimeoutMs: Int = 12_000,
+    ): String {
         val connection = URL(normalizedBaseUrl + path).openConnection() as HttpURLConnection
         connection.applyMemoIsleHeaders()
         return try {
             connection.requestMethod = method
             connection.connectTimeout = 8_000
-            connection.readTimeout = 12_000
+            connection.readTimeout = readTimeoutMs
             connection.setRequestProperty("Accept", "application/json")
             accessToken?.let { token ->
                 connection.setRequestProperty("Authorization", "Bearer $token")

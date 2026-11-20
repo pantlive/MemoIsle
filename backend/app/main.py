@@ -20,6 +20,8 @@ from app.ledger_api import router as ledger_router
 from app.link_health_service import link_health_monitor_loop
 from app.memo_tools_api import router as memo_tools_router
 from app.model_settings_api import router as model_settings_router
+from app.relay_api import router as relay_router
+from app.relay_service import RelayHub, relay_purge_loop
 from app.resource_classification_api import router as resource_classification_router
 from app.resource_classification_service import resource_classification_loop
 from app.resource_summary_service import resource_summary_loop
@@ -34,6 +36,8 @@ def create_app(
 
     resolved_settings = settings or Settings.from_environment()
     resolved_database = database or Database(resolved_settings.database_url)
+    # 文件/文本中转只放在本进程内存里，所以部署必须保持单 worker。
+    relay_hub = RelayHub()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -42,6 +46,7 @@ def create_app(
         resolved_database.create_schema()
         stop_event = asyncio.Event()
         monitor_task: asyncio.Task[None] | None = None
+        relay_purge_task = asyncio.create_task(relay_purge_loop(relay_hub, stop_event))
         classification_task = asyncio.create_task(
             resource_classification_loop(
                 resolved_settings.database_url, resolved_settings, stop_event,
@@ -98,6 +103,8 @@ def create_app(
             await bookmark_recovery_task
             await image_ocr_recovery_task
             await ebook_recovery_task
+            await relay_purge_task
+            relay_hub.clear()
             resolved_database.dispose()
 
     application = FastAPI(
@@ -107,6 +114,7 @@ def create_app(
     )
     application.state.settings = resolved_settings
     application.state.database = resolved_database
+    application.state.relay_hub = relay_hub
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved_settings.cors_origins),
@@ -123,6 +131,7 @@ def create_app(
     application.include_router(resource_classification_router, prefix="/api/v1")
     application.include_router(vault_router, prefix="/api/v1")
     application.include_router(ledger_router, prefix="/api/v1")
+    application.include_router(relay_router, prefix="/api/v1")
     return application
 
 

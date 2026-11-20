@@ -807,6 +807,28 @@ export interface LedgerQuickResult extends LedgerEntry {
   parsed_by: LedgerParsedBy;
 }
 
+/** 中转的两端：Web 网页或 Android 手机。 */
+export type RelayDevice = "web" | "android";
+
+/**
+ * 一条待接收的中转内容。服务端只在内存里暂放，取走即删、10 分钟后过期。
+ * 文本直接带上 text，文件需要再调下载接口取走。
+ */
+export interface RelayItem {
+  id: string;
+  kind: "text" | "file";
+  source: RelayDevice;
+  target: RelayDevice;
+  filename: string | null;
+  mime_type: string | null;
+  size: number;
+  created_at: string;
+  expires_at: string;
+  /** 剩余有效秒数，倒计时以它为准，不受两端时钟偏差影响。 */
+  expires_in: number;
+  text: string | null;
+}
+
 /** 图片识别方式：vision 本地视觉模型，llm 为 OCR 后的本地文本模型，rule 为规则。 */
 export type LedgerImageParsedBy = "vision" | "llm" | "rule";
 
