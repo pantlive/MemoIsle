@@ -29,6 +29,8 @@ import {
   verifyEmailToken,
 } from "./api";
 import type { AuthProvidersResponse, AuthUser } from "./types";
+import { t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 type AuthStatus = "loading" | "anonymous" | "authenticated";
 type EmailAuthMode = "login" | "register" | "forgot" | "reset";
@@ -37,7 +39,7 @@ function describeAuthError(error: unknown): string {
   if (error instanceof ApiError) {
     return error.message;
   }
-  return "登录服务暂时不可用，请稍后重试。";
+  return t("登录服务暂时不可用，请稍后重试。");
 }
 
 function readAuthCallback(): { token: string | null; error: string | null } {
@@ -76,6 +78,7 @@ function readEmailAction(): {
 }
 
 export default function AuthGate(): ReactNode {
+  const { t } = useI18n();
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [providers, setProviders] = useState<AuthProvidersResponse | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -122,7 +125,7 @@ export default function AuthGate(): ReactNode {
       const emailAction = readEmailAction();
       const token = callback.token ?? getAccessToken();
       if (callback.error) {
-        setError("第三方登录未完成，请重新发起登录。");
+        setError(t("第三方登录未完成，请重新发起登录。"));
       }
       if (emailAction.resetToken) {
         setResetToken(emailAction.resetToken);
@@ -131,7 +134,7 @@ export default function AuthGate(): ReactNode {
       if (emailAction.verificationToken) {
         try {
           await verifyEmailToken(emailAction.verificationToken);
-          setNotice("邮箱验证成功，请使用邮箱登录。");
+          setNotice(t("邮箱验证成功，请使用邮箱登录。"));
           setEmailAuthMode("login");
         } catch (verifyError) {
           setError(describeAuthError(verifyError));
@@ -210,7 +213,7 @@ export default function AuthGate(): ReactNode {
         (emailAuthMode === "register" && password !== confirmPassword) ||
         (emailAuthMode === "reset" && newPassword !== confirmNewPassword)
       ) {
-        setError("两次输入的密码不一致");
+        setError(t("两次输入的密码不一致"));
         return;
       }
       if (
@@ -218,14 +221,14 @@ export default function AuthGate(): ReactNode {
         inviteRequired &&
         !inviteCode.trim()
       ) {
-        setError("请输入邀请码");
+        setError(t("请输入邀请码"));
         return;
       }
       if (
         emailAuthMode === "register" &&
         !/^\d{6}$/.test(verificationCode.trim())
       ) {
-        setError("请输入 6 位邮箱验证码");
+        setError(t("请输入 6 位邮箱验证码"));
         return;
       }
       setBusy(true);
@@ -246,15 +249,15 @@ export default function AuthGate(): ReactNode {
             displayName.trim() || undefined,
             inviteRequired ? inviteCode.trim() : undefined,
           );
-          setNotice("注册成功，请使用邮箱登录。");
+          setNotice(t("注册成功，请使用邮箱登录。"));
           setEmailAuthMode("login");
         } else if (emailAuthMode === "forgot") {
           await requestPasswordReset(email.trim());
-          setNotice("如果邮箱已注册，重置链接已发送。");
+          setNotice(t("如果邮箱已注册，重置链接已发送。"));
           setEmailAuthMode("login");
         } else {
           await resetPassword(resetToken, newPassword, confirmNewPassword);
-          setNotice("密码已重置，请使用新密码登录。");
+          setNotice(t("密码已重置，请使用新密码登录。"));
           setResetToken("");
           setEmailAuthMode("login");
         }
@@ -304,7 +307,7 @@ export default function AuthGate(): ReactNode {
         inviteRequired ? inviteCode.trim() : undefined,
       );
       setCodeCooldown(60);
-      setNotice("验证码已发送，请查收邮箱（10 分钟内有效）。");
+      setNotice(t("验证码已发送，请查收邮箱（10 分钟内有效）。"));
     } catch (codeError) {
       setError(describeAuthError(codeError));
     } finally {
@@ -321,7 +324,7 @@ export default function AuthGate(): ReactNode {
     setNotice("");
     try {
       await requestEmailVerification(email.trim());
-      setNotice("如果邮箱尚未验证，验证链接已发送。");
+      setNotice(t("如果邮箱尚未验证，验证链接已发送。"));
     } catch (verificationError) {
       setError(describeAuthError(verificationError));
     } finally {
@@ -350,7 +353,7 @@ export default function AuthGate(): ReactNode {
           </div>
           <div className="auth-heading">
             <h1>MemoIsle</h1>
-            <p>正在检查登录状态…</p>
+            <p>{t("正在检查登录状态…")}</p>
           </div>
         </section>
       </main>
@@ -363,7 +366,7 @@ export default function AuthGate(): ReactNode {
         authUser={user}
         onLogout={handleLogout}
         onPasswordChanged={() => {
-          setNotice("密码已修改，请使用新密码重新登录。");
+          setNotice(t("密码已修改，请使用新密码重新登录。"));
           setEmailAuthMode("login");
           setPassword("");
           void handleLogout();
@@ -377,16 +380,16 @@ export default function AuthGate(): ReactNode {
   const hasThirdPartyLogin = enabledProviders.length > 0;
   const isEmailMode = emailAuthMode === "login" || emailAuthMode === "register";
   const authHeading = {
-    login: "欢迎回到 MemoIsle",
-    register: inviteRequired ? "凭邀请码注册" : "加入 MemoIsle",
-    forgot: "找回你的资料库",
-    reset: "设置新密码",
+    login: t("欢迎回到 MemoIsle"),
+    register: inviteRequired ? t("凭邀请码注册") : t("加入 MemoIsle"),
+    forgot: t("找回你的资料库"),
+    reset: t("设置新密码"),
   }[emailAuthMode];
   const authSubheading = {
-    login: "继续整理那些值得再次遇见的内容",
-    register: "从今天开始，收好每一个值得再次遇见的瞬间",
-    forgot: "输入注册邮箱，我们会发送密码重置链接",
-    reset: "设置一个新的密码，继续回到你的私人小岛",
+    login: t("继续整理那些值得再次遇见的内容"),
+    register: t("从今天开始，收好每一个值得再次遇见的瞬间"),
+    forgot: t("输入注册邮箱，我们会发送密码重置链接"),
+    reset: t("设置一个新的密码，继续回到你的私人小岛"),
   }[emailAuthMode];
   const normalizedEmail = email.trim();
   const emailInvalid = normalizedEmail.length > 0 &&
@@ -443,7 +446,7 @@ export default function AuthGate(): ReactNode {
                     : ""
                 }`}
               >
-                {emailAuthMode === "forgot" ? "注册邮箱" : "昵称（可选）"}
+                {emailAuthMode === "forgot" ? t("注册邮箱") : t("昵称（可选）")}
                 <input
                   type={emailAuthMode === "forgot" ? "email" : "text"}
                   value={emailAuthMode === "forgot" ? email : displayName}
@@ -456,7 +459,7 @@ export default function AuthGate(): ReactNode {
                   aria-invalid={emailAuthMode === "forgot" && emailInvalid}
                   autoComplete={emailAuthMode === "forgot" ? "email" : "nickname"}
                   placeholder={
-                    emailAuthMode === "forgot" ? "输入注册邮箱" : "输入昵称（可选）"
+                    emailAuthMode === "forgot" ? t("输入注册邮箱") : t("输入昵称（可选）")
                   }
                   required={emailAuthMode === "forgot"}
                 />
@@ -464,7 +467,7 @@ export default function AuthGate(): ReactNode {
             )}
             {emailAuthMode !== "forgot" && emailAuthMode !== "reset" && (
               <label className={`auth-field${emailInvalid ? " auth-field-invalid" : ""}`}>
-                电子邮箱
+                {t("电子邮箱")}
                 <input
                   type="email"
                   value={email}
@@ -472,16 +475,16 @@ export default function AuthGate(): ReactNode {
                   required
                   aria-invalid={emailInvalid}
                   autoComplete="email"
-                  placeholder="输入邮箱地址"
+                  placeholder={t("输入邮箱地址")}
                 />
               </label>
             )}
             {emailInvalid && (
-              <p className="auth-field-error">请输入有效的邮箱地址</p>
+              <p className="auth-field-error">{t("请输入有效的邮箱地址")}</p>
             )}
             {emailAuthMode === "register" && inviteRequired && (
               <label className="auth-field">
-                邀请码
+                {t("邀请码")}
                 <input
                   type="text"
                   value={inviteCode}
@@ -490,14 +493,14 @@ export default function AuthGate(): ReactNode {
                   maxLength={32}
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="输入邀请码"
+                  placeholder={t("输入邀请码")}
                 />
               </label>
             )}
             {emailAuthMode === "register" && (
               <div className="auth-code-row">
                 <label className={`auth-field${verificationCodeInvalid ? " auth-field-invalid" : ""}`}>
-                  邮箱验证码
+                  {t("邮箱验证码")}
                   <input
                     type="text"
                     value={verificationCode}
@@ -510,7 +513,7 @@ export default function AuthGate(): ReactNode {
                     required
                     aria-invalid={verificationCodeInvalid}
                     autoComplete="one-time-code"
-                    placeholder="输入 6 位验证码"
+                    placeholder={t("输入 6 位验证码")}
                   />
                 </label>
                 <button
@@ -526,19 +529,19 @@ export default function AuthGate(): ReactNode {
                   }
                 >
                   {codeSending
-                    ? "发送中…"
+                    ? t("发送中…")
                     : codeCooldown > 0
-                      ? `${codeCooldown}s 后重发`
-                      : "发送验证码"}
+                      ? t("{codeCooldown}s 后重发", { codeCooldown })
+                      : t("发送验证码")}
                 </button>
               </div>
             )}
             {verificationCodeInvalid && (
-              <p className="auth-field-error">请输入 6 位数字验证码</p>
+              <p className="auth-field-error">{t("请输入 6 位数字验证码")}</p>
             )}
             {emailAuthMode !== "forgot" && emailAuthMode !== "reset" && (
               <label className={`auth-field${passwordInvalid ? " auth-field-invalid" : ""}`}>
-                密码
+                {t("密码")}
                 <span className="auth-password-control">
                   <input
                     type={showPassword ? "text" : "password"}
@@ -552,31 +555,31 @@ export default function AuthGate(): ReactNode {
                       emailAuthMode === "login" ? "current-password" : "new-password"
                     }
                     placeholder={
-                      emailAuthMode === "register" ? "设置 8 位以上密码" : "输入密码"
+                      emailAuthMode === "register" ? t("设置 8 位以上密码") : t("输入密码")
                     }
                   />
                   <button
                     className="auth-password-toggle"
                     type="button"
                     onClick={() => setShowPassword((visible) => !visible)}
-                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                    aria-label={showPassword ? t("隐藏密码") : t("显示密码")}
                   >
-                    {showPassword ? "隐藏" : "显示"}
+                    {showPassword ? t("隐藏") : t("显示")}
                   </button>
                 </span>
               </label>
             )}
             {emailAuthMode === "register" && (
               <p className="auth-password-hint">
-                至少 8 位，建议包含字母和数字
+                {t("至少 8 位，建议包含字母和数字")}
               </p>
             )}
             {passwordInvalid && (
-              <p className="auth-field-error">密码至少需要 8 位</p>
+              <p className="auth-field-error">{t("密码至少需要 8 位")}</p>
             )}
             {emailAuthMode === "reset" && (
               <label className={`auth-field${newPasswordInvalid ? " auth-field-invalid" : ""}`}>
-                新密码
+                {t("新密码")}
                 <span className="auth-password-control">
                   <input
                     type={showNewPassword ? "text" : "password"}
@@ -587,25 +590,25 @@ export default function AuthGate(): ReactNode {
                     minLength={8}
                     maxLength={128}
                     autoComplete="new-password"
-                    placeholder="设置新密码"
+                    placeholder={t("设置新密码")}
                   />
                   <button
                     className="auth-password-toggle"
                     type="button"
                     onClick={() => setShowNewPassword((visible) => !visible)}
-                    aria-label={showNewPassword ? "隐藏新密码" : "显示新密码"}
+                    aria-label={showNewPassword ? t("隐藏新密码") : t("显示新密码")}
                   >
-                    {showNewPassword ? "隐藏" : "显示"}
+                    {showNewPassword ? t("隐藏") : t("显示")}
                   </button>
                 </span>
               </label>
             )}
             {newPasswordInvalid && (
-              <p className="auth-field-error">密码至少需要 8 位</p>
+              <p className="auth-field-error">{t("密码至少需要 8 位")}</p>
             )}
             {(emailAuthMode === "register" || emailAuthMode === "reset") && (
               <label className={`auth-field${confirmPasswordInvalid ? " auth-field-invalid" : ""}`}>
-                确认密码
+                {t("确认密码")}
                 <span className="auth-password-control">
                   <input
                     type={showConfirmPassword ? "text" : "password"}
@@ -622,32 +625,32 @@ export default function AuthGate(): ReactNode {
                     minLength={8}
                     maxLength={128}
                     autoComplete="new-password"
-                    placeholder="再次输入密码"
+                    placeholder={t("再次输入密码")}
                   />
                   <button
                     className="auth-password-toggle"
                     type="button"
                     onClick={() => setShowConfirmPassword((visible) => !visible)}
-                    aria-label={showConfirmPassword ? "隐藏确认密码" : "显示确认密码"}
+                    aria-label={showConfirmPassword ? t("隐藏确认密码") : t("显示确认密码")}
                   >
-                    {showConfirmPassword ? "隐藏" : "显示"}
+                    {showConfirmPassword ? t("隐藏") : t("显示")}
                   </button>
                 </span>
               </label>
             )}
             {confirmPasswordInvalid && (
-              <p className="auth-field-error">两次输入的密码需保持一致</p>
+              <p className="auth-field-error">{t("两次输入的密码需保持一致")}</p>
             )}
             <button type="submit" disabled={busy || codeSending}>
               {busy
-                ? "正在处理…"
+                ? t("正在处理…")
                 : emailAuthMode === "login"
-                  ? "登录"
+                  ? t("登录")
                   : emailAuthMode === "register"
-                    ? "创建账号"
+                    ? t("创建账号")
                     : emailAuthMode === "forgot"
-                      ? "发送重置链接"
-                      : "重置密码"}
+                      ? t("发送重置链接")
+                      : t("重置密码")}
             </button>
           </form>
         )}
@@ -660,7 +663,7 @@ export default function AuthGate(): ReactNode {
                 onClick={() => void handleResendVerification()}
                 disabled={busy || !email.trim()}
               >
-                重新发送验证邮件
+                {t("重新发送验证邮件")}
               </button>
               <button
                 className="auth-text-button auth-forgot-link"
@@ -668,7 +671,7 @@ export default function AuthGate(): ReactNode {
                 onClick={() => setEmailAuthMode("forgot")}
                 disabled={busy}
               >
-                忘记密码？
+                {t("忘记密码？")}
               </button>
             </div>
           )}
@@ -679,13 +682,13 @@ export default function AuthGate(): ReactNode {
             onClick={() => void handleDevLogin()}
             disabled={busy}
           >
-            {busy ? "正在进入…" : "本地开发登录"}
+            {busy ? t("正在进入…") : t("本地开发登录")}
           </button>
         )}
         {isEmailMode && hasThirdPartyLogin && (
           <>
             <div className="auth-divider">
-              <span>或使用其他方式</span>
+              <span>{t("或使用其他方式")}</span>
             </div>
             <div className="auth-provider-grid">
               {enabledProviders.map((provider) => (
@@ -706,24 +709,24 @@ export default function AuthGate(): ReactNode {
           <div className="auth-mode-switch">
             {emailAuthMode === "login" ? (
               <>
-                还没有账号？
+                {t("还没有账号？")}
                 <button
                   type="button"
                   onClick={() => setEmailAuthMode("register")}
                   disabled={busy}
                 >
-                  立即注册
+                  {t("立即注册")}
                 </button>
               </>
             ) : (
               <>
-                已有账号？
+                {t("已有账号？")}
                 <button
                   type="button"
                   onClick={() => setEmailAuthMode("login")}
                   disabled={busy}
                 >
-                  返回登录
+                  {t("返回登录")}
                 </button>
               </>
             )}
@@ -736,23 +739,23 @@ export default function AuthGate(): ReactNode {
             onClick={() => setEmailAuthMode("login")}
             disabled={busy}
           >
-            返回邮箱登录
+            {t("返回邮箱登录")}
           </button>
         )}
         {emailAuthMode === "register" && (
           <p className="auth-privacy-note">
-            注册即表示你同意我们只为同步服务保存必要信息
+            {t("注册即表示你同意我们只为同步服务保存必要信息")}
           </p>
         )}
         <a
           className="auth-android-download"
           href={androidDownloadUrl()}
           download="MemoIsle-android.apk"
-        ><Icon name="download" size={16} /> 下载安卓端（APK）</a>
+        ><Icon name="download" size={16} />{t(" 下载安卓端（APK）")}</a>
         {isEmailMode && (
           <div className="auth-trust-note">
             <span className="auth-trust-icon" aria-hidden="true"><Icon name="swap" size={14} /></span>
-            <span>你的资料只属于你 · Web 与 Android 自动同步</span>
+            <span>{t("你的资料只属于你 · Web 与 Android 自动同步")}</span>
           </div>
         )}
       </section>

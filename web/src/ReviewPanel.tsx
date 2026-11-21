@@ -10,6 +10,8 @@ import type {
   ReviewQueueResponse,
   ReviewSettings,
 } from "./types";
+import { dateTimeFormat, msg, t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 export type ReviewQueueFilter = "all" | MemoType;
 
@@ -34,13 +36,13 @@ interface ReviewPanelProps {
 }
 
 const queueFilters: { value: ReviewQueueFilter; label: string }[] = [
-  { value: "all", label: "混合队列" },
-  { value: "word", label: "单词复习" },
-  { value: "resource", label: "待阅读" },
-  { value: "idea", label: "待整理" },
+  { value: "all", get label() { return t("混合队列"); } },
+  { value: "word", get label() { return t("单词复习"); } },
+  { value: "resource", get label() { return t("待阅读"); } },
+  { value: "idea", get label() { return t("待整理"); } },
 ];
 
-const reviewTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+const reviewTimeFormatter = (): Intl.DateTimeFormat => dateTimeFormat({
   month: "short",
   day: "numeric",
   hour: "2-digit",
@@ -51,16 +53,16 @@ function formatReviewTime(value: string | null, empty: string): string {
   if (!value) {
     return empty;
   }
-  return reviewTimeFormatter.format(new Date(value));
+  return reviewTimeFormatter().format(new Date(value));
 }
 
 const reviewIntervalLabels = [
-  "忘记后",
-  "模糊后 / 熟悉度 1",
-  "熟悉度 2",
-  "熟悉度 3",
-  "熟悉度 4",
-  "熟悉度 5",
+  msg("忘记后"),
+  msg("模糊后 / 熟悉度 1"),
+  msg("熟悉度 2"),
+  msg("熟悉度 3"),
+  msg("熟悉度 4"),
+  msg("熟悉度 5"),
 ];
 
 interface ReviewPlanSettingsProps {
@@ -70,6 +72,7 @@ interface ReviewPlanSettingsProps {
 }
 
 function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [dailyLimit, setDailyLimit] = useState("10");
   const [intervalsDays, setIntervalsDays] = useState<string[]>(
@@ -93,7 +96,7 @@ function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps)
       parsedDailyLimit < 1 ||
       parsedDailyLimit > 100
     ) {
-      setError("每日上限需要是 1–100 的整数。");
+      setError(t("每日上限需要是 1–100 的整数。"));
       return;
     }
     if (
@@ -102,7 +105,7 @@ function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps)
         (interval) => !Number.isInteger(interval) || interval < 1 || interval > 365,
       )
     ) {
-      setError("每个间隔需要是 1–365 天的整数。");
+      setError(t("每个间隔需要是 1–365 天的整数。"));
       return;
     }
     setError("");
@@ -110,24 +113,24 @@ function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps)
   };
 
   return (
-    <section className="review-plan-settings" aria-label="自定义复习计划">
+    <section className="review-plan-settings" aria-label={t("自定义复习计划")}>
       <div className="review-plan-heading">
         <div>
-          <strong>复习计划</strong>
+          <strong>{t("复习计划")}</strong>
           <span>
             {settings
-              ? `每天最多 ${settings.daily_limit} 条 · ${settings.intervals_days.join(" / ")} 天`
-              : "正在读取设置…"}
+              ? t("每天最多 {daily_limit} 条 · {value} 天", { daily_limit: settings.daily_limit, value: settings.intervals_days.join(" / ") })
+              : t("正在读取设置…")}
           </span>
         </div>
         <button type="button" onClick={() => setOpen((value) => !value)}>
-          {open ? "收起" : "调整计划"}
+          {open ? t("收起") : t("调整计划")}
         </button>
       </div>
       {open && (
         <div className="review-plan-fields">
           <label>
-            每日队列上限
+            {t("每日队列上限")}
             <input
               type="number"
               min="1"
@@ -140,7 +143,7 @@ function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps)
           <div className="review-interval-grid">
             {intervalsDays.map((value, index) => (
               <label key={reviewIntervalLabels[index]}>
-                {reviewIntervalLabels[index]}
+                {t(reviewIntervalLabels[index])}
                 <input
                   type="number"
                   min="1"
@@ -157,7 +160,7 @@ function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps)
             ))}
           </div>
           <p className="review-plan-help">
-            “记得”会按复习后的熟悉度选择对应间隔；“忘记”和“模糊”分别使用前两档。
+            {t("“记得”会按复习后的熟悉度选择对应间隔；“忘记”和“模糊”分别使用前两档。")}
           </p>
           {error && <p className="review-plan-error">{error}</p>}
           <button
@@ -166,7 +169,7 @@ function ReviewPlanSettings({ settings, busy, onSave }: ReviewPlanSettingsProps)
             onClick={handleSave}
             disabled={busy || !settings}
           >
-            {busy ? "保存中…" : "保存计划"}
+            {busy ? t("保存中…") : t("保存计划")}
           </button>
         </div>
       )}
@@ -190,6 +193,7 @@ export default function ReviewPanel({
   reviewSettingsBusy,
   onSaveReviewSettings,
 }: ReviewPanelProps) {
+  const { t } = useI18n();
   const current = queue?.items[0] ?? null;
   const [showAnswer, setShowAnswer] = useState(false);
   const [ideaTitle, setIdeaTitle] = useState("");
@@ -234,7 +238,7 @@ export default function ReviewPanel({
           busy={reviewSettingsBusy}
           onSave={onSaveReviewSettings}
         />
-        正在准备今日回顾…
+        {t("正在准备今日回顾…")}
       </div>
     );
   }
@@ -248,8 +252,8 @@ export default function ReviewPanel({
         />
         <div className="review-complete">
           <span className="review-complete-icon" aria-hidden="true"><Icon name="review" size={20} /></span>
-          <h2>今天的回顾已经完成</h2>
-          <p>到期单词、待读资料和待整理灵感都会出现在这里。可以返回资料库继续收藏。</p>
+          <h2>{t("今天的回顾已经完成")}</h2>
+          <p>{t("到期单词、待读资料和待整理灵感都会出现在这里。可以返回资料库继续收藏。")}</p>
         </div>
       </section>
     );
@@ -262,7 +266,7 @@ export default function ReviewPanel({
         busy={reviewSettingsBusy}
         onSave={onSaveReviewSettings}
       />
-      <div className="review-queue-filters" aria-label="回顾队列">
+      <div className="review-queue-filters" aria-label={t("回顾队列")}>
         {queueFilters.map((item) => (
           <button
             key={item.value}
@@ -274,22 +278,22 @@ export default function ReviewPanel({
           </button>
         ))}
       </div>
-      <div className="review-stats" aria-label="今日回顾数量">
-        <span><strong>{scheduledCount}</strong> / {dailyLimit} 条今日计划</span>
-        <span><strong>{queue.word_count}</strong> 个单词</span>
-        <span><strong>{queue.resource_count}</strong> 篇待读</span>
-        <span><strong>{queue.idea_count}</strong> 条待整理</span>
+      <div className="review-stats" aria-label={t("今日回顾数量")}>
+        <span><strong>{scheduledCount}</strong>{t(" / {dailyLimit} 条今日计划", { dailyLimit })}</span>
+        <span><strong>{queue.word_count}</strong>{t(" 个单词")}</span>
+        <span><strong>{queue.resource_count}</strong>{t(" 篇待读")}</span>
+        <span><strong>{queue.idea_count}</strong>{t(" 条待整理")}</span>
       </div>
       <article className="review-card">
         <div className="review-card-meta">
           <span>
             {current.type === "word"
-              ? "单词复习"
+              ? t("单词复习")
               : current.type === "resource"
-                ? "待阅读"
-                : "待整理灵感"}
+                ? t("待阅读")
+                : t("待整理灵感")}
           </span>
-          <span>{progressLabel ?? `还剩 ${remainingCount} 条`}</span>
+          <span>{progressLabel ?? t("还剩 {remainingCount} 条", { remainingCount })}</span>
         </div>
         {current.type === "word" && (
           <>
@@ -304,23 +308,22 @@ export default function ReviewPanel({
               <p className="review-example">“{current.word_example}”</p>
             )}
             <p className="review-schedule">
-              上次 {formatReviewTime(current.last_review_at, "尚未复习")}
-              {" · "}
-              下次 {formatReviewTime(current.next_review_at, "待安排")}
+              {t("上次 ")}{formatReviewTime(current.last_review_at, t("尚未复习"))}
+              {" · "}{t("下次 ")}{formatReviewTime(current.next_review_at, t("待安排"))}
             </p>
             {showAnswer ? (
               <div className="review-answer">
                 <p>{current.word_meaning || current.body}</p>
                 <div className="review-actions">
-                  <button type="button" disabled={busy} onClick={() => onReviewWord(current, "forgot")}>忘记</button>
-                  <button type="button" disabled={busy} onClick={() => onReviewWord(current, "fuzzy")}>模糊</button>
-                  <button type="button" className="primary" disabled={busy} onClick={() => onReviewWord(current, "remembered")}>记得</button>
+                  <button type="button" disabled={busy} onClick={() => onReviewWord(current, "forgot")}>{t("忘记")}</button>
+                  <button type="button" disabled={busy} onClick={() => onReviewWord(current, "fuzzy")}>{t("模糊")}</button>
+                  <button type="button" className="primary" disabled={busy} onClick={() => onReviewWord(current, "remembered")}>{t("记得")}</button>
                 </div>
               </div>
             ) : (
               <div className="review-hidden">
-                <p>先回想释义和例句，再显示答案。</p>
-                <button type="button" onClick={() => setShowAnswer(true)}>显示答案</button>
+                <p>{t("先回想释义和例句，再显示答案。")}</p>
+                <button type="button" onClick={() => setShowAnswer(true)}>{t("显示答案")}</button>
               </div>
             )}
           </>
@@ -331,7 +334,7 @@ export default function ReviewPanel({
             <p className="review-example">
               {sourceHost(current.source_url)}
               {current.resource_categories && current.resource_categories.length > 0
-                ? ` · ${current.resource_categories.length} 个分类`
+                ? t(" · {length} 个分类", { length: current.resource_categories.length })
                 : current.resource_category_label
                   ? ` · ${current.resource_category_label}`
                   : ""}
@@ -340,18 +343,18 @@ export default function ReviewPanel({
               <p>{current.resource_ai_summary || current.resource_description}</p>
             )}
             <div className="review-actions">
-              <button type="button" className="primary" disabled={busy} onClick={() => onOpenResource(current)}>打开原网页</button>
+              <button type="button" className="primary" disabled={busy} onClick={() => onOpenResource(current)}>{t("打开原网页")}</button>
               <button type="button" disabled={busy} onClick={() => onStarResource(current)}>
-                {current.starred ? "取消星标" : "星标"}
+                {current.starred ? t("取消星标") : t("星标")}
               </button>
             </div>
           </>
         )}
         {current.type === "idea" && (
           <>
-            <h2 id="review-card-title">补充这条灵感</h2>
+            <h2 id="review-card-title">{t("补充这条灵感")}</h2>
             <label>
-              标题
+              {t("标题")}
               <input
                 value={ideaTitle}
                 onChange={(event) => setIdeaTitle(event.target.value)}
@@ -359,7 +362,7 @@ export default function ReviewPanel({
               />
             </label>
             <label>
-              内容
+              {t("内容")}
               <textarea
                 value={ideaBody}
                 onChange={(event) => setIdeaBody(event.target.value)}
@@ -374,14 +377,14 @@ export default function ReviewPanel({
                 disabled={busy || !ideaBody.trim()}
                 onClick={() => onOrganizeIdea(current, ideaTitle.trim(), ideaBody.trim())}
               >
-                整理完成
+                {t("整理完成")}
               </button>
-              <button type="button" disabled={busy} onClick={() => onArchiveIdea(current)}>归档</button>
+              <button type="button" disabled={busy} onClick={() => onArchiveIdea(current)}>{t("归档")}</button>
             </div>
           </>
         )}
         <button type="button" className="review-skip" disabled={busy} onClick={() => onSkip(current)}>
-          跳过
+          {t("跳过")}
         </button>
       </article>
     </section>

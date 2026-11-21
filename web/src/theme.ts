@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 export type ThemePreference = "system" | "light" | "dark";
 
 const storageKey = "memoisle_theme";
@@ -5,9 +6,9 @@ const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 let systemThemeListener: (() => void) | null = null;
 
 export const themeOptions = [
-  { value: "system", label: "跟随系统", icon: "monitor" },
-  { value: "light", label: "浅色", icon: "sun" },
-  { value: "dark", label: "深色", icon: "moon" },
+  { value: "system", get label() { return t("跟随系统"); }, icon: "monitor" },
+  { value: "light", get label() { return t("浅色"); }, icon: "sun" },
+  { value: "dark", get label() { return t("深色"); }, icon: "moon" },
 ] as const;
 
 export function readThemePreference(): ThemePreference {

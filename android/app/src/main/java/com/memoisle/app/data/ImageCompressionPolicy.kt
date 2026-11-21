@@ -1,5 +1,7 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
 import java.util.Locale
 import kotlin.math.floor
 import kotlin.math.min
@@ -115,14 +117,14 @@ object ImageCompressionPolicy {
         return if (hasAlpha) ImageOutputFormat.PNG else ImageOutputFormat.JPEG
     }
 
-    /** 把 MIME 转成用户可读的格式名。 */
-    fun formatLabel(mimeType: String?): String {
+    /** 把 MIME 转成用户可读的格式名；无法识别时返回 null（界面显示为「图片」）。 */
+    fun formatLabel(mimeType: String?): String? {
         return when (normalizeImageMimeType(mimeType)) {
             "image/png" -> "PNG"
             "image/jpeg" -> "JPEG"
             "image/webp" -> "WebP"
             "image/gif" -> "GIF"
-            else -> "图片"
+            else -> null
         }
     }
 
@@ -142,23 +144,37 @@ object ImageCompressionPolicy {
         sourceMimeType: String?,
         outputFormat: ImageOutputFormat,
         animationDropped: Boolean,
-    ): String {
-        val details = mutableListOf<String>()
-        details += "${sizeLabel(originalByteCount)} → ${sizeLabel(newByteCount)}"
+    ): UiText {
+        val details = mutableListOf<UiText>()
+        details += UiText.plain("${sizeLabel(originalByteCount)} → ${sizeLabel(newByteCount)}")
         val dimensionsChanged = originalWidth > 0 &&
             originalHeight > 0 &&
             (originalWidth != newWidth || originalHeight != newHeight)
         if (dimensionsChanged) {
-            details += "尺寸 $originalWidth × $originalHeight → $newWidth × $newHeight"
+            details += UiText.res(
+                R.string.image_compress_detail_dimensions,
+                originalWidth,
+                originalHeight,
+                newWidth,
+                newHeight,
+            )
         }
         val sourceLabel = formatLabel(sourceMimeType)
         if (sourceLabel != outputFormat.label) {
-            details += "格式 $sourceLabel → ${outputFormat.label}"
+            details += UiText.res(
+                R.string.image_compress_detail_format,
+                sourceLabel ?: UiText.res(R.string.image_format_unknown),
+                outputFormat.label,
+            )
         }
         if (animationDropped) {
-            details += "动图已转为静态图，仅保留第一帧"
+            details += UiText.res(R.string.image_compress_detail_animation_dropped)
         }
-        return "图片已自动压缩后收藏：" + details.joinToString("；")
+        // 片段数随情况变化，按资源里的分隔符逐段拼接。
+        val joined = details.drop(1).fold(details.first()) { acc, part ->
+            UiText.res(R.string.image_compress_detail_join, acc, part)
+        }
+        return UiText.res(R.string.image_compress_reminder, joined)
     }
 
     private fun sizeLabel(bytes: Int): String {

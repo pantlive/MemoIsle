@@ -4,6 +4,7 @@
 // 更改主密码只需重新包裹库密钥，条目不必重新加密。
 
 import type { VaultItemRecord, VaultKeyMaterial, VaultStatus } from "./api";
+import { t } from "./i18n";
 
 export const VAULT_KDF = "pbkdf2-sha256";
 export const VAULT_ITERATIONS = 600_000;
@@ -18,7 +19,7 @@ export const subscriptionProviderLabels = {
   claude: "Claude",
   chatgpt: "ChatGPT",
   grok: "Grok",
-  other: "其他",
+  get other() { return t("其他"); },
 } as const;
 
 export type SubscriptionProvider = keyof typeof subscriptionProviderLabels;
@@ -232,7 +233,7 @@ async function wrapVaultKey(
 
 export class WrongMasterPasswordError extends Error {
   constructor() {
-    super("主密码不正确。");
+    super(t("主密码不正确。"));
   }
 }
 
@@ -243,10 +244,10 @@ async function unwrapVaultKey(
   extractable: boolean,
 ): Promise<CryptoKey> {
   if (!status.kdf_salt || !status.wrapped_key || !status.wrap_iv || !status.kdf_iterations) {
-    throw new Error("密码库参数不完整。");
+    throw new Error(t("密码库参数不完整。"));
   }
   if (status.kdf !== VAULT_KDF) {
-    throw new Error("不支持的密码库格式，请更新 MemoIsle。");
+    throw new Error(t("不支持的密码库格式，请更新 MemoIsle。"));
   }
   const wrappingKey = await deriveWrappingKey(
     password,
@@ -359,7 +360,7 @@ function reminderSettings(raw: Record<string, unknown>): VaultReminderSettings {
 
 // 解密后按类型补齐字段，旧版本或缺字段的数据也能正常显示。
 export function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
-  const title = text(raw.title) || "未命名";
+  const title = text(raw.title) || t("未命名");
   const notes = text(raw.notes);
   if (raw.kind === "subscription") {
     const provider = raw.provider;
@@ -430,7 +431,7 @@ export function normalizeItemData(raw: Record<string, unknown>): VaultItemData {
 
 export class VaultDecryptError extends Error {
   constructor() {
-    super("有条目无法解密，可能已损坏或被篡改。");
+    super(t("有条目无法解密，可能已损坏或被篡改。"));
   }
 }
 
@@ -571,11 +572,11 @@ export function stampSecretChange(
 }
 
 export const vaultKindLabels: Record<VaultKind, string> = {
-  login: "账号密码",
-  secret: "密钥",
-  recovery: "恢复码",
-  server: "云服务器",
-  subscription: "AI 订阅",
+  get login() { return t("账号密码"); },
+  get secret() { return t("密钥"); },
+  get recovery() { return t("恢复码"); },
+  get server() { return t("云服务器"); },
+  get subscription() { return t("AI 订阅"); },
 };
 
 // 加密备份：直接保存服务器上的密文和导出时的包裹参数，文件里没有任何明文。
@@ -597,7 +598,7 @@ export interface VaultBackupFile {
 
 export function buildVaultBackup(status: VaultStatus, records: VaultItemRecord[]): VaultBackupFile {
   if (!status.kdf || !status.kdf_iterations || !status.kdf_salt || !status.wrapped_key || !status.wrap_iv) {
-    throw new Error("密码库参数不完整，无法导出。");
+    throw new Error(t("密码库参数不完整，无法导出。"));
   }
   return {
     format: VAULT_BACKUP_FORMAT,
@@ -623,17 +624,17 @@ function isBase64(value: unknown): value is string {
 }
 
 export function parseVaultBackup(text: string): VaultBackupFile {
-  if (text.length > MAX_BACKUP_BYTES) throw new Error("备份文件过大。");
+  if (text.length > MAX_BACKUP_BYTES) throw new Error(t("备份文件过大。"));
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(text) as Record<string, unknown>;
   } catch {
-    throw new Error("不是有效的 JSON 文件。");
+    throw new Error(t("不是有效的 JSON 文件。"));
   }
   if (raw?.format !== VAULT_BACKUP_FORMAT) {
-    throw new Error("这不是 MemoIsle 密码库备份文件。");
+    throw new Error(t("这不是 MemoIsle 密码库备份文件。"));
   }
-  if (raw.version !== 1) throw new Error("备份文件版本不受支持，请更新 MemoIsle。");
+  if (raw.version !== 1) throw new Error(t("备份文件版本不受支持，请更新 MemoIsle。"));
   const items = Array.isArray(raw.items) ? raw.items : null;
   const keyFieldsValid = raw.kdf === VAULT_KDF
     && typeof raw.kdf_iterations === "number"
@@ -647,7 +648,7 @@ export function parseVaultBackup(text: string): VaultBackupFile {
     && isBase64((item as Record<string, unknown>).iv)
     && isBase64((item as Record<string, unknown>).ciphertext)
   ));
-  if (!keyFieldsValid || !items || !itemsValid) throw new Error("备份文件已损坏或格式不完整。");
+  if (!keyFieldsValid || !items || !itemsValid) throw new Error(t("备份文件已损坏或格式不完整。"));
   return raw as unknown as VaultBackupFile;
 }
 

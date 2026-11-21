@@ -10,8 +10,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.memoisle.app.data.FORGET_MAX_ATTACHMENT_BYTES
 import com.memoisle.app.data.FORGET_MAX_ATTACHMENTS
+import com.memoisle.app.data.FORGET_MAX_ATTACHMENT_BYTES
 import com.memoisle.app.data.FORGET_PREVIEW_MAX_BYTES
 import com.memoisle.app.data.ForgetItem
 import com.memoisle.app.data.ForgetItemInput
@@ -20,6 +20,9 @@ import com.memoisle.app.data.forgetTextError
 import com.memoisle.app.data.isForgetImage
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -32,12 +35,12 @@ data class ForgetUiState(
     val items: List<ForgetItem> = emptyList(),
     val loading: Boolean = false,
     val busy: Boolean = false,
-    val error: String? = null,
-    val message: String? = null,
+    val error: UiText? = null,
+    val message: UiText? = null,
     /** 冲突后加一，界面用它把编辑框刷回服务端文字。 */
     val textEpoch: Int = 0,
     val previews: Map<String, ByteArray> = emptyMap(),
-    val previewNotes: Map<String, String> = emptyMap(),
+    val previewNotes: Map<String, UiText> = emptyMap(),
 )
 
 /** 在线易忘事项。不写入本地数据库；退出登录时 [reset]。 */
@@ -61,7 +64,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
         uiState = uiState.copy(error = null, message = null)
     }
 
-    fun showError(message: String) {
+    fun showError(message: UiText) {
         uiState = uiState.copy(error = message, message = null)
     }
 
@@ -96,12 +99,12 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
         val images = item.attachments.filter(::isForgetImage)
         if (images.isEmpty()) return
         previewJob = viewModelScope.launch {
-            val notes = linkedMapOf<String, String>()
+            val notes = linkedMapOf<String, UiText>()
             val bytes = linkedMapOf<String, ByteArray>()
             for (attachment in images) {
                 if (previewItemId != item.id) return@launch
                 if (attachment.size > FORGET_PREVIEW_MAX_BYTES) {
-                    notes[attachment.id] = "图片超过 8 MB，请另存后查看。"
+                    notes[attachment.id] = UiText.res(R.string.forget_preview_too_large)
                     continue
                 }
                 try {
@@ -114,7 +117,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
-                    notes[attachment.id] = "预览失败，请另存后查看。"
+                    notes[attachment.id] = UiText.res(R.string.forget_preview_failed)
                 }
                 if (previewItemId == item.id) {
                     uiState = uiState.copy(previews = bytes.toMap(), previewNotes = notes.toMap())
@@ -147,7 +150,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 }
                 replace(saved)
                 onSaved(saved)
-                uiState = uiState.copy(message = if (creating) "已记下。" else "已保存。")
+                uiState = uiState.copy(message = if (creating) UiText.res(R.string.forget_msg_recorded) else UiText.res(R.string.ledger_msg_saved))
             } catch (error: ApiException) {
                 if (error.statusCode == 409) {
                     syncAfterConflict()
@@ -165,7 +168,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 if (previewItemId == id) clearPreviews()
                 uiState = uiState.copy(items = uiState.items.filter { it.id != id })
                 onDone()
-                uiState = uiState.copy(message = "已删除这条事项。")
+                uiState = uiState.copy(message = UiText.res(R.string.forget_msg_deleted))
             } catch (error: ApiException) {
                 if (error.statusCode == 409) {
                     syncAfterConflict()
@@ -187,7 +190,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 items = items,
                 previews = uiState.previews - attachmentId,
                 previewNotes = uiState.previewNotes - attachmentId,
-                message = "已删除附件。",
+                message = UiText.res(R.string.forget_msg_attachment_deleted),
             )
         }
     }
@@ -214,15 +217,15 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
             onItem(item)
             for (uri in uris) {
                 if (item.attachments.size >= FORGET_MAX_ATTACHMENTS) {
-                    throw IllegalArgumentException("每条最多 20 个附件")
+                    throw UiTextException(UiText.res(R.string.forget_error_too_many_attachments))
                 }
                 val (queriedName, size) = withContext(Dispatchers.IO) {
                     queryNameAndSize(contentResolver, uri)
                 }
                 val name = queriedName.ifBlank { "file" }
-                forgetFileError(size)?.let { throw IllegalArgumentException("「$name」$it") }
+                forgetFileError(size)?.let { throw UiTextException(UiText.res(R.string.forget_error_named_file, name, it)) }
                 val bytes = withContext(Dispatchers.IO) { readLimited(contentResolver, uri, name) }
-                if (bytes.isEmpty()) throw IllegalArgumentException("「$name」附件内容不能为空")
+                if (bytes.isEmpty()) throw UiTextException(UiText.res(R.string.forget_error_named_file, name, UiText.res(R.string.error_attachment_empty)))
                 val mime = contentResolver.getType(uri)?.ifBlank { null }
                 item = withContext(Dispatchers.IO) {
                     api.uploadForgetAttachment(item.id, bytes, name, mime)
@@ -231,7 +234,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 onItem(item)
             }
             refreshPreviews(item)
-            uiState = uiState.copy(message = "附件已保存。")
+            uiState = uiState.copy(message = UiText.res(R.string.forget_msg_attachment_saved))
         }
     }
 
@@ -247,7 +250,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
             try {
                 withContext(Dispatchers.IO) {
                     val output = contentResolver.openOutputStream(uri, "w")
-                        ?: throw java.io.IOException("无法写入所选位置")
+                        ?: throw java.io.IOException("Cannot write to the selected location")
                     output.use { api.downloadForgetAttachment(itemId, attachmentId, it) }
                 }
             } catch (error: Exception) {
@@ -256,7 +259,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 }
                 throw error
             }
-            uiState = uiState.copy(message = "已保存「$displayName」。")
+            uiState = uiState.copy(message = UiText.res(R.string.forget_msg_file_saved, displayName))
         }
     }
 
@@ -283,7 +286,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
         uiState = uiState.copy(
             items = items,
             textEpoch = uiState.textEpoch + 1,
-            error = "已在其他设备修改，正在重新读取。",
+            error = UiText.res(R.string.forget_conflict_reloading),
         )
     }
 
@@ -329,7 +332,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
 
     /** 大小未知时边读边数，超过 20 MB 立刻停止。 */
     private fun readLimited(contentResolver: ContentResolver, uri: Uri, name: String): ByteArray {
-        val input = contentResolver.openInputStream(uri) ?: throw IllegalArgumentException("无法读取「$name」")
+        val input = contentResolver.openInputStream(uri) ?: throw UiTextException(UiText.res(R.string.relay_error_cannot_read, name))
         return input.use { stream ->
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(64 * 1024)
@@ -339,7 +342,7 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
                 if (read < 0) break
                 total += read
                 if (total > FORGET_MAX_ATTACHMENT_BYTES) {
-                    throw IllegalArgumentException("「$name」附件不能超过 20 MB")
+                    throw UiTextException(UiText.res(R.string.forget_error_named_file, name, UiText.res(R.string.forget_error_attachment_too_large)))
                 }
                 output.write(buffer, 0, read)
             }
@@ -347,12 +350,14 @@ class ForgetViewModel(private val api: MemoApiClient) : ViewModel() {
         }
     }
 
-    private fun describe(error: Exception): String = when (error) {
-        is ApiException -> error.detailMessage ?: "操作失败（${error.statusCode}），请重试。"
-        is IllegalArgumentException -> error.message ?: "这个文件无法保存。"
-        is java.io.IOException -> "无法连接服务器。易忘事项需要在线使用，请检查网络后重试。"
-        is SecurityException -> "没有读取或写入这个文件的权限。"
-        else -> "操作失败，请稍后重试。"
+    private fun describe(error: Exception): UiText = when (error) {
+        is HasUiText -> error.text
+        is ApiException -> error.detailMessage?.let(UiText::plain)
+            ?: UiText.res(R.string.error_operation_failed_retry, error.statusCode)
+        is IllegalArgumentException -> error.message?.let(UiText::plain) ?: UiText.res(R.string.forget_error_cannot_save_file)
+        is java.io.IOException -> UiText.res(R.string.forget_error_offline)
+        is SecurityException -> UiText.res(R.string.relay_error_permission)
+        else -> UiText.res(R.string.error_operation_failed_later)
     }
 
     companion object {

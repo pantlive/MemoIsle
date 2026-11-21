@@ -4,10 +4,22 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.util.Locale
 import org.json.JSONObject
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
 
 const val LEDGER_MAX_AMOUNT_CENTS = 100_000_000_000L
-val ledgerExpenseCategories = listOf("餐饮", "交通", "购物", "订阅", "住房", "娱乐", "医疗", "其他")
-val ledgerIncomeCategories = listOf("工资", "其他")
+/** 预置分类（字符串资源 id）：按当前界面语言显示，分类是自由文本，选中后按显示的文字保存。 */
+val ledgerExpenseCategories = listOf(
+    R.string.ledger_category_food,
+    R.string.ledger_category_transport,
+    R.string.ledger_category_shopping,
+    R.string.ledger_category_subscription,
+    R.string.ledger_category_housing,
+    R.string.ledger_category_entertainment,
+    R.string.ledger_category_medical,
+    R.string.common_other,
+)
+val ledgerIncomeCategories = listOf(R.string.ledger_category_salary, R.string.common_other)
 
 /** 记账金额统一用 Long 保存分，不经浮点数换算。 */
 data class LedgerEntryInput(
@@ -169,20 +181,22 @@ fun ledgerEntrySubtitle(data: LedgerEntryInput): String = listOfNotNull(
     data.note?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotBlank() },
 ).joinToString(" · ")
 
-fun ledgerKindLabel(kind: String): String = if (kind == "income") "收入" else "支出"
+fun ledgerKindLabel(kind: String): Int = if (kind == "income") R.string.ledger_kind_income else R.string.ledger_kind_expense
 fun currentLedgerMonth(): String = YearMonth.now().toString()
 fun shiftLedgerMonth(month: String, delta: Long): String = YearMonth.parse(month).plusMonths(delta).toString()
 
 /** 客户端先校验，服务端仍负责最终校验与账号隔离。 */
-fun ledgerValidationError(data: LedgerEntryInput): String? {
-    if (data.kind !in listOf("income", "expense")) return "请选择收入或支出。"
-    if (data.amountCents !in 1..LEDGER_MAX_AMOUNT_CENTS) return "金额需大于 0 且不超过 10 亿元。"
-    if (!Regex("[A-Z]{3}").matches(data.currency)) return "币种应为三位字母，如 CNY。"
+fun ledgerValidationError(data: LedgerEntryInput): UiText? {
+    if (data.kind !in listOf("income", "expense")) return UiText.res(R.string.ledger_error_kind)
+    if (data.amountCents !in 1..LEDGER_MAX_AMOUNT_CENTS) return UiText.res(R.string.ledger_error_amount)
+    if (!Regex("[A-Z]{3}").matches(data.currency)) return UiText.res(R.string.ledger_error_currency)
     val date = runCatching { LocalDate.parse(data.occurredOn) }.getOrNull()
-    if (date == null || date.year !in 1900..2100) return "日期应为 YYYY-MM-DD，年份范围 1900–2100。"
-    if (data.category.isBlank() || data.category.codePointCount(0, data.category.length) > 30) return "分类需为 1–30 个字。"
-    if ((data.account?.codePointCount(0, data.account.length) ?: 0) > 30) return "账户最多 30 个字。"
-    if ((data.note?.codePointCount(0, data.note.length) ?: 0) > 500) return "备注最多 500 个字。"
+    if (date == null || date.year !in 1900..2100) return UiText.res(R.string.ledger_error_date)
+    if (data.category.isBlank() || data.category.codePointCount(0, data.category.length) > 30) {
+        return UiText.res(R.string.ledger_error_category)
+    }
+    if ((data.account?.codePointCount(0, data.account.length) ?: 0) > 30) return UiText.res(R.string.ledger_error_account)
+    if ((data.note?.codePointCount(0, data.note.length) ?: 0) > 500) return UiText.res(R.string.ledger_error_note)
     return null
 }
 

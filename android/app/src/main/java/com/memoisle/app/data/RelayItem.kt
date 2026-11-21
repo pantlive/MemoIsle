@@ -5,6 +5,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.json.JSONObject
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
 
 /** 与服务端一致：文本 100 KB（UTF-8 字节），文件 20 MB，长轮询每次最多 25 秒。 */
 const val RELAY_MAX_TEXT_BYTES = 100 * 1024
@@ -55,24 +57,24 @@ data class RelayItem(
 private fun JSONObject.optNullableString(name: String): String? =
     if (!has(name) || isNull(name)) null else getString(name)
 
-fun relayDeviceLabel(device: String): String = when (device) {
-    RELAY_DEVICE_WEB -> "网页"
-    RELAY_DEVICE_ANDROID -> "手机"
-    else -> device
+fun relayDeviceLabel(device: String): UiText = when (device) {
+    RELAY_DEVICE_WEB -> UiText.res(R.string.relay_device_web)
+    RELAY_DEVICE_ANDROID -> UiText.res(R.string.relay_device_android)
+    else -> UiText.plain(device)
 }
 
-/** 发送前在本地挡住超限文本，返回中文提示；可以发送时返回 null。 */
-fun relayTextError(text: String): String? = when {
-    text.isBlank() -> "请输入要发送的内容。"
-    text.toByteArray(Charsets.UTF_8).size > RELAY_MAX_TEXT_BYTES -> "文本不能超过 100 KB，请改用文件发送。"
+/** 发送前在本地挡住超限文本，返回提示；可以发送时返回 null。 */
+fun relayTextError(text: String): UiText? = when {
+    text.isBlank() -> UiText.res(R.string.relay_error_text_empty)
+    text.toByteArray(Charsets.UTF_8).size > RELAY_MAX_TEXT_BYTES -> UiText.res(R.string.relay_error_text_too_large)
     else -> null
 }
 
 /** size 未知时传 null，读取时再按 [RELAY_MAX_FILE_BYTES] 截断检查。 */
-fun relayFileError(name: String, size: Long?): String? = when {
+fun relayFileError(name: String, size: Long?): UiText? = when {
     size == null -> null
-    size <= 0 -> "「$name」是空文件。"
-    size > RELAY_MAX_FILE_BYTES -> "「$name」有 ${formatRelayBytes(size)}，单个文件不能超过 20 MB。"
+    size <= 0 -> UiText.res(R.string.relay_error_file_empty, name)
+    size > RELAY_MAX_FILE_BYTES -> UiText.res(R.string.relay_error_file_too_large, name, formatRelayBytes(size))
     else -> null
 }
 
@@ -83,9 +85,9 @@ fun formatRelayBytes(size: Long): String = when {
 }
 
 /** 剩余有效时间，如「9:58」；到期返回「已过期」。 */
-fun formatRelayRemaining(seconds: Long): String {
-    if (seconds <= 0) return "已过期"
-    return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+fun formatRelayRemaining(seconds: Long): UiText {
+    if (seconds <= 0) return UiText.res(R.string.common_expired)
+    return UiText.plain("${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}")
 }
 
 fun relayImageExtension(mime: String?): String = when (

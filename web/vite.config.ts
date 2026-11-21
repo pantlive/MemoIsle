@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -8,6 +9,10 @@ const apiProxy = (
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    // 测试固定中文界面，见 src/__tests__/setup.ts。
+    setupFiles: ["src/__tests__/setup.ts"],
+  },
   server: {
     port: 5173,
     proxy: {

@@ -5,6 +5,9 @@ import java.time.ZoneOffset
 import java.net.URI
 import java.util.Locale
 import java.util.UUID
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
 
 enum class SyncState {
     SYNCED,
@@ -471,9 +474,8 @@ fun newLocalIdea(body: String): Memo {
 }
 
 fun newLocalResource(url: String, title: String, note: String): Memo {
-    val normalizedUrl = requireNotNull(normalizeResourceUrl(url)) {
-        "网页资料必须包含有效的网址"
-    }
+    val normalizedUrl = normalizeResourceUrl(url)
+        ?: throw UiTextException(UiText.res(R.string.memo_error_resource_url_required))
     val cleanedTitle = title.trim().ifEmpty { resourceHost(normalizedUrl) }
     val cleanedNote = note.trim().ifEmpty { normalizedUrl }
     val now = Instant.now().toString()
@@ -514,7 +516,7 @@ fun newLocalWord(
     example: String,
 ): Memo {
     val cleanedLemma = lemma.trim()
-    require(cleanedLemma.isNotEmpty()) { "英语单词必须包含词形" }
+    if (cleanedLemma.isEmpty()) throw UiTextException(UiText.res(R.string.memo_error_word_lemma_required))
     val cleanedMeaning = meaning.trim()
     val now = Instant.now().toString()
     return Memo(
@@ -548,7 +550,7 @@ fun newLocalWord(
 }
 
 fun newLocalVoiceIdea(body: String, audioPath: String, durationMs: Int): Memo {
-    val resolvedBody = body.trim().ifEmpty { "语音记录" }
+    val resolvedBody = body.trim().ifEmpty { ContentDefaults.voiceBody }
     return newLocalIdea(resolvedBody).copy(
         audioMimeType = "audio/mp4",
         audioDurationMs = durationMs,
@@ -653,7 +655,7 @@ private fun hasCjk(value: String): Boolean =
 fun defaultMemoTitle(body: String): String {
     val firstLine = body.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     if (firstLine.isEmpty()) {
-        return "灵感"
+        return ContentDefaults.ideaTitle
     }
     return if (firstLine.length <= 80) firstLine else "${firstLine.take(77)}..."
 }
@@ -683,61 +685,89 @@ fun normalizeResourceUrl(value: String): String? {
 fun resourceHost(url: String): String {
     return runCatching {
         URI(url).host.orEmpty().removePrefix("www.")
-    }.getOrDefault("网页资料").ifEmpty { "网页资料" }
+    }.getOrDefault(ContentDefaults.resourceTitle).ifEmpty { ContentDefaults.resourceTitle }
 }
 
 fun Memo.assignedCategoryCodes(): List<String> =
     resourceCategories.ifEmpty { listOfNotNull(resourceCategory) }
 
-fun resourceCategoryLabel(category: String?, customLabel: String? = null): String {
+/** 自定义分类名是用户内容，原样显示；预置分类按界面语言显示。 */
+fun resourceCategoryLabel(category: String?, customLabel: String? = null): UiText {
     if (!customLabel.isNullOrBlank()) {
-        return customLabel
+        return UiText.plain(customLabel)
     }
-    return when (category) {
-        "learning" -> "学习资料"
-        "article" -> "文章阅读"
-        "media" -> "视频与音频"
-        "tool" -> "工具与服务"
-        "book_paper" -> "书籍与论文"
-        "product" -> "商品与好物"
-        "other" -> "其他"
-        else -> "分类中"
-    }
+    return UiText.res(
+        when (category) {
+            "learning" -> R.string.resource_category_learning
+            "article" -> R.string.resource_category_article
+            "media" -> R.string.resource_category_media
+            "tool" -> R.string.resource_category_tool
+            "book_paper" -> R.string.resource_category_book_paper
+            "product" -> R.string.resource_category_product
+            "other" -> R.string.common_other
+            else -> R.string.resource_category_pending
+        },
+    )
 }
 
-fun resourceKindLabel(kind: String?): String = when (kind) {
-    "article" -> "文章"
-    "video" -> "视频"
-    "course" -> "课程"
-    "tool" -> "工具"
-    "book" -> "书籍"
-    else -> "其他"
-}
+fun resourceKindLabel(kind: String?): UiText = UiText.res(
+    when (kind) {
+        "article" -> R.string.resource_kind_article
+        "video" -> R.string.resource_kind_video
+        "course" -> R.string.resource_kind_course
+        "tool" -> R.string.resource_kind_tool
+        "book" -> R.string.resource_kind_book
+        else -> R.string.common_other
+    },
+)
 
-fun resourceReadingStatusLabel(status: String?): String = when (status) {
-    "reading" -> "阅读中"
-    "completed" -> "已完成"
-    "archived" -> "已归档"
-    else -> "未读"
-}
+fun resourceReadingStatusLabel(status: String?): UiText = UiText.res(
+    when (status) {
+        "reading" -> R.string.resource_reading_reading
+        "completed" -> R.string.resource_reading_completed
+        "archived" -> R.string.resource_reading_archived
+        else -> R.string.resource_reading_unread
+    },
+)
 
-fun linkHealthLabel(status: String): String = when (status) {
-    "healthy" -> "网页正常"
-    "redirected" -> "网址已跳转"
-    "changed" -> "网页有更新"
-    "auth_required" -> "需要登录"
-    "temporary_failure" -> "暂时无法访问"
-    "failed" -> "网页已失效"
-    "ignored" -> "已忽略巡检"
-    else -> "等待检查"
-}
+fun linkHealthLabel(status: String): UiText = UiText.res(
+    when (status) {
+        "healthy" -> R.string.link_health_healthy
+        "redirected" -> R.string.link_health_redirected
+        "changed" -> R.string.link_health_changed
+        "auth_required" -> R.string.link_health_auth_required
+        "temporary_failure" -> R.string.link_health_temporary_failure
+        "failed" -> R.string.link_health_failed
+        "ignored" -> R.string.link_health_ignored
+        else -> R.string.link_health_pending
+    },
+)
 
 const val TYPE_IDEA = "idea"
 const val TYPE_RESOURCE = "resource"
 const val TYPE_WORD = "word"
 const val TYPE_IMAGE = "image"
 
-const val DEFAULT_IMAGE_MEMO_TITLE = "图片收藏"
+/**
+ * 新建内容时写进数据里的默认标题 / 正文（保存后就是用户内容，不再随语言变化）。
+ * 按创建时的界面语言填写：MainActivity 启动（含切换语言后重建）时用当前语言的资源更新。
+ */
+object ContentDefaults {
+    @Volatile var ideaTitle: String = "Idea"
+    @Volatile var voiceBody: String = "Voice note"
+    @Volatile var resourceTitle: String = "Web resource"
+    @Volatile var imageTitle: String = "Image"
+    @Volatile var meetingRecording: String = "Meeting recording"
+    @Volatile var voiceRecording: String = "Voice idea"
+    @Volatile var untitled: String = "Untitled"
+    @Volatile var otherProvider: String = "Other"
+}
+
+/** 会议录音的数据标签（与 Web 端约定的固定值），是数据标记而不是界面文案，不翻译。 */
+const val MEETING_TAG = "会议"
+
+val DEFAULT_IMAGE_MEMO_TITLE: String
+    get() = ContentDefaults.imageTitle
 const val MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 
 private val supportedImageMimeTypes = mapOf(
@@ -807,7 +837,8 @@ fun audioFileExtensionForMimeType(mimeType: String?): String? {
 /** 保存录音时使用可读标题和真实容器扩展名，会议录音与普通语音灵感共用。 */
 fun audioDownloadFileName(memo: Memo): String {
     val extension = audioFileExtensionForMimeType(memo.audioMimeType) ?: "audio"
-    val fallback = if ("会议" in memo.tags) "会议录音" else "语音灵感"
+    // 「会议」标签是数据标记（Web 端会议模式创建时写入），不随界面语言变化。
+    val fallback = if (MEETING_TAG in memo.tags) ContentDefaults.meetingRecording else ContentDefaults.voiceRecording
     val title = memo.title.trim()
         .replace(Regex("[\\\\/:*?\"<>|]"), "_")
         .trim()
@@ -867,31 +898,33 @@ fun newLocalImage(
     )
 }
 
-fun imageDimensionsLabel(width: Int?, height: Int?): String? {
+fun imageDimensionsLabel(width: Int?, height: Int?): UiText? {
     if (width == null || height == null || width <= 0 || height <= 0) {
         return null
     }
-    return "$width × $height 像素"
+    return UiText.res(R.string.image_dimensions_px, width, height)
 }
 
 /**
  * 服务端图片 OCR 状态的可读文案，未知状态按未识别处理。
  */
-fun Memo.imageOcrStatusLabel(): String = when (imageOcrStatus) {
-    "pending" -> "排队中"
-    "processing" -> "识别中"
-    "ready" -> "已识别"
-    "failed" -> "识别失败"
-    "disabled" -> "未启用"
-    else -> "未识别"
-}
+fun Memo.imageOcrStatusLabel(): UiText = UiText.res(
+    when (imageOcrStatus) {
+        "pending" -> R.string.image_ocr_pending
+        "processing" -> R.string.image_ocr_processing
+        "ready" -> R.string.image_ocr_ready
+        "failed" -> R.string.image_ocr_failed
+        "disabled" -> R.string.image_ocr_disabled
+        else -> R.string.image_ocr_none
+    },
+)
 
 /**
  * OCR 结果来源文案，没有来源时返回 null。
  */
-fun Memo.imageOcrSourceLabel(): String? = when (imageOcrSource) {
-    "local" -> "本地识别"
-    "llm" -> "AI 识别"
+fun Memo.imageOcrSourceLabel(): UiText? = when (imageOcrSource) {
+    "local" -> UiText.res(R.string.image_ocr_source_local)
+    "llm" -> UiText.res(R.string.image_ocr_source_llm)
     else -> null
 }
 

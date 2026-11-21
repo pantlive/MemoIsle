@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { synthesizeSpeech } from "./api";
 import Icon from "./Icon";
 import { speakText } from "./wordSpeech";
+import { useI18n } from "./I18nProvider";
 
 interface SpeechPronunciationProps {
   text: string;
@@ -12,8 +13,10 @@ interface SpeechPronunciationProps {
 /** 播放句子或灵感正文，优先使用服务端 sanoTTS，失败时回退浏览器 TTS。 */
 export default function SpeechPronunciation({
   text,
-  label = "播放语音",
+  label: labelProp,
 }: SpeechPronunciationProps) {
+  const { t } = useI18n();
+  const label = labelProp ?? t("播放语音");
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -92,7 +95,7 @@ export default function SpeechPronunciation({
   return (
     <div className="word-pronunciation speech-pronunciation" aria-label={label}>
       <button type="button" onClick={() => void play()} disabled={!text.trim() || playing}>
-        {playing ? "播放中…" : <><Icon name="play" size={14} /> {label}</>}
+        {playing ? t("播放中…") : <><Icon name="play" size={14} /> {label}</>}
       </button>
     </div>
   );

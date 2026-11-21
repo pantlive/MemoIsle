@@ -25,9 +25,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.memoisle.app.R
 import com.memoisle.app.data.Memo
 import com.memoisle.app.network.QuickAccessEntry
 
@@ -44,10 +47,10 @@ internal fun QuickAccessSection(
     onRemove: (Memo) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionHeader("快速访问", trailing = "按打开次数排列")
+        SectionHeader(stringResource(R.string.quick_access_title), trailing = stringResource(R.string.quick_access_sorted))
         if (entries.isEmpty()) {
             Text(
-                "还没有打开记录。点开网页资料的「打开原网页」后，常用的网页会按打开次数出现在这里。",
+                stringResource(R.string.quick_access_empty),
                 color = TextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -79,7 +82,7 @@ internal fun QuickAccessSection(
                             ) {
                                 Icon(
                                     Icons.Outlined.Close,
-                                    contentDescription = "从快速访问移除「${memo.title}」",
+                                    contentDescription = stringResource(R.string.quick_access_remove, memo.title),
                                     tint = TextMuted,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -95,7 +98,7 @@ internal fun QuickAccessSection(
                         )
                         // 固定两行高度，有无简介的卡片都一样高。
                         Text(
-                            summary ?: "暂无简介",
+                            summary ?: stringResource(R.string.quick_access_no_summary),
                             color = if (summary == null) TextMuted.copy(alpha = 0.6f) else TextMuted,
                             style = MaterialTheme.typography.bodySmall,
                             minLines = 2,
@@ -105,7 +108,7 @@ internal fun QuickAccessSection(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "${entry.openCount} 次 · $host",
+                            pluralStringResource(R.plurals.quick_access_open_count, entry.openCount, entry.openCount, host),
                             color = TextMuted,
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,

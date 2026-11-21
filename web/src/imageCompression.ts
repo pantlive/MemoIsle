@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 // 与服务端 backend/app/service.py 的图片限制保持一致。
 // 只有当图片会被服务端拒绝时才在浏览器里压缩，避免无谓的画质损失。
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -65,7 +66,7 @@ function mimeLabel(mimeType: string): string {
     case "image/gif":
       return "GIF";
     default:
-      return mimeType || "未知格式";
+      return mimeType || t("未知格式");
   }
 }
 
@@ -122,7 +123,7 @@ export async function readImageDimensions(blob: Blob): Promise<ImageDimensions> 
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("图片无法解码，可能已损坏"));
+      reject(new Error(t("图片无法解码，可能已损坏")));
     };
     image.src = url;
   });
@@ -166,7 +167,7 @@ async function loadDrawable(
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("图片无法解码，可能已损坏"));
+      reject(new Error(t("图片无法解码，可能已损坏")));
     };
     image.src = url;
   });
@@ -182,7 +183,7 @@ async function renderScaled(
   canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) {
-    throw new Error("当前浏览器不支持图片压缩");
+    throw new Error(t("当前浏览器不支持图片压缩"));
   }
   const drawable = await loadDrawable(source, width, height);
   try {
@@ -204,7 +205,7 @@ function canvasToBlob(
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          reject(new Error("图片压缩失败"));
+          reject(new Error(t("图片压缩失败")));
           return;
         }
         // 部分浏览器会忽略不支持的输出格式，这里强制标注为目标类型。
@@ -264,7 +265,7 @@ export async function compressImageIfNeeded(
       }
     } catch (error) {
       // 单次解码/编码失败（例如画布过大）时继续缩小后重试。
-      lastError = error instanceof Error ? error : new Error("图片压缩失败");
+      lastError = error instanceof Error ? error : new Error(t("图片压缩失败"));
     }
     target = {
       width: Math.max(1, Math.round(target.width * 0.75)),
@@ -273,10 +274,10 @@ export async function compressImageIfNeeded(
     quality = 0.8;
   }
   if (!best) {
-    throw lastError ?? new Error("图片压缩失败");
+    throw lastError ?? new Error(t("图片压缩失败"));
   }
   if (best.blob.size > MAX_IMAGE_BYTES) {
-    throw new Error("图片过大，自动压缩后仍超过 20 MB，请先裁剪后再上传");
+    throw new Error(t("图片过大，自动压缩后仍超过 20 MB，请先裁剪后再上传"));
   }
   return {
     ...untouched,
@@ -295,16 +296,16 @@ export function describeImageCompression(
   result: ImageCompressionResult,
 ): string {
   const parts = [
-    `图片超过服务端限制，已自动压缩后上传：${formatImageBytes(
+    t("图片超过服务端限制，已自动压缩后上传：{value} → {value2}", { value: formatImageBytes(
       result.originalBytes,
-    )} → ${formatImageBytes(result.newBytes)}`,
+    ), value2: formatImageBytes(result.newBytes) }),
   ];
   if (
     result.newWidth !== result.originalWidth ||
     result.newHeight !== result.originalHeight
   ) {
     parts.push(
-      `尺寸 ${result.originalWidth}×${result.originalHeight} → ${result.newWidth}×${result.newHeight}`,
+      t("尺寸 {originalWidth}×{originalHeight} → {newWidth}×{newHeight}", { originalWidth: result.originalWidth, originalHeight: result.originalHeight, newWidth: result.newWidth, newHeight: result.newHeight }),
     );
   }
   if (
@@ -313,11 +314,11 @@ export function describeImageCompression(
     result.originalType !== result.newType
   ) {
     parts.push(
-      `格式 ${mimeLabel(result.originalType)} → ${mimeLabel(result.newType)}`,
+      t("格式 {value} → {value2}", { value: mimeLabel(result.originalType), value2: mimeLabel(result.newType) }),
     );
   }
   if (result.animationDropped) {
-    parts.push("动图已转为静态图片");
+    parts.push(t("动图已转为静态图片"));
   }
-  return parts.join("；");
+  return parts.join(t("；"));
 }

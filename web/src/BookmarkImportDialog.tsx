@@ -24,6 +24,8 @@ import type {
   BookmarkPreviewItem,
 } from "./types";
 import Icon from "./Icon";
+import { t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 interface BookmarkImportDialogProps {
   onClose: () => void;
@@ -32,24 +34,24 @@ interface BookmarkImportDialogProps {
 
 function itemStatusLabel(item: BookmarkPreviewItem): string {
   if (item.status === "valid") {
-    return "可导入";
+    return t("可导入");
   }
   if (item.error_code === "already_saved") {
-    return "资料库已有";
+    return t("资料库已有");
   }
   if (item.error_code === "duplicate_in_file") {
-    return "文件内重复";
+    return t("文件内重复");
   }
-  return "链接无效";
+  return t("链接无效");
 }
 
 function batchStatusLabel(status: string): string {
   const labels: Record<string, string> = {
-    pending: "等待导入",
-    processing: "正在导入",
-    completed: "导入完成",
-    partial_failed: "部分项目失败",
-    undone: "已撤销导入",
+    pending: t("等待导入"),
+    processing: t("正在导入"),
+    completed: t("导入完成"),
+    partial_failed: t("部分项目失败"),
+    undone: t("已撤销导入"),
   };
   return labels[status] ?? status;
 }
@@ -58,6 +60,7 @@ export default function BookmarkImportDialog({
   onClose,
   onImported,
 }: BookmarkImportDialogProps) {
+  const { t } = useI18n();
   const [sourceLabel, setSourceLabel] = useState("");
   const [items, setItems] = useState<BookmarkInput[]>([]);
   const [preview, setPreview] = useState<BookmarkImportPreview | null>(null);
@@ -70,7 +73,7 @@ export default function BookmarkImportDialog({
   const previewGroups = useMemo(() => {
     const groups = new Map<string, BookmarkPreviewItem[]>();
     for (const item of preview?.items ?? []) {
-      const folder = item.folder_path || "未分类文件夹";
+      const folder = item.folder_path || t("未分类文件夹");
       const current = groups.get(folder) ?? [];
       current.push(item);
       groups.set(folder, current);
@@ -89,21 +92,21 @@ export default function BookmarkImportDialog({
       const snapshot = await getCurrentBrowserBookmarks();
       if (!snapshot.extension_connected) {
         throw new Error(
-          "尚未收到浏览器书签。请在 chrome://extensions 重新加载新版扩展，刷新 MemoIsle 页面并确认已登录后重试。",
+          t("尚未收到浏览器书签。请在 chrome://extensions 重新加载新版扩展，刷新 MemoIsle 页面并确认已登录后重试。"),
         );
       }
       if (snapshot.items.length === 0) {
-        throw new Error("当前浏览器没有可读取的书签，也可以使用下方 HTML 备用导入。");
+        throw new Error(t("当前浏览器没有可读取的书签，也可以使用下方 HTML 备用导入。"));
       }
       const result = await previewBookmarkImport(snapshot.items);
       const syncedAt = snapshot.synced_at
         ? new Date(snapshot.synced_at).toLocaleString()
-        : "刚刚";
+        : t("刚刚");
       const truncatedLabel = snapshot.truncated
-        ? ` · 仅预览前 ${snapshot.items.length} 条`
+        ? t(" · 仅预览前 {length} 条", { length: snapshot.items.length })
         : "";
       setSourceLabel(
-        `当前浏览器 · 共 ${snapshot.total_count} 条 · 同步于 ${syncedAt}${truncatedLabel}`,
+        t("当前浏览器 · 共 {total_count} 条 · 同步于 {syncedAt}{truncatedLabel}", { total_count: snapshot.total_count, syncedAt, truncatedLabel }),
       );
       setItems(snapshot.items);
       setPreview(result);
@@ -111,7 +114,7 @@ export default function BookmarkImportDialog({
       setError(
         browserError instanceof Error
           ? browserError.message
-          : "读取当前浏览器书签失败。",
+          : t("读取当前浏览器书签失败。"),
       );
     } finally {
       setBusy(false);
@@ -135,7 +138,7 @@ export default function BookmarkImportDialog({
         const latest = await getBookmarkImport(batch.id);
         setBatch(latest);
       } catch (pollError) {
-        setError(pollError instanceof Error ? pollError.message : "读取导入进度失败。");
+        setError(pollError instanceof Error ? pollError.message : t("读取导入进度失败。"));
       }
     }, 900);
     return () => window.clearTimeout(timer);
@@ -165,11 +168,11 @@ export default function BookmarkImportDialog({
       // HTML 仅在浏览器本地解析，服务端只接收结构化书签字段。
       const parsedItems = await parseChromeBookmarksFile(file);
       const result = await previewBookmarkImport(parsedItems);
-      setSourceLabel(`${file.name} · HTML 备用导入`);
+      setSourceLabel(t("{name} · HTML 备用导入", { name: file.name }));
       setItems(parsedItems);
       setPreview(result);
     } catch (fileError) {
-      setError(fileError instanceof Error ? fileError.message : "读取书签文件失败。");
+      setError(fileError instanceof Error ? fileError.message : t("读取书签文件失败。"));
     } finally {
       setBusy(false);
       event.target.value = "";
@@ -187,7 +190,7 @@ export default function BookmarkImportDialog({
       notifiedBatchRef.current = null;
       setBatch(createdBatch);
     } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "创建导入任务失败。");
+      setError(importError instanceof Error ? importError.message : t("创建导入任务失败。"));
     } finally {
       setBusy(false);
     }
@@ -202,7 +205,7 @@ export default function BookmarkImportDialog({
     try {
       setBatch(await retryBookmarkImport(batch.id));
     } catch (retryError) {
-      setError(retryError instanceof Error ? retryError.message : "重试失败。");
+      setError(retryError instanceof Error ? retryError.message : t("重试失败。"));
     } finally {
       setBusy(false);
     }
@@ -213,7 +216,7 @@ export default function BookmarkImportDialog({
       return;
     }
     const confirmed = window.confirm(
-      "撤销后，本批导入且未编辑的资料会移入回收站；已经编辑的资料会保留。继续吗？",
+      t("撤销后，本批导入且未编辑的资料会移入回收站；已经编辑的资料会保留。继续吗？"),
     );
     if (!confirmed) {
       return;
@@ -224,7 +227,7 @@ export default function BookmarkImportDialog({
       setBatch(await undoBookmarkImport(batch.id));
       onImported();
     } catch (undoError) {
-      setError(undoError instanceof Error ? undoError.message : "撤销失败。");
+      setError(undoError instanceof Error ? undoError.message : t("撤销失败。"));
     } finally {
       setBusy(false);
     }
@@ -258,11 +261,11 @@ export default function BookmarkImportDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label"><Icon name="bookmark" size={16} /> 当前浏览器</span>
-            <h2 id="bookmark-import-title">导入浏览器书签</h2>
-            <p>从当前浏览器读取书签，或选择导出的 HTML 作为备用。</p>
+            <span className="type-label"><Icon name="bookmark" size={16} />{t(" 当前浏览器")}</span>
+            <h2 id="bookmark-import-title">{t("导入浏览器书签")}</h2>
+            <p>{t("从当前浏览器读取书签，或选择导出的 HTML 作为备用。")}</p>
           </div>
-          <button className="icon-button" aria-label="关闭书签导入" onClick={onClose}>
+          <button className="icon-button" aria-label={t("关闭书签导入")} onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -274,24 +277,24 @@ export default function BookmarkImportDialog({
               <span aria-hidden="true"><Icon name="bookmark" size={20} /></span>
               <div>
                 <strong>
-                  {busy ? "正在读取并检查当前浏览器书签…" : "从当前浏览器直接读取"}
+                  {busy ? t("正在读取并检查当前浏览器书签…") : t("从当前浏览器直接读取")}
                 </strong>
-                <small>新版扩展只同步书签标题、网址和文件夹，不读取浏览历史或页面内容。</small>
+                <small>{t("新版扩展只同步书签标题、网址和文件夹，不读取浏览历史或页面内容。")}</small>
               </div>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void loadCurrentBrowserBookmarks()}
               >
-                {busy ? "读取中…" : "重新读取"}
+                {busy ? t("读取中…") : t("重新读取")}
               </button>
             </section>
-            <div className="bookmark-source-divider"><span>备用方式</span></div>
+            <div className="bookmark-source-divider"><span>{t("备用方式")}</span></div>
             <label className="bookmark-file-picker compact">
               <span><Icon name="upload" size={20} /></span>
               <span>
-                <strong>选择浏览器导出的书签 HTML</strong>
-                <small>Chrome、Edge、Firefox 都可以，Firefox 书签的标签会一起保留；原始文件不会上传。</small>
+                <strong>{t("选择浏览器导出的书签 HTML")}</strong>
+                <small>{t("Chrome、Edge、Firefox 都可以，Firefox 书签的标签会一起保留；原始文件不会上传。")}</small>
               </span>
               <input
                 type="file"
@@ -306,25 +309,25 @@ export default function BookmarkImportDialog({
         {preview && !batch && (
           <>
             <div className="bookmark-summary">
-              <div><strong>{preview.total_count}</strong><span>读取总数</span></div>
-              <div className="success"><strong>{preview.valid_count}</strong><span>可导入</span></div>
-              <div><strong>{preview.duplicate_count}</strong><span>重复跳过</span></div>
+              <div><strong>{preview.total_count}</strong><span>{t("读取总数")}</span></div>
+              <div className="success"><strong>{preview.valid_count}</strong><span>{t("可导入")}</span></div>
+              <div><strong>{preview.duplicate_count}</strong><span>{t("重复跳过")}</span></div>
               <div className={preview.invalid_count ? "danger" : ""}>
-                <strong>{preview.invalid_count}</strong><span>无法导入</span>
+                <strong>{preview.invalid_count}</strong><span>{t("无法导入")}</span>
               </div>
             </div>
-            <p className="bookmark-file-name">{sourceLabel} · 原来的文件夹（和书签标签）会先交给 Jev 判断，正确就沿用对应的分类，否则由系统重新分类。</p>
+            <p className="bookmark-file-name">{t("{sourceLabel} · 原来的文件夹（和书签标签）会先交给 Jev 判断，正确就沿用对应的分类，否则由系统重新分类。", { sourceLabel })}</p>
             <div className="bookmark-preview-list">
               {previewGroups.map(([folder, folderItems]) => (
                 <section key={folder}>
-                  <h3>{folder}<span>{folderItems.length} 条</span></h3>
+                  <h3>{folder}<span>{t("{length} 条", { length: folderItems.length })}</span></h3>
                   {folderItems.slice(0, 8).map((item) => (
                     <div className={`bookmark-preview-row ${item.status}`} key={item.client_item_id}>
-                      <span><strong>{item.title || "未命名书签"}</strong><small>{item.url}</small></span>
+                      <span><strong>{item.title || t("未命名书签")}</strong><small>{item.url}</small></span>
                       <em>{itemStatusLabel(item)}</em>
                     </div>
                   ))}
-                  {folderItems.length > 8 && <p>另有 {folderItems.length - 8} 条，将按相同规则处理。</p>}
+                  {folderItems.length > 8 && <p>{t("另有 {value} 条，将按相同规则处理。", { value: folderItems.length - 8 })}</p>}
                 </section>
               ))}
             </div>
@@ -341,10 +344,10 @@ export default function BookmarkImportDialog({
               <progress max={Math.max(batch.valid_count, 1)} value={batch.imported_count} />
             </div>
             <div className="bookmark-summary compact">
-              <div className="success"><strong>{batch.imported_count}</strong><span>已导入</span></div>
-              <div><strong>{batch.duplicate_count}</strong><span>已跳过</span></div>
-              <div className={batch.invalid_count ? "danger" : ""}><strong>{batch.invalid_count}</strong><span>链接无效</span></div>
-              <div className={batch.failed_count ? "danger" : ""}><strong>{batch.failed_count}</strong><span>处理失败</span></div>
+              <div className="success"><strong>{batch.imported_count}</strong><span>{t("已导入")}</span></div>
+              <div><strong>{batch.duplicate_count}</strong><span>{t("已跳过")}</span></div>
+              <div className={batch.invalid_count ? "danger" : ""}><strong>{batch.invalid_count}</strong><span>{t("链接无效")}</span></div>
+              <div className={batch.failed_count ? "danger" : ""}><strong>{batch.failed_count}</strong><span>{t("处理失败")}</span></div>
             </div>
             {batch.failed_count > 0 && (
               <div className="bookmark-failures">
@@ -354,7 +357,7 @@ export default function BookmarkImportDialog({
               </div>
             )}
             <p className="bookmark-progress-note">
-              已导入资料可以立即搜索；网页信息与自动分类会在后台继续更新。
+              {t("已导入资料可以立即搜索；网页信息与自动分类会在后台继续更新。")}
             </p>
           </>
         )}
@@ -362,14 +365,14 @@ export default function BookmarkImportDialog({
 
         {preview && !batch && (
           <div className="dialog-actions">
-            <button type="button" className="ghost" onClick={chooseAnotherSource}>重新选择</button>
+            <button type="button" className="ghost" onClick={chooseAnotherSource}>{t("重新选择")}</button>
             <button
               type="button"
               className="primary"
               disabled={busy || preview.valid_count === 0}
               onClick={() => void handleImport()}
             >
-              {busy ? "正在创建导入任务…" : `确认导入 ${preview.valid_count} 条`}
+              {busy ? t("正在创建导入任务…") : t("确认导入 {valid_count} 条", { valid_count: preview.valid_count })}
             </button>
           </div>
         )}
@@ -378,15 +381,15 @@ export default function BookmarkImportDialog({
           <div className="dialog-actions">
             {batch.failed_count > 0 && batch.status !== "undone" && (
               <button type="button" className="ghost" disabled={busy} onClick={() => void handleRetry()}>
-                {busy ? "正在重试…" : "重试失败项目"}
+                {busy ? t("正在重试…") : t("重试失败项目")}
               </button>
             )}
             {batch.imported_count > 0 && batch.status !== "undone" && (
               <button type="button" className="danger-button" disabled={busy} onClick={() => void handleUndo()}>
-                撤销本批导入
+                {t("撤销本批导入")}
               </button>
             )}
-            <button type="button" className="primary" onClick={onClose}>完成</button>
+            <button type="button" className="primary" onClick={onClose}>{t("完成")}</button>
           </div>
         )}
 

@@ -33,9 +33,9 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.OpenInFull
+import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Share
@@ -67,11 +67,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.memoisle.app.R
 import com.memoisle.app.audio.VoiceRecording
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.SyncState
@@ -101,7 +103,7 @@ private fun DetailMenu(
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }, enabled = enabled) {
-            Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+            Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.home_more_actions))
         }
         DropdownMenu(
             expanded = open,
@@ -117,7 +119,7 @@ private fun DetailMenu(
 @Composable
 private fun MoveToTrashMenuItem(close: () -> Unit, onMoveToTrash: () -> Unit) {
     DropdownMenuItem(
-        text = { Text("移入回收站", color = DangerRed) },
+        text = { Text(stringResource(R.string.home_move_to_trash), color = DangerRed) },
         leadingIcon = { Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = DangerRed) },
         onClick = {
             close()
@@ -146,14 +148,14 @@ internal fun ResourceDetailDialog(
         closeEnabled = !isSaving,
         actions = {
             IconButton(onClick = onCopy, enabled = hasUrl && !isSaving) {
-                Icon(Icons.Outlined.ContentCopy, contentDescription = "复制链接")
+                Icon(Icons.Outlined.ContentCopy, contentDescription = stringResource(R.string.dialog_copy_link))
             }
             IconButton(onClick = onShare, enabled = hasUrl && !isSaving) {
-                Icon(Icons.Outlined.Share, contentDescription = "分享")
+                Icon(Icons.Outlined.Share, contentDescription = stringResource(R.string.dialog_share))
             }
             DetailMenu(enabled = !isSaving) { close ->
                 DropdownMenuItem(
-                    text = { Text("归档") },
+                    text = { Text(stringResource(R.string.row_archive)) },
                     leadingIcon = { Icon(Icons.Outlined.Archive, contentDescription = null) },
                     onClick = {
                         close()
@@ -175,7 +177,7 @@ internal fun ResourceDetailDialog(
             ) {
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("打开原网页", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.review_open_source), style = MaterialTheme.typography.titleSmall)
             }
         },
     ) {
@@ -204,15 +206,15 @@ internal fun ResourceDetailDialog(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             InfoPill(
-                resourceCategoryLabel(memo.resourceCategory, memo.resourceCategoryLabel),
+                resourceCategoryLabel(memo.resourceCategory, memo.resourceCategoryLabel).asString(),
                 color = ResourceAccent,
                 background = ResourceSoft,
             )
             if (memo.starred) {
-                InfoPill("星标", color = WarmAmberText, background = WarmAmberSoft, icon = Icons.Filled.Star)
+                InfoPill(stringResource(R.string.row_star), color = WarmAmberText, background = WarmAmberSoft, icon = Icons.Filled.Star)
             }
             InfoPill(
-                "巡检：${linkHealthLabel(memo.linkHealthStatus)}",
+                stringResource(R.string.dialog_link_health, linkHealthLabel(memo.linkHealthStatus).asString()),
                 icon = Icons.Outlined.HealthAndSafety,
             )
         }
@@ -225,7 +227,7 @@ internal fun ResourceDetailDialog(
                     .padding(12.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                Text("用途", color = ResourceAccent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 2.dp))
+                Text(stringResource(R.string.dialog_purpose), color = ResourceAccent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 2.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(summary, style = MaterialTheme.typography.bodyMedium, color = TextStrong)
             }
@@ -234,7 +236,7 @@ internal fun ResourceDetailDialog(
             Text(description, style = MaterialTheme.typography.bodyLarge)
         }
         if (memo.body != memo.sourceUrl && memo.body.isNotBlank()) {
-            DetailField("个人备注") {
+            DetailField(stringResource(R.string.dialog_personal_note)) {
                 Text(
                     memo.body,
                     style = MaterialTheme.typography.bodyMedium,
@@ -247,8 +249,8 @@ internal fun ResourceDetailDialog(
         }
         Text(
             listOfNotNull(
-                "收藏于 ${formatTime(memo.createdAt)}",
-                memo.linkLastCheckedAt?.let { "最近检查 ${formatTime(it)}" },
+                stringResource(R.string.dialog_saved_at, formatTime(memo.createdAt)),
+                memo.linkLastCheckedAt?.let { stringResource(R.string.dialog_last_checked, formatTime(it)) },
             ).joinToString(" · "),
             color = TextMuted,
             style = MaterialTheme.typography.labelSmall,
@@ -288,7 +290,7 @@ internal fun ImageDetailDialog(
         closeEnabled = !isSaving,
         actions = {
             IconButton(onClick = onShare, enabled = !isSaving) {
-                Icon(Icons.Outlined.Share, contentDescription = "分享")
+                Icon(Icons.Outlined.Share, contentDescription = stringResource(R.string.dialog_share))
             }
             DetailMenu(enabled = !isSaving) { close ->
                 MoveToTrashMenuItem(close, onMoveToTrash)
@@ -327,7 +329,7 @@ internal fun ImageDetailDialog(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (expanded) "收起原图" else "查看原图",
+                        if (expanded) stringResource(R.string.dialog_collapse_original) else stringResource(R.string.dialog_view_original),
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                     )
@@ -338,19 +340,19 @@ internal fun ImageDetailDialog(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            imageDimensionsLabel(memo.imageWidth, memo.imageHeight)?.let { ImageMetaChip(it) }
+            imageDimensionsLabel(memo.imageWidth, memo.imageHeight)?.let { ImageMetaChip(it.asString()) }
             formatFileSize(memo.imageSizeBytes)?.let { ImageMetaChip(it) }
             imageMimeLabel(memo.imageMimeType)?.let { ImageMetaChip(it) }
         }
         memo.body.takeIf { it.isNotBlank() }?.let { note ->
-            DetailField("备注") {
+            DetailField(stringResource(R.string.dialog_note)) {
                 Text(note, style = MaterialTheme.typography.bodyMedium)
             }
         }
         ImageOcrSection(memo)
         if (memo.id == null || !memo.hasUploadedImage()) {
             InfoPill(
-                "图片尚未上传完成，联网后会自动重试",
+                stringResource(R.string.dialog_image_not_uploaded),
                 color = WarmAmberText,
                 background = WarmAmberSoft,
                 icon = Icons.Outlined.CloudUpload,
@@ -381,15 +383,15 @@ private fun ImageOcrSection(memo: Memo) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("图片文字识别", color = TextMuted, fontSize = 11.sp)
-            Text(memo.imageOcrStatusLabel(), color = DeepTeal, fontSize = 11.sp)
+            Text(stringResource(R.string.dialog_ocr_title), color = TextMuted, fontSize = 11.sp)
+            Text(memo.imageOcrStatusLabel().asString(), color = DeepTeal, fontSize = 11.sp)
         }
         when (memo.imageOcrStatus) {
             "ready" -> {
                 val ocrText = memo.imageOcrText?.trim().orEmpty()
                 if (ocrText.isEmpty()) {
                     Text(
-                        "没有识别到文字",
+                        stringResource(R.string.dialog_ocr_no_text),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -404,7 +406,7 @@ private fun ImageOcrSection(memo: Memo) {
                     )
                 }
                 if (memo.imageAutoTags.isNotEmpty()) {
-                    Text("自动标签", color = TextMuted, fontSize = 11.sp)
+                    Text(stringResource(R.string.dialog_auto_tags), color = TextMuted, fontSize = 11.sp)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -415,10 +417,10 @@ private fun ImageOcrSection(memo: Memo) {
                     }
                 }
                 val metaLine = listOfNotNull(
-                    memo.imageOcrSourceLabel()?.let { source -> "来源：$source" },
+                    memo.imageOcrSourceLabel()?.let { source -> stringResource(R.string.dialog_ocr_source, source.asString()) },
                     memo.imageOcrUpdatedAt
                         ?.takeIf { it.isNotBlank() }
-                        ?.let { updated -> "更新于 ${formatTime(updated)}" },
+                        ?.let { updated -> stringResource(R.string.dialog_updated_at_value, formatTime(updated)) },
                 ).joinToString(" · ")
                 if (metaLine.isNotEmpty()) {
                     Text(
@@ -429,27 +431,27 @@ private fun ImageOcrSection(memo: Memo) {
                 }
             }
             "failed" -> Text(
-                memo.imageOcrError?.takeIf { it.isNotBlank() } ?: "图片文字识别失败。",
+                memo.imageOcrError?.takeIf { it.isNotBlank() } ?: stringResource(R.string.dialog_ocr_failed),
                 color = WarmAmberText,
                 style = MaterialTheme.typography.labelSmall,
             )
             "disabled" -> Text(
-                memo.imageOcrError?.takeIf { it.isNotBlank() } ?: "图片文字识别未启用。",
+                memo.imageOcrError?.takeIf { it.isNotBlank() } ?: stringResource(R.string.dialog_ocr_disabled),
                 color = WarmAmberText,
                 style = MaterialTheme.typography.labelSmall,
             )
             "pending" -> Text(
-                "已排队，等待识别图片文字。",
+                stringResource(R.string.dialog_ocr_queued),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
             "processing" -> Text(
-                "正在识别图片文字…",
+                stringResource(R.string.dialog_ocr_processing),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
             else -> Text(
-                "尚未开始识别图片文字。",
+                stringResource(R.string.dialog_ocr_not_started),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -527,7 +529,7 @@ internal fun EditMemoDialog(
         },
         bottomBar = {
             Text(
-                "更新于 ${formatTime(memo.updatedAt)}",
+                stringResource(R.string.dialog_updated_at, formatTime(memo.updatedAt)),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.weight(1f),
@@ -550,7 +552,7 @@ internal fun EditMemoDialog(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text(if (isSaving) "保存中…" else "保存修改", style = MaterialTheme.typography.titleSmall)
+                Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.dialog_save_changes), style = MaterialTheme.typography.titleSmall)
             }
         },
     ) {
@@ -573,7 +575,7 @@ internal fun EditMemoDialog(
                     Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (seconds > 0) "播放 · ${seconds} 秒" else "播放录音",
+                        text = if (seconds > 0) stringResource(R.string.dialog_play_seconds, seconds) else stringResource(R.string.dialog_play_recording),
                         maxLines = 1,
                     )
                 }
@@ -589,14 +591,14 @@ internal fun EditMemoDialog(
                     Icon(Icons.Outlined.FileDownload, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (isDownloadingAudio) "保存中…" else "下载录音",
+                        text = if (isDownloadingAudio) stringResource(R.string.relay_ui_saving) else stringResource(R.string.dialog_download_recording),
                         maxLines = 1,
                     )
                 }
             }
         }
         if (!memo.transcript.isNullOrBlank()) {
-            DetailField("会议转写（我 / 对方）") {
+            DetailField(stringResource(R.string.dialog_meeting_transcript)) {
                 Text(
                     memo.transcript,
                     style = MaterialTheme.typography.bodyMedium,
@@ -612,7 +614,7 @@ internal fun EditMemoDialog(
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
-            label = { Text(if (isWord) "单词或短语" else "标题") },
+            label = { Text(if (isWord) stringResource(R.string.home_word_label) else stringResource(R.string.dialog_title)) },
             modifier = Modifier.fillMaxWidth(),
             textStyle = if (isWord) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyLarge,
             shape = RoundedCornerShape(12.dp),
@@ -634,7 +636,7 @@ internal fun EditMemoDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Icon(Icons.Outlined.Psychology, contentDescription = null, tint = WordAccent, modifier = Modifier.size(28.dp))
-                    Text("先回想释义和例句", color = WordAccent, style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.dialog_recall_first), color = WordAccent, style = MaterialTheme.typography.titleSmall)
                     OutlinedButton(
                         onClick = { showWordAnswer = true },
                         shape = RoundedCornerShape(12.dp),
@@ -642,14 +644,14 @@ internal fun EditMemoDialog(
                     ) {
                         Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("显示答案")
+                        Text(stringResource(R.string.review_show_answer))
                     }
                 }
             } else {
                 OutlinedTextField(
                     value = wordMeaning,
                     onValueChange = { wordMeaning = it },
-                    label = { Text("释义") },
+                    label = { Text(stringResource(R.string.dialog_meaning)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 7,
@@ -659,7 +661,7 @@ internal fun EditMemoDialog(
                 OutlinedTextField(
                     value = wordExample,
                     onValueChange = { wordExample = it },
-                    label = { Text("例句或上下文") },
+                    label = { Text(stringResource(R.string.dialog_example_context)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 5,
@@ -667,7 +669,7 @@ internal fun EditMemoDialog(
                     colors = fieldColors,
                 )
                 SentencePronunciationButton(text = wordExample)
-                DetailField("这次记得怎么样？") {
+                DetailField(stringResource(R.string.dialog_how_well)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -678,28 +680,32 @@ internal fun EditMemoDialog(
                             enabled = !isSaving,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
-                        ) { Text("忘记") }
+                        ) { Text(stringResource(R.string.review_forgot)) }
                         OutlinedButton(
                             onClick = { onReview("fuzzy") },
                             modifier = Modifier.weight(1f),
                             enabled = !isSaving,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmberText),
-                        ) { Text("模糊") }
+                        ) { Text(stringResource(R.string.review_fuzzy)) }
                         Button(
                             onClick = { onReview("remembered") },
                             modifier = Modifier.weight(1f),
                             enabled = !isSaving,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = WordAccent),
-                        ) { Text("记得") }
+                        ) { Text(stringResource(R.string.review_remembered)) }
                     }
                 }
             }
             Text(
-                "熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.reviewCount} 次 · " +
-                    "上次 ${memo.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · " +
-                    "下次 ${memo.nextReviewAt?.let(::formatTime) ?: "待安排"}",
+                stringResource(
+                    R.string.word_review_meta,
+                    memo.familiarity,
+                    memo.reviewCount,
+                    memo.lastReviewAt?.let(::formatTime) ?: stringResource(R.string.review_never),
+                    memo.nextReviewAt?.let(::formatTime) ?: stringResource(R.string.review_unscheduled),
+                ),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -707,7 +713,7 @@ internal fun EditMemoDialog(
             OutlinedTextField(
                 value = body,
                 onValueChange = { body = it },
-                label = { Text("内容") },
+                label = { Text(stringResource(R.string.dialog_content)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 6,
                 maxLines = 16,
@@ -729,12 +735,12 @@ internal fun CreateIdeaDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("写灵感", fontWeight = FontWeight.SemiBold) },
+        title = { Text(stringResource(R.string.home_action_write_idea_title), fontWeight = FontWeight.SemiBold) },
         text = {
             OutlinedTextField(
                 value = body,
                 onValueChange = { body = it },
-                label = { Text("此刻想到什么？") },
+                label = { Text(stringResource(R.string.dialog_idea_label)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 5,
                 maxLines = 12,
@@ -746,12 +752,12 @@ internal fun CreateIdeaDialog(
                 onClick = { onSave(body) },
                 enabled = body.isNotBlank() && !isSaving,
             ) {
-                Text(if (isSaving) "保存中…" else "保存灵感")
+                Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.home_save_idea))
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("取消")
+                Text(stringResource(R.string.common_cancel))
             }
         },
         containerColor = SurfaceWhite,
@@ -783,26 +789,26 @@ internal fun CreateResourceDialog(
                 enabled = !isSaving,
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("取消") }
+            ) { Text(stringResource(R.string.common_cancel)) }
             Button(
                 onClick = onSave,
                 enabled = normalizeResourceUrl(url) != null && !isSaving,
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-            ) { Text(if (isSaving) "保存中…" else "保存资料") }
+            ) { Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.dialog_save_resource)) }
         },
     ) {
-        Text("保存分享的网页", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.dialog_shared_page_title), style = MaterialTheme.typography.headlineSmall)
         Text(
-            "确认浏览器分享的链接；保存后资料在手机上只读，完整整理请使用 Web。",
+            stringResource(R.string.dialog_shared_page_hint),
             color = TextMuted,
             style = MaterialTheme.typography.bodySmall,
         )
         OutlinedTextField(
             value = url,
             onValueChange = onUrlChange,
-            label = { Text("网页链接") },
+            label = { Text(stringResource(R.string.dialog_link_label)) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("https://example.com/article") },
             singleLine = true,
@@ -812,7 +818,7 @@ internal fun CreateResourceDialog(
         OutlinedTextField(
             value = title,
             onValueChange = onTitleChange,
-            label = { Text("标题（可选）") },
+            label = { Text(stringResource(R.string.dialog_title_optional)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
@@ -821,7 +827,7 @@ internal fun CreateResourceDialog(
         OutlinedTextField(
             value = note,
             onValueChange = onNoteChange,
-            label = { Text("个人备注（可选）") },
+            label = { Text(stringResource(R.string.dialog_note_optional)) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
             maxLines = 7,
@@ -865,7 +871,7 @@ internal fun CreateWordDialog(
             TextButton(onClick = onFillClipboard, enabled = !isSaving) {
                 Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("从剪贴板填入")
+                Text(stringResource(R.string.dialog_fill_from_clipboard))
             }
         },
         bottomBar = {
@@ -874,20 +880,20 @@ internal fun CreateWordDialog(
                 enabled = !isSaving,
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("取消") }
+            ) { Text(stringResource(R.string.common_cancel)) }
             Button(
                 onClick = onSave,
                 enabled = lemma.isNotBlank() && !isSaving,
                 modifier = Modifier.height(48.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-            ) { Text(if (isSaving) "保存中…" else "收藏单词") }
+            ) { Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.home_save_word)) }
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("收藏英语单词", style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.home_word_title), style = MaterialTheme.typography.headlineSmall)
             Text(
-                if (isLookingUp) "正在填入中文释义、音标和例句…" else "输入单词后自动填入中文释义、音标和例句",
+                if (isLookingUp) stringResource(R.string.home_word_filling) else stringResource(R.string.dialog_word_hint),
                 color = TextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -895,9 +901,9 @@ internal fun CreateWordDialog(
         OutlinedTextField(
             value = lemma,
             onValueChange = onLemmaChange,
-            label = { Text("单词或短语") },
+            label = { Text(stringResource(R.string.home_word_label)) },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("例如 serendipity") },
+            placeholder = { Text(stringResource(R.string.home_word_placeholder)) },
             singleLine = true,
             textStyle = MaterialTheme.typography.titleLarge,
             shape = RoundedCornerShape(12.dp),
@@ -927,7 +933,7 @@ internal fun CreateWordDialog(
         OutlinedTextField(
             value = meaning,
             onValueChange = onMeaningChange,
-            label = { Text("中文释义（自动填入）") },
+            label = { Text(stringResource(R.string.home_meaning_label)) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
             maxLines = 6,
@@ -937,7 +943,7 @@ internal fun CreateWordDialog(
         OutlinedTextField(
             value = example,
             onValueChange = onExampleChange,
-            label = { Text("例句（自动填入）") },
+            label = { Text(stringResource(R.string.home_example_label)) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 5,
@@ -970,7 +976,7 @@ internal fun VoiceCaptureDialog(
     val seconds = elapsedMs() / 1_000
     AlertDialog(
         onDismissRequest = { if (!isSaving) onRequestDismiss() },
-        title = { Text("语音记录", fontWeight = FontWeight.SemiBold) },
+        title = { Text(stringResource(R.string.home_action_voice_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -998,15 +1004,15 @@ internal fun VoiceCaptureDialog(
                             modifier = Modifier.size(30.dp),
                         )
                         Text(
-                            "${seconds}秒",
+                            stringResource(R.string.dialog_seconds, seconds),
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
                             when {
-                                isPaused -> "已暂停"
-                                isRecording -> "正在录音"
-                                recording != null -> "录音已就绪"
-                                else -> "等待开始"
+                                isPaused -> stringResource(R.string.dialog_paused)
+                                isRecording -> stringResource(R.string.dialog_recording)
+                                recording != null -> stringResource(R.string.dialog_recording_ready)
+                                else -> stringResource(R.string.dialog_waiting_start)
                             },
                             color = TextMuted,
                             fontSize = 11.sp,
@@ -1018,7 +1024,7 @@ internal fun VoiceCaptureDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("输入音量", color = TextMuted, fontSize = 12.sp)
+                        Text(stringResource(R.string.dialog_input_level), color = TextMuted, fontSize = 12.sp)
                         Text("${amplitudePercent()}%", color = TextMuted, fontSize = 12.sp)
                     }
                     Box(
@@ -1037,7 +1043,7 @@ internal fun VoiceCaptureDialog(
                 }
                 if (permissionDenied) {
                     Text(
-                        "需要麦克风权限才能录音，你仍可使用文字记录。",
+                        stringResource(R.string.dialog_mic_permission),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -1045,8 +1051,8 @@ internal fun VoiceCaptureDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = onTextChange,
-                    label = { Text("转写结果（可编辑，可选）") },
-                    placeholder = { Text("录音停止后会自动填入识别结果") },
+                    label = { Text(stringResource(R.string.dialog_transcript_label)) },
+                    placeholder = { Text(stringResource(R.string.dialog_transcript_placeholder)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 7,
@@ -1064,7 +1070,7 @@ internal fun VoiceCaptureDialog(
                             strokeWidth = 2.dp,
                         )
                         Text(
-                            transcriptionMessage ?: "正在转写…",
+                            transcriptionMessage ?: stringResource(R.string.dialog_transcribing),
                             color = TextMuted,
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -1077,7 +1083,7 @@ internal fun VoiceCaptureDialog(
                     )
                 }
                 Text(
-                    "原始录音只保存到你的私人资料库；没有模型时仍可手动填写文字。",
+                    stringResource(R.string.dialog_recording_privacy),
                     color = TextMuted,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -1087,28 +1093,28 @@ internal fun VoiceCaptureDialog(
             when {
                 isRecording -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onTogglePause) {
-                        Text(if (isPaused) "继续" else "暂停")
+                        Text(if (isPaused) stringResource(R.string.dialog_resume) else stringResource(R.string.dialog_pause))
                     }
-                    Button(onClick = onStop) { Text("结束录音") }
+                    Button(onClick = onStop) { Text(stringResource(R.string.dialog_stop_recording)) }
                 }
                 recording != null -> Button(onClick = onSave, enabled = !isSaving) {
-                    Text(if (isSaving) "保存中…" else "保存语音灵感")
+                    Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.dialog_save_voice))
                 }
                 else -> Button(onClick = onStart, enabled = !isSaving) {
-                    Text("开始录音")
+                    Text(stringResource(R.string.dialog_start_recording))
                 }
             }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (recording != null && !isSaving) {
-                    TextButton(onClick = onReset) { Text("重新录制") }
+                    TextButton(onClick = onReset) { Text(stringResource(R.string.dialog_record_again)) }
                 }
                 OutlinedButton(
                     onClick = onRequestDismiss,
                     enabled = !isSaving,
                 ) {
-                    Text("取消")
+                    Text(stringResource(R.string.common_cancel))
                 }
             }
         },

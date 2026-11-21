@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 // 会议录音：把麦克风和自己电脑播放的声音（对方说话）混成一路再交给 MediaRecorder。
 //
 // 网页本身拿不到会议客户端（腾讯会议、Zoom、飞书等）的内部音频，
@@ -65,12 +66,12 @@ export async function startMeetingCapture(
 ): Promise<MeetingCapture> {
   if (!supportsMeetingAudio()) {
     throw new MeetingAudioUnavailableError(
-      "当前浏览器不支持抓取系统音频，无法录制对方的声音。",
+      t("当前浏览器不支持抓取系统音频，无法录制对方的声音。"),
     );
   }
   const contextConstructor = audioContextConstructor();
   if (!contextConstructor) {
-    throw new MeetingAudioUnavailableError("当前浏览器不支持音频混音。");
+    throw new MeetingAudioUnavailableError(t("当前浏览器不支持音频混音。"));
   }
 
   const displayStream = await navigator.mediaDevices.getDisplayMedia({

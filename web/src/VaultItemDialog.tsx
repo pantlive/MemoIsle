@@ -17,6 +17,8 @@ import {
   type VaultSubscriptionData,
 } from "./vault";
 import { daysSince, daysUntilDate, isWeakPassword, reminderLabels, type VaultReminder } from "./vaultReminders";
+import { currentLocale, t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 // 敏感字段默认遮挡，点「显示」才露出明文。
 function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = false }: {
@@ -27,6 +29,7 @@ function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = f
   onGenerate?: () => void;
   multiline?: boolean;
 }) {
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false);
   return (
     <div className="vault-field">
@@ -34,10 +37,10 @@ function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = f
         <span>{label}</span>
         <span className="vault-field-tools">
           <button type="button" onClick={() => setVisible((current) => !current)}>
-            {visible ? "隐藏" : "显示"}
+            {visible ? t("隐藏") : t("显示")}
           </button>
-          {onGenerate && <button type="button" onClick={onGenerate}>生成</button>}
-          <button type="button" onClick={onCopy} disabled={!value}>复制</button>
+          {onGenerate && <button type="button" onClick={onGenerate}>{t("生成")}</button>}
+          <button type="button" onClick={onCopy} disabled={!value}>{t("复制")}</button>
         </span>
       </div>
       {multiline && visible && (
@@ -55,10 +58,10 @@ function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = f
         <button
           type="button"
           className="vault-masked-block"
-          aria-label={`${label}已隐藏，点按显示并编辑`}
+          aria-label={t("{label}已隐藏，点按显示并编辑", { label })}
           onClick={() => setVisible(true)}
         >
-          {value ? `•••••• 已隐藏（${value.length} 个字符），点按显示` : "点按输入"}
+          {value ? t("•••••• 已隐藏（{length} 个字符），点按显示", { length: value.length }) : t("点按输入")}
         </button>
       )}
       {!multiline && (
@@ -78,20 +81,20 @@ function SecretInput({ label, value, onChange, onCopy, onGenerate, multiline = f
 }
 
 function rotateLabel(days: number): string {
-  if (days === 0) return "不提醒";
-  if (days === 365) return "每年";
-  return `每 ${days} 天`;
+  if (days === 0) return t("不提醒");
+  if (days === 365) return t("每年");
+  return t("每 {days} 天", { days });
 }
 
 function describeAge(iso: string): string {
   const days = daysSince(iso);
-  const date = new Date(iso).toLocaleDateString("zh-CN");
-  return `${date}（${days === 0 ? "今天" : `${days} 天前`}）`;
+  const date = new Date(iso).toLocaleDateString(currentLocale());
+  return t("{date}（{value}）", { date, value: days === 0 ? t("今天") : t("{days} 天前", { days }) });
 }
 
 function subscriptionAmountError(value: string): string {
   return value && !/^\d{1,9}(\.\d{1,2})?$/.test(value)
-    ? "请输入非负数字，整数最多 9 位，小数最多 2 位。"
+    ? t("请输入非负数字，整数最多 9 位，小数最多 2 位。")
     : "";
 }
 
@@ -102,24 +105,27 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
   secretChanged: boolean;
   onChange: (field: "rotateDays" | "expiresOn" | "skipChecks", value: number | string | boolean) => void;
 }) {
+  const { t } = useI18n();
   const expiresIn = draft.expiresOn ? daysUntilDate(draft.expiresOn) : null;
   return (
     <fieldset className="vault-reminder-fields">
-      <legend>提醒</legend>
+      <legend>{t("提醒")}</legend>
       {draft.kind !== "subscription" && (
         <p className="vault-hint">
-          {draft.kind === "login"
-            ? "密码"
-            : draft.kind === "server"
-              ? "登录凭据"
-              : "密钥"}上次更换：
-          {secretChanged ? "保存后记为今天" : changedLabel}
+          {t("{secret}上次更换：{changed}", {
+            secret: draft.kind === "login"
+              ? t("密码")
+              : draft.kind === "server"
+                ? t("登录凭据")
+                : t("密钥"),
+            changed: secretChanged ? t("保存后记为今天") : changedLabel,
+          })}
         </p>
       )}
       <div className="vault-reminder-grid">
         {draft.kind !== "subscription" && (
           <label className="vault-field">
-            <span className="vault-field-label"><span>定期更换</span></span>
+            <span className="vault-field-label"><span>{t("定期更换")}</span></span>
             <select
               value={draft.rotateDays}
               onChange={(event) => onChange("rotateDays", Number(event.target.value))}
@@ -132,9 +138,9 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
         )}
         <label className="vault-field">
           <span className="vault-field-label">
-            <span>{draft.kind === "subscription" ? "到期 / 下次续费日期" : "到期日"}</span>
+            <span>{draft.kind === "subscription" ? t("到期 / 下次续费日期") : t("到期日")}</span>
             {draft.expiresOn && (
-              <button type="button" onClick={() => onChange("expiresOn", "")}>清除</button>
+              <button type="button" onClick={() => onChange("expiresOn", "")}>{t("清除")}</button>
             )}
           </span>
           <input
@@ -146,7 +152,7 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
       </div>
       {expiresIn !== null && (
         <small className={expiresIn <= 0 ? "vault-hint warn" : "vault-hint"}>
-          {expiresIn < 0 ? `已过期 ${-expiresIn} 天` : expiresIn === 0 ? "今天到期" : `还有 ${expiresIn} 天到期，到期前 14 天开始提醒`}
+          {expiresIn < 0 ? t("已过期 {value} 天", { value: -expiresIn }) : expiresIn === 0 ? t("今天到期") : t("还有 {expiresIn} 天到期，到期前 14 天开始提醒", { expiresIn })}
         </small>
       )}
       {draft.kind === "login" && (
@@ -156,7 +162,7 @@ function ReminderFields({ draft, changedLabel, secretChanged, onChange }: {
             checked={draft.skipChecks}
             onChange={(event) => onChange("skipChecks", event.target.checked)}
           />
-          不检查这条的密码强度和是否与其他条目重复
+          {t("不检查这条的密码强度和是否与其他条目重复")}
         </label>
       )}
     </fieldset>
@@ -168,13 +174,14 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
   onChange: (codes: RecoveryCode[]) => void;
   onCopy: (code: string) => void;
 }) {
+  const { t } = useI18n();
   const [pasted, setPasted] = useState("");
   const remaining = codes.filter((item) => !item.used).length;
   return (
     <div className="vault-field">
       <div className="vault-field-label">
-        <span>恢复码</span>
-        {codes.length > 0 && <small>剩余 {remaining} / {codes.length} 个可用</small>}
+        <span>{t("恢复码")}</span>
+        {codes.length > 0 && <small>{t("剩余 {remaining} / {length} 个可用", { remaining, length: codes.length })}</small>}
       </div>
       {codes.length > 0 && (
         <ul className="vault-code-list">
@@ -188,14 +195,14 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
                     current === index ? { ...code, used: !code.used } : code
                   )))}
                 />
-                已用
+                {t("已用")}
               </label>
               <code className="vault-mono">{item.code}</code>
-              <button type="button" onClick={() => onCopy(item.code)} disabled={item.used}>复制</button>
+              <button type="button" onClick={() => onCopy(item.code)} disabled={item.used}>{t("复制")}</button>
               <button
                 type="button"
                 className="danger-text"
-                aria-label={`删除恢复码 ${item.code}`}
+                aria-label={t("删除恢复码 {code}", { code: item.code })}
                 onClick={() => onChange(codes.filter((_, current) => current !== index))}
               ><Icon name="close" size={16} /></button>
             </li>
@@ -203,11 +210,11 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
         </ul>
       )}
       <textarea
-        aria-label="添加恢复码"
+        aria-label={t("添加恢复码")}
         value={pasted}
         onChange={(event) => setPasted(event.target.value)}
         rows={codes.length > 0 ? 2 : 5}
-        placeholder="把网站给的恢复码整段粘贴进来，按空格、换行或逗号自动拆分"
+        placeholder={t("把网站给的恢复码整段粘贴进来，按空格、换行或逗号自动拆分")}
         spellCheck={false}
         autoComplete="off"
         className="vault-mono"
@@ -221,7 +228,7 @@ function RecoveryCodeEditor({ codes, onChange, onCopy }: {
           setPasted("");
         }}
       >
-        添加恢复码
+        {t("添加恢复码")}
       </button>
     </div>
   );
@@ -243,6 +250,7 @@ export default function VaultItemDialog({
   onClose: () => void;
   onCopy: (value: string, label: string) => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<VaultItemData>(initial);
   // 引用尚未选择目标时也保留来源模式，切换时不丢弃内联私钥草稿。
   const [useKeyReference, setUseKeyReference] = useState(initial.kind === "server" && Boolean(initial.privateKeyRef));
@@ -256,7 +264,7 @@ export default function VaultItemDialog({
   const balanceError = draft.kind === "subscription" ? subscriptionAmountError(draft.balance) : "";
   const currencyError = draft.kind === "subscription" && draft.currency
     && (draft.currency.length !== 3 || !/^[A-Z]{3}$/.test(draft.currency))
-    ? "请输入 3 位英文字母，例如 USD 或 CNY；留空使用 USD。"
+    ? t("请输入 3 位英文字母，例如 USD 或 CNY；留空使用 USD。")
     : "";
   const hasSubscriptionErrors = Boolean(priceError || balanceError || currencyError);
 
@@ -273,7 +281,7 @@ export default function VaultItemDialog({
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || busy) return;
-      if (dirtyRef.current && !window.confirm("有未保存的修改，确定放弃吗？")) return;
+      if (dirtyRef.current && !window.confirm(t("有未保存的修改，确定放弃吗？"))) return;
       onClose();
     };
     window.addEventListener("keydown", handleKey);
@@ -304,7 +312,7 @@ export default function VaultItemDialog({
     || (draft.kind === "server" && initial.kind === "server"
       && Boolean(serverCredentialIdentity(draft))
       && serverCredentialIdentity(draft) !== serverCredentialIdentity(initial));
-  const changedLabel = changedAt ? describeAge(changedAt) : "还没有填写";
+  const changedLabel = changedAt ? describeAge(changedAt) : t("还没有填写");
   const referencedSecret = draft.kind === "server"
     ? secretEntries.find((entry) => entry.id === draft.privateKeyRef)
     : undefined;
@@ -319,7 +327,7 @@ export default function VaultItemDialog({
     // 订阅名称可留空，新建时按服务商和套餐生成，编辑时回落为「未命名」。
     const title = draft.title.trim() || (draft.kind === "subscription" && isNew
       ? `${subscriptionProviderLabels[draft.provider]} ${draft.plan.trim()}`.trim()
-      : "未命名");
+      : t("未命名"));
     onSave(draft.kind === "subscription"
       ? { ...draft, title, currency: draft.currency || "USD" }
       : { ...draft, title });
@@ -338,21 +346,21 @@ export default function VaultItemDialog({
         <div className="dialog-header">
           <div>
             <span className="type-label">{vaultKindLabels[draft.kind]}</span>
-            <h2 id="vault-item-title">{isNew ? `新建${vaultKindLabels[draft.kind]}` : draft.title || "未命名"}</h2>
+            <h2 id="vault-item-title">{isNew ? t("新建{value}", { value: vaultKindLabels[draft.kind] }) : draft.title || t("未命名")}</h2>
           </div>
           <button
             type="button"
             className="icon-button"
-            aria-label="关闭"
+            aria-label={t("关闭")}
             disabled={busy}
             onClick={() => {
-              if (!dirty || window.confirm("有未保存的修改，确定放弃吗？")) onClose();
+              if (!dirty || window.confirm(t("有未保存的修改，确定放弃吗？"))) onClose();
             }}
           ><Icon name="close" size={16} /></button>
         </div>
         <div className="dialog-body vault-form">
           {reminders.length > 0 && (
-            <ul className="vault-dialog-reminders" aria-label="这一条的提醒">
+            <ul className="vault-dialog-reminders" aria-label={t("这一条的提醒")}>
               {reminders.map((reminder) => (
                 <li key={reminder.type} className={reminder.level}>
                   <strong>{reminderLabels[reminder.type]}</strong>
@@ -364,7 +372,7 @@ export default function VaultItemDialog({
           {draft.kind === "subscription" && (
             <div className="vault-subscription-grid">
               <label className="vault-field">
-                <span className="vault-field-label"><span>服务商</span></span>
+                <span className="vault-field-label"><span>{t("服务商")}</span></span>
                 <select
                   value={draft.provider}
                   onChange={(event) => updateProvider(event.target.value as SubscriptionProvider)}
@@ -375,13 +383,13 @@ export default function VaultItemDialog({
                 </select>
               </label>
               <label className="vault-field">
-                <span className="vault-field-label"><span>套餐</span></span>
-                <input value={draft.plan} onChange={(event) => update("plan", event.target.value)} placeholder="例如：Pro / Max / Plus / SuperGrok" />
+                <span className="vault-field-label"><span>{t("套餐")}</span></span>
+                <input value={draft.plan} onChange={(event) => update("plan", event.target.value)} placeholder={t("例如：Pro / Max / Plus / SuperGrok")} />
               </label>
             </div>
           )}
           <label className="vault-field">
-            <span className="vault-field-label"><span>{draft.kind === "subscription" ? "标题" : "名称"}</span></span>
+            <span className="vault-field-label"><span>{draft.kind === "subscription" ? t("标题") : t("名称")}</span></span>
             <input
               ref={titleRef}
               value={draft.title}
@@ -390,12 +398,12 @@ export default function VaultItemDialog({
                 draft.kind === "subscription"
                   ? `${subscriptionProviderLabels[draft.provider]} ${draft.plan.trim()}`.trim()
                   : draft.kind === "login"
-                  ? "例如：GitHub"
+                  ? t("例如：GitHub")
                   : draft.kind === "secret"
-                    ? "例如：OpenAI API Key"
+                    ? t("例如：OpenAI API Key")
                     : draft.kind === "server"
-                      ? "例如：阿里云 ECS · 博客服务器"
-                      : "例如：GitHub 两步验证"
+                      ? t("例如：阿里云 ECS · 博客服务器")
+                      : t("例如：GitHub 两步验证")
               }
               maxLength={200}
               required={draft.kind !== "subscription"}
@@ -406,12 +414,12 @@ export default function VaultItemDialog({
             <>
               <label className="vault-field">
                 <span className="vault-field-label">
-                  <span>{draft.kind === "subscription" ? "订阅账号（邮箱或用户名）" : "用户名或邮箱"}</span>
+                  <span>{draft.kind === "subscription" ? t("订阅账号（邮箱或用户名）") : t("用户名或邮箱")}</span>
                   <button
                     type="button"
-                    onClick={() => onCopy(draft.kind === "subscription" ? draft.account : draft.username, draft.kind === "subscription" ? "账号" : "用户名")}
+                    onClick={() => onCopy(draft.kind === "subscription" ? draft.account : draft.username, draft.kind === "subscription" ? t("账号") : t("用户名"))}
                     disabled={!(draft.kind === "subscription" ? draft.account : draft.username)}
-                  >复制</button>
+                  >{t("复制")}</button>
                 </span>
                 <input
                   value={draft.kind === "subscription" ? draft.account : draft.username}
@@ -425,19 +433,19 @@ export default function VaultItemDialog({
           {draft.kind === "login" && (
             <>
               <SecretInput
-                label="密码"
+                label={t("密码")}
                 value={draft.password}
                 onChange={(value) => update("password", value)}
-                onCopy={() => onCopy(draft.password, "密码")}
+                onCopy={() => onCopy(draft.password, t("密码"))}
                 onGenerate={() => update("password", generatePassword())}
               />
               {!draft.skipChecks && isWeakPassword(draft.password) && (
                 <small className="vault-hint warn vault-weak-hint">
-                  密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。
+                  {t("密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。")}
                 </small>
               )}
               <label className="vault-field">
-                <span className="vault-field-label"><span>网址</span></span>
+                <span className="vault-field-label"><span>{t("网址")}</span></span>
                 <input
                   value={draft.url}
                   onChange={(event) => update("url", event.target.value)}
@@ -452,47 +460,47 @@ export default function VaultItemDialog({
           {draft.kind === "subscription" && (
             <div className="vault-subscription-grid">
               <label className="vault-field">
-                <span className="vault-field-label"><span>订阅开始日期</span></span>
+                <span className="vault-field-label"><span>{t("订阅开始日期")}</span></span>
                 <input type="date" value={draft.startedOn} onChange={(event) => update("startedOn", event.target.value)} />
               </label>
               <label className="vault-field">
-                <span className="vault-field-label"><span>计费周期</span></span>
+                <span className="vault-field-label"><span>{t("计费周期")}</span></span>
                 <select value={draft.billingCycle} onChange={(event) => update("billingCycle", event.target.value)}>
-                  <option value="monthly">每月</option>
-                  <option value="yearly">每年</option>
-                  <option value="none">一次性 / 按量</option>
+                  <option value="monthly">{t("每月")}</option>
+                  <option value="yearly">{t("每年")}</option>
+                  <option value="none">{t("一次性 / 按量")}</option>
                 </select>
               </label>
               <label className="vault-field">
-                <span className="vault-field-label"><span>每期费用</span></span>
+                <span className="vault-field-label"><span>{t("每期费用")}</span></span>
                 <input
                   value={draft.price}
                   onChange={(event) => update("price", event.target.value)}
                   inputMode="decimal"
-                  placeholder="例如：20.00"
+                  placeholder={t("例如：20.00")}
                   aria-invalid={Boolean(priceError)}
                   aria-describedby={priceError ? "vault-price-error" : undefined}
                 />
                 {priceError && <small id="vault-price-error" className="vault-hint warn" role="alert">{priceError}</small>}
               </label>
               <label className="vault-field">
-                <span className="vault-field-label"><span>账户余额</span></span>
+                <span className="vault-field-label"><span>{t("账户余额")}</span></span>
                 <input
                   value={draft.balance}
                   onChange={(event) => update("balance", event.target.value)}
                   inputMode="decimal"
-                  placeholder="例如：12.50"
+                  placeholder={t("例如：12.50")}
                   aria-invalid={Boolean(balanceError)}
                   aria-describedby={balanceError ? "vault-balance-error" : undefined}
                 />
                 {balanceError && <small id="vault-balance-error" className="vault-hint warn" role="alert">{balanceError}</small>}
               </label>
               <label className="vault-field">
-                <span className="vault-field-label"><span>币种</span></span>
+                <span className="vault-field-label"><span>{t("币种")}</span></span>
                 <input
                   value={draft.currency}
                   onChange={(event) => update("currency", event.target.value.toUpperCase())}
-                  placeholder="USD / CNY（留空使用 USD）"
+                  placeholder={t("USD / CNY（留空使用 USD）")}
                   aria-invalid={Boolean(currencyError)}
                   aria-describedby={currencyError ? "vault-currency-error" : undefined}
                 />
@@ -503,10 +511,10 @@ export default function VaultItemDialog({
 
           {draft.kind === "secret" && (
             <SecretInput
-              label="密钥内容"
+              label={t("密钥内容")}
               value={draft.secret}
               onChange={(value) => update("secret", value)}
-              onCopy={() => onCopy(draft.secret, "密钥")}
+              onCopy={() => onCopy(draft.secret, t("密钥"))}
               multiline
             />
           )}
@@ -515,18 +523,18 @@ export default function VaultItemDialog({
             <>
               <div className="vault-server-address">
                 <label className="vault-field">
-                  <span className="vault-field-label"><span>主机</span></span>
+                  <span className="vault-field-label"><span>{t("主机")}</span></span>
                   <input
                     value={draft.host}
                     onChange={(event) => update("host", event.target.value)}
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="203.0.113.10 或 vps.example.com"
+                    placeholder={t("203.0.113.10 或 vps.example.com")}
                     required
                   />
                 </label>
                 <label className="vault-field vault-port-field">
-                  <span className="vault-field-label"><span>端口</span></span>
+                  <span className="vault-field-label"><span>{t("端口")}</span></span>
                   <input
                     value={draft.port}
                     onChange={(event) => update("port", event.target.value.replace(/[^0-9]/g, "").slice(0, 5))}
@@ -538,8 +546,8 @@ export default function VaultItemDialog({
               </div>
               <label className="vault-field">
                 <span className="vault-field-label">
-                  <span>登录用户</span>
-                  <button type="button" onClick={() => onCopy(draft.username, "用户名")} disabled={!draft.username}>复制</button>
+                  <span>{t("登录用户")}</span>
+                  <button type="button" onClick={() => onCopy(draft.username, t("用户名"))} disabled={!draft.username}>{t("复制")}</button>
                 </span>
                 <input
                   value={draft.username}
@@ -550,10 +558,10 @@ export default function VaultItemDialog({
                 />
               </label>
               <fieldset className="vault-auth-method">
-                <legend>登录方式</legend>
+                <legend>{t("登录方式")}</legend>
                 {([
-                  ["password", "密码"],
-                  ["key", "SSH 私钥"],
+                  ["password", t("密码")],
+                  ["key", t("SSH 私钥")],
                 ] as const).map(([value, label]) => (
                   <label key={value}>
                     <input
@@ -568,16 +576,16 @@ export default function VaultItemDialog({
               </fieldset>
               {draft.authMethod === "password" ? (
                 <SecretInput
-                  label="登录密码"
+                  label={t("登录密码")}
                   value={draft.password}
                   onChange={(value) => update("password", value)}
-                  onCopy={() => onCopy(draft.password, "密码")}
+                  onCopy={() => onCopy(draft.password, t("密码"))}
                   onGenerate={() => update("password", generatePassword())}
                 />
               ) : (
                 <>
                   <fieldset className="vault-auth-method">
-                    <legend>私钥来源</legend>
+                    <legend>{t("私钥来源")}</legend>
                     <label>
                       <input
                         type="radio"
@@ -588,7 +596,7 @@ export default function VaultItemDialog({
                           update("privateKeyRef", "");
                         }}
                       />
-                      直接填写
+                      {t("直接填写")}
                     </label>
                     <label>
                       <input
@@ -597,58 +605,58 @@ export default function VaultItemDialog({
                         checked={useKeyReference}
                         onChange={() => setUseKeyReference(true)}
                       />
-                      引用已保存的密钥
+                      {t("引用已保存的密钥")}
                     </label>
                   </fieldset>
                   {useKeyReference ? (
                     <div className="vault-field">
                       <label className="vault-field">
-                        <span className="vault-field-label"><span>已保存的密钥</span></span>
+                        <span className="vault-field-label"><span>{t("已保存的密钥")}</span></span>
                         <select
                           value={draft.privateKeyRef}
                           disabled={secretEntries.length === 0}
                           onChange={(event) => update("privateKeyRef", event.target.value)}
                         >
-                          <option value="">请选择密钥</option>
+                          <option value="">{t("请选择密钥")}</option>
                           {draft.privateKeyRef && !referencedSecret && (
-                            <option value={draft.privateKeyRef}>引用的密钥已被删除</option>
+                            <option value={draft.privateKeyRef}>{t("引用的密钥已被删除")}</option>
                           )}
                           {[...secretEntries].sort((left, right) => left.title.localeCompare(right.title, "zh-CN"))
                             .map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}
                         </select>
                       </label>
                       {secretEntries.length === 0 && (
-                        <small className="vault-hint">还没有保存的密钥，请先新建一个「密钥」条目。</small>
+                        <small className="vault-hint">{t("还没有保存的密钥，请先新建一个「密钥」条目。")}</small>
                       )}
                       {draft.privateKeyRef && !referencedSecret && (
-                        <small className="vault-hint warn" role="alert">引用的密钥已被删除，请重新选择</small>
+                        <small className="vault-hint warn" role="alert">{t("引用的密钥已被删除，请重新选择")}</small>
                       )}
                       {referencedSecret && (
                         <div className="vault-field-label">
-                          <small className="vault-hint">原密钥更新后这里会自动使用新内容</small>
+                          <small className="vault-hint">{t("原密钥更新后这里会自动使用新内容")}</small>
                           <button
                             type="button"
-                            aria-label="复制引用的私钥"
+                            aria-label={t("复制引用的私钥")}
                             disabled={!referencedSecret.secret}
-                            onClick={() => onCopy(referencedSecret.secret, "私钥")}
-                          >复制</button>
+                            onClick={() => onCopy(referencedSecret.secret, t("私钥"))}
+                          >{t("复制")}</button>
                         </div>
                       )}
                     </div>
                   ) : (
                     <SecretInput
-                      label="SSH 私钥"
+                      label={t("SSH 私钥")}
                       value={draft.privateKey}
                       onChange={(value) => update("privateKey", value)}
-                      onCopy={() => onCopy(draft.privateKey, "私钥")}
+                      onCopy={() => onCopy(draft.privateKey, t("私钥"))}
                       multiline
                     />
                   )}
                   <SecretInput
-                    label="私钥口令（可选）"
+                    label={t("私钥口令（可选）")}
                     value={draft.keyPassphrase}
                     onChange={(value) => update("keyPassphrase", value)}
-                    onCopy={() => onCopy(draft.keyPassphrase, "私钥口令")}
+                    onCopy={() => onCopy(draft.keyPassphrase, t("私钥口令"))}
                   />
                 </>
               )}
@@ -667,24 +675,24 @@ export default function VaultItemDialog({
           {draft.kind === "recovery" && (
             <>
               <label className="vault-field">
-                <span className="vault-field-label"><span>对应账号</span></span>
+                <span className="vault-field-label"><span>{t("对应账号")}</span></span>
                 <input
                   value={draft.account}
                   onChange={(event) => update("account", event.target.value)}
                   autoComplete="off"
-                  placeholder="例如：me@example.com"
+                  placeholder={t("例如：me@example.com")}
                 />
               </label>
               <RecoveryCodeEditor
                 codes={draft.codes}
                 onChange={(codes) => update("codes", codes)}
-                onCopy={(code) => onCopy(code, "恢复码")}
+                onCopy={(code) => onCopy(code, t("恢复码"))}
               />
             </>
           )}
 
           <label className="vault-field">
-            <span className="vault-field-label"><span>备注</span></span>
+            <span className="vault-field-label"><span>{t("备注")}</span></span>
             <textarea
               value={draft.notes}
               onChange={(event) => update("notes", event.target.value)}
@@ -697,12 +705,12 @@ export default function VaultItemDialog({
         <div className="dialog-actions vault-dialog-actions">
           {!isNew && (
             <button type="button" className="danger-button" onClick={onDelete} disabled={busy}>
-              删除
+              {t("删除")}
             </button>
           )}
           <span className="vault-dialog-spacer" />
           <button type="submit" className="primary" disabled={busy || hasSubscriptionErrors || needsKeySelection || (draft.kind !== "subscription" && !draft.title.trim()) || (!dirty && !isNew)}>
-            {busy ? "加密保存中…" : "保存"}
+            {busy ? t("加密保存中…") : t("保存")}
           </button>
         </div>
         {error && <p className="dialog-error" role="alert">{error}</p>}

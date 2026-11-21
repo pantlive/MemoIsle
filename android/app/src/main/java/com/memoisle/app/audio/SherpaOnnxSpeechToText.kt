@@ -7,16 +7,20 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.memoisle.app.BuildConfig
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextStateException
+import com.memoisle.app.ui.requireUi
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
-import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -36,12 +40,12 @@ interface SpeechToTextEngine {
     suspend fun transcribe(audioPath: Path): Result<String>
 }
 
-class SpeechModelMissingException : IllegalStateException(
-    "设备端语音模型尚未安装，请联网后重试",
+class SpeechModelMissingException : UiTextStateException(
+    UiText.res(R.string.speech_error_model_missing),
 )
 
-class SpeechModelDownloadException(cause: Throwable) : IllegalStateException(
-    "设备端语音模型下载失败，请检查网络后重试",
+class SpeechModelDownloadException(cause: Throwable) : UiTextStateException(
+    UiText.res(R.string.speech_error_model_download_failed),
     cause,
 )
 
@@ -114,7 +118,7 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
             }
             runCatching {
                 val waveform = AudioPcmDecoder.decode(audioPath, SAMPLE_RATE)
-                require(waveform.isNotEmpty()) { "录音内容为空" }
+                requireUi(waveform.isNotEmpty()) { UiText.res(R.string.speech_error_empty_recording) }
                 synchronized(recognizerLock) {
                     val activeRecognizer = getRecognizer()
                     val stream = activeRecognizer.createStream()
@@ -126,7 +130,7 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
                         stream.release()
                     }
                 }.also { text ->
-                    require(text.isNotBlank()) { "没有识别到语音内容" }
+                    requireUi(text.isNotBlank()) { UiText.res(R.string.speech_error_no_speech) }
                 }
             }
         }
@@ -237,11 +241,9 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/octet-stream")
             val statusCode = connection.responseCode
-            require(statusCode in 200..299) { "模型下载服务返回 HTTP $statusCode" }
+            requireUi(statusCode in 200..299) { UiText.res(R.string.speech_error_model_http, statusCode) }
             val contentLength = connection.contentLengthLong
-            require(contentLength <= MAX_ARCHIVE_BYTES || contentLength < 0L) {
-                "模型压缩包超过大小限制"
-            }
+            requireUi(contentLength <= MAX_ARCHIVE_BYTES || contentLength < 0L) { UiText.res(R.string.speech_error_archive_too_large) }
             BufferedInputStream(connection.inputStream).use { input ->
                 BufferedOutputStream(
                     Files.newOutputStream(
@@ -260,7 +262,7 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
                             break
                         }
                         total += count
-                        require(total <= MAX_ARCHIVE_BYTES) { "模型压缩包超过大小限制" }
+                        requireUi(total <= MAX_ARCHIVE_BYTES) { UiText.res(R.string.speech_error_archive_too_large) }
                         output.write(buffer, 0, count)
                     }
                 }
@@ -292,16 +294,16 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
                         "$ARCHIVE_MODEL_DIRECTORY/$MODEL_FILE_NAME",
                         MODEL_FILE_NAME,
                         -> {
-                            require(!modelFound) { "模型压缩包包含重复模型文件" }
-                            require(entry.isFile) { "模型文件不是普通文件" }
+                            requireUi(!modelFound) { UiText.res(R.string.speech_error_archive_duplicate_model) }
+                            requireUi(entry.isFile) { UiText.res(R.string.speech_error_model_not_regular) }
                             copyArchiveEntry(archive, modelPartPath, MAX_MODEL_BYTES)
                             modelFound = true
                         }
                         "$ARCHIVE_MODEL_DIRECTORY/$TOKENS_FILE_NAME",
                         TOKENS_FILE_NAME,
                         -> {
-                            require(!tokensFound) { "模型压缩包包含重复词表文件" }
-                            require(entry.isFile) { "词表文件不是普通文件" }
+                            requireUi(!tokensFound) { UiText.res(R.string.speech_error_archive_duplicate_tokens) }
+                            requireUi(entry.isFile) { UiText.res(R.string.speech_error_tokens_not_regular) }
                             copyArchiveEntry(archive, tokensPartPath, MAX_TOKENS_BYTES)
                             tokensFound = true
                         }
@@ -309,7 +311,7 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
                 }
             }
         }
-        require(modelFound && tokensFound) { "模型压缩包缺少 SenseVoice 文件" }
+        requireUi(modelFound && tokensFound) { UiText.res(R.string.speech_error_archive_missing_files) }
     }
 
     private suspend fun copyArchiveEntry(
@@ -334,16 +336,16 @@ class SherpaOnnxSpeechToText(context: Context) : SpeechToTextEngine, AutoCloseab
                     break
                 }
                 total += count
-                require(total <= maxBytes) { "模型文件超过大小限制" }
+                requireUi(total <= maxBytes) { UiText.res(R.string.speech_error_model_too_large) }
                 output.write(buffer, 0, count)
             }
         }
     }
 
     private fun verifyFile(path: Path, expectedSha256: String, maxBytes: Long): Unit {
-        require(Files.isRegularFile(path)) { "模型文件未成功解压" }
-        require(Files.size(path) in 1..maxBytes) { "模型文件大小无效" }
-        require(sha256(path) == expectedSha256) { "模型文件校验失败" }
+        requireUi(Files.isRegularFile(path)) { UiText.res(R.string.speech_error_model_not_extracted) }
+        requireUi(Files.size(path) in 1..maxBytes) { UiText.res(R.string.speech_error_model_invalid_size) }
+        requireUi(sha256(path) == expectedSha256) { UiText.res(R.string.speech_error_model_checksum) }
     }
 
     private fun sha256(path: Path): String {

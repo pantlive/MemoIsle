@@ -1,4 +1,5 @@
 import type { MemoType } from "./types";
+import { t } from "./i18n";
 
 export interface CaptureTypeSuggestion {
   type: MemoType;
@@ -54,7 +55,7 @@ export function suggestCaptureType(
   if (foundUrl) {
     return {
       type: "resource",
-      reason: "检测到网址，更适合保存为网页资料",
+      reason: t("检测到网址，更适合保存为网页资料"),
       key: `resource:${foundUrl.toLowerCase()}`,
     };
   }
@@ -63,7 +64,7 @@ export function suggestCaptureType(
   if (looksLikeEnglishLemma(lemmaCandidate)) {
     return {
       type: "word",
-      reason: "内容像英语单词或短语，可以直接查词并加入复习",
+      reason: t("内容像英语单词或短语，可以直接查词并加入复习"),
       key: `word:${lemmaCandidate.toLowerCase()}:${body.slice(0, 80)}`,
     };
   }
@@ -71,7 +72,7 @@ export function suggestCaptureType(
   if (body || title) {
     return {
       type: "idea",
-      reason: "这段内容更适合先放入灵感收件箱",
+      reason: t("这段内容更适合先放入灵感收件箱"),
       key: `idea:${title}:${body.slice(0, 120)}`,
     };
   }

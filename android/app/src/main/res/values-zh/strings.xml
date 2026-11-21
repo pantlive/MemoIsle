@@ -1,0 +1,979 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中文文案；键与 values/strings.xml 一致（见 StringsParityTest）。 -->
+<resources>
+    <!-- 00_common -->
+    <string name="app_name">MemoIsle</string>
+    <string name="error_unknown">未知错误</string>
+    <string name="error_api_request_failed">API 请求失败（%1$s）：%2$s</string>
+    <string name="error_operation_failed_retry">操作失败（%1$s），请重试。</string>
+    <string name="common_back">返回</string>
+    <string name="common_refresh">刷新</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_save">保存</string>
+    <string name="common_delete">删除</string>
+    <string name="common_close">关闭</string>
+    <string name="common_edit">编辑</string>
+    <string name="common_copy">复制</string>
+    <string name="common_untitled">未命名</string>
+    <string name="common_other">其他</string>
+    <string name="common_expired">已过期</string>
+    <string name="common_list_separator">、</string>
+    <string name="language_menu">语言</string>
+    <string name="language_dialog_title">界面语言</string>
+    <string name="language_follow_system">跟随系统</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
+    <string name="error_operation_failed_later">操作失败，请稍后重试。</string>
+    <string name="error_server_unreachable">无法连接服务器，请检查网络后重试。</string>
+
+    <!-- 10_memo_data -->
+    <string name="memo_error_resource_url_required">网页资料必须包含有效的网址</string>
+    <string name="memo_error_word_lemma_required">英语单词必须包含词形</string>
+    <string name="content_default_idea_title">灵感</string>
+    <string name="content_default_voice_body">语音记录</string>
+    <string name="content_default_resource_title">网页资料</string>
+    <string name="content_default_image_title">图片收藏</string>
+    <string name="content_default_meeting_recording">会议录音</string>
+    <string name="content_default_voice_recording">语音灵感</string>
+    <string name="resource_category_learning">学习资料</string>
+    <string name="resource_category_article">文章阅读</string>
+    <string name="resource_category_media">视频与音频</string>
+    <string name="resource_category_tool">工具与服务</string>
+    <string name="resource_category_book_paper">书籍与论文</string>
+    <string name="resource_category_product">商品与好物</string>
+    <string name="resource_category_pending">分类中</string>
+    <string name="resource_kind_article">文章</string>
+    <string name="resource_kind_video">视频</string>
+    <string name="resource_kind_course">课程</string>
+    <string name="resource_kind_tool">工具</string>
+    <string name="resource_kind_book">书籍</string>
+    <string name="resource_reading_reading">阅读中</string>
+    <string name="resource_reading_completed">已完成</string>
+    <string name="resource_reading_archived">已归档</string>
+    <string name="resource_reading_unread">未读</string>
+    <string name="link_health_healthy">网页正常</string>
+    <string name="link_health_redirected">网址已跳转</string>
+    <string name="link_health_changed">网页有更新</string>
+    <string name="link_health_auth_required">需要登录</string>
+    <string name="link_health_temporary_failure">暂时无法访问</string>
+    <string name="link_health_failed">网页已失效</string>
+    <string name="link_health_ignored">已忽略巡检</string>
+    <string name="link_health_pending">等待检查</string>
+    <string name="image_dimensions_px">%1$s × %2$s 像素</string>
+    <string name="image_ocr_pending">排队中</string>
+    <string name="image_ocr_processing">识别中</string>
+    <string name="image_ocr_ready">已识别</string>
+    <string name="image_ocr_failed">识别失败</string>
+    <string name="image_ocr_disabled">未启用</string>
+    <string name="image_ocr_none">未识别</string>
+    <string name="image_ocr_source_local">本地识别</string>
+    <string name="image_ocr_source_llm">AI 识别</string>
+    <string name="content_default_untitled">未命名</string>
+
+    <!-- 11_vault_data -->
+    <string name="vault_kind_login">账号密码</string>
+    <string name="vault_kind_secret">密钥</string>
+    <string name="vault_kind_recovery">恢复码</string>
+    <string name="vault_kind_server">云服务器</string>
+    <string name="vault_kind_subscription">AI 订阅</string>
+    <string name="vault_provider_claude">Claude</string>
+    <string name="vault_provider_chatgpt">ChatGPT</string>
+    <string name="vault_provider_grok">Grok</string>
+    <string name="vault_billing_monthly">每月</string>
+    <string name="vault_billing_yearly">每年</string>
+    <string name="vault_billing_none">一次性 / 按量</string>
+    <string name="vault_reminder_type_expiring">即将到期</string>
+    <string name="vault_reminder_type_rotate">该更换了</string>
+    <string name="vault_reminder_type_rotate_soon">快该换了</string>
+    <string name="vault_reminder_type_reused">重复密码</string>
+    <string name="vault_reminder_type_weak">弱密码</string>
+    <string name="vault_reminder_type_codes_empty">恢复码用完</string>
+    <string name="vault_reminder_type_codes_low">恢复码不足</string>
+    <string name="vault_reminder_type_missing_key">密钥缺失</string>
+    <string name="vault_reminder_codes_empty">恢复码已全部用完，请到网站重新生成一组。</string>
+    <plurals name="vault_reminder_codes_low">
+        <item quantity="other">只剩 %1$s 个可用恢复码，建议重新生成一组。</item>
+    </plurals>
+    <string name="vault_reminder_missing_key">引用的密钥已被删除，请重新选择或直接填写私钥。</string>
+    <plurals name="vault_reminder_subscription_expired">
+        <item quantity="other">已于 %1$s 到期（%2$s 天前），请续费或更新到期日。</item>
+    </plurals>
+    <plurals name="vault_reminder_expired">
+        <item quantity="other">已于 %1$s 过期（%2$s 天前），请更换。</item>
+    </plurals>
+    <string name="vault_reminder_subscription_due_today">今天到期，请确认续费。</string>
+    <string name="vault_reminder_due_today">今天到期，请尽快更换。</string>
+    <plurals name="vault_reminder_subscription_expiring">
+        <item quantity="other">%1$s 天后到期续费（%2$s）。</item>
+    </plurals>
+    <plurals name="vault_reminder_expiring">
+        <item quantity="other">%1$s 天后到期（%2$s）。</item>
+    </plurals>
+    <plurals name="vault_reminder_rotate">
+        <item quantity="other">已 %1$s 天没有更换，设定为每 %2$s 天换一次。</item>
+    </plurals>
+    <plurals name="vault_reminder_rotate_soon">
+        <item quantity="other">%1$s 天后到了更换周期（每 %2$s 天）。</item>
+    </plurals>
+    <string name="vault_reminder_reused_one">和「%1$s」用的是同一个密码。</string>
+    <string name="vault_reminder_reused_two">和「%1$s」「%2$s」用的是同一个密码。</string>
+    <string name="vault_reminder_reused_many">和「%1$s」「%2$s」等 %3$s 条用的是同一个密码。</string>
+    <string name="vault_reminder_weak">密码偏弱，建议用「生成」换成 20 位随机密码。</string>
+
+    <!-- 12_ledger_relay_forget_data -->
+    <string name="ledger_category_food">餐饮</string>
+    <string name="ledger_category_transport">交通</string>
+    <string name="ledger_category_shopping">购物</string>
+    <string name="ledger_category_subscription">订阅</string>
+    <string name="ledger_category_housing">住房</string>
+    <string name="ledger_category_entertainment">娱乐</string>
+    <string name="ledger_category_medical">医疗</string>
+    <string name="ledger_category_salary">工资</string>
+    <string name="ledger_kind_income">收入</string>
+    <string name="ledger_kind_expense">支出</string>
+    <string name="ledger_error_kind">请选择收入或支出。</string>
+    <string name="ledger_error_amount">金额需大于 0 且不超过 10 亿元。</string>
+    <string name="ledger_error_currency">币种应为三位字母，如 CNY。</string>
+    <string name="ledger_error_date">日期应为 YYYY-MM-DD，年份范围 1900–2100。</string>
+    <string name="ledger_error_category">分类需为 1–30 个字。</string>
+    <string name="ledger_error_account">账户最多 30 个字。</string>
+    <string name="ledger_error_note">备注最多 500 个字。</string>
+    <string name="relay_device_web">网页</string>
+    <string name="relay_device_android">手机</string>
+    <string name="relay_error_text_empty">请输入要发送的内容。</string>
+    <string name="relay_error_text_too_large">文本不能超过 100 KB，请改用文件发送。</string>
+    <string name="relay_error_file_empty">「%1$s」是空文件。</string>
+    <string name="relay_error_file_too_large">「%1$s」有 %2$s，单个文件不能超过 20 MB。</string>
+    <string name="forget_error_title_too_long">标题最多 %1$s 个字</string>
+    <string name="forget_error_content_too_long">正文最多 %1$s 个字</string>
+    <string name="error_attachment_empty">附件内容不能为空</string>
+    <string name="forget_error_attachment_too_large">附件不能超过 20 MB</string>
+
+    <!-- 13_sync_errors -->
+    <string name="error_conflict_needs_server_id">冲突条目必须包含服务端标识</string>
+    <string name="error_audio_play_needs_sync">播放录音前必须先完成同步</string>
+    <string name="error_image_not_synced">图片收藏尚未同步，暂时无法查看原图</string>
+    <string name="error_image_view_needs_sync">查看图片前必须先完成同步</string>
+    <string name="error_merge_needs_sync">合并前必须先完成单词同步</string>
+    <string name="error_synced_item_needs_server_id">同步后的条目必须包含服务端标识</string>
+    <string name="error_restore_needs_sync">恢复前必须先完成同步</string>
+    <string name="error_purge_needs_sync">永久删除前必须先完成同步</string>
+    <string name="error_review_needs_sync">复习前必须先完成单词同步</string>
+    <string name="error_skip_needs_sync">跳过回顾前必须先完成同步</string>
+    <string name="error_audio_upload_needs_sync">上传录音前必须先完成灵感同步</string>
+    <string name="error_audio_too_large">录音文件过大</string>
+    <string name="error_image_memo_type">创建图片收藏时类型必须为 image</string>
+    <string name="error_image_upload_needs_memo">上传图片前必须先创建图片收藏</string>
+    <string name="error_image_unsupported_type">仅支持 PNG/JPEG/WebP/GIF 图片</string>
+    <string name="error_image_empty">图片内容不能为空</string>
+    <string name="error_file_empty">文件内容不能为空</string>
+    <string name="error_duplicate_word">已收藏相同词形</string>
+    <string name="error_duplicate_url">已收藏相同网址</string>
+
+    <!-- 14_vault_crypto -->
+    <string name="vault_error_master_password_required">请输入主密码</string>
+    <string name="vault_error_unsupported_format">不支持的密码库格式，请更新 MemoIsle。</string>
+    <string name="vault_error_wrong_master_password">主密码不正确。</string>
+    <string name="vault_error_decrypt_failed">有条目无法解密，可能已损坏或被篡改。</string>
+
+    <!-- 15_audio -->
+    <string name="speech_error_empty_recording">录音内容为空</string>
+    <string name="speech_error_no_speech">没有识别到语音内容</string>
+    <string name="speech_error_archive_too_large">模型压缩包超过大小限制</string>
+    <string name="speech_error_archive_duplicate_model">模型压缩包包含重复模型文件</string>
+    <string name="speech_error_model_not_regular">模型文件不是普通文件</string>
+    <string name="speech_error_archive_duplicate_tokens">模型压缩包包含重复词表文件</string>
+    <string name="speech_error_tokens_not_regular">词表文件不是普通文件</string>
+    <string name="speech_error_archive_missing_files">模型压缩包缺少 SenseVoice 文件</string>
+    <string name="speech_error_model_too_large">模型文件超过大小限制</string>
+    <string name="speech_error_model_not_extracted">模型文件未成功解压</string>
+    <string name="speech_error_model_invalid_size">模型文件大小无效</string>
+    <string name="speech_error_model_checksum">模型文件校验失败</string>
+    <string name="speech_error_model_missing">设备端语音模型尚未安装，请联网后重试</string>
+    <string name="speech_error_model_download_failed">设备端语音模型下载失败，请检查网络后重试</string>
+    <string name="speech_error_model_http">模型下载服务返回 HTTP %1$s</string>
+    <string name="audio_error_sample_rate">目标采样率必须大于 0</string>
+    <string name="audio_error_file_missing">录音文件不存在</string>
+    <string name="audio_error_no_audio_track">录音不包含音频轨道</string>
+    <string name="audio_error_no_mime">录音格式缺少 MIME 类型</string>
+    <string name="audio_error_no_input_buffer">无法获取解码输入缓冲区</string>
+    <string name="audio_error_no_pcm">录音没有可用的 PCM 数据</string>
+    <string name="audio_error_source_sample_rate">源采样率无效</string>
+
+    <!-- 16_update -->
+    <string name="update_error_size_mismatch">安装包大小不一致，已删除，请稍后重试</string>
+    <string name="update_error_checksum">安装包校验失败，已删除，请稍后重试</string>
+
+    <!-- 17_image -->
+    <string name="image_compress_detail_dimensions">尺寸 %1$s × %2$s → %3$s × %4$s</string>
+    <string name="image_compress_detail_format">格式 %1$s → %2$s</string>
+    <string name="image_format_unknown">图片</string>
+    <string name="image_compress_detail_animation_dropped">动图已转为静态图，仅保留第一帧</string>
+    <string name="image_compress_detail_join">%1$s；%2$s</string>
+    <string name="image_compress_reminder">图片已自动压缩后收藏：%1$s</string>
+    <string name="image_compress_error_no_dimensions">无法解析图片尺寸，且图片超过 20 MB，请换一张图片</string>
+    <string name="image_compress_error_still_too_large">图片压缩后仍无法小于 20 MB，请换一张图片</string>
+    <string name="image_error_read_failed">无法读取所选图片</string>
+    <string name="image_compress_error_decode">图片解码失败，无法压缩，请换一张图片</string>
+
+    <!-- 20_memo_vm -->
+    <string name="memo_msg_synced_partial">已同步，部分内容将在联网后自动重试</string>
+    <string name="memo_msg_synced_with_web">已与 Web 端同步</string>
+    <string name="memo_msg_offline">当前离线，已显示本地内容：%1$s</string>
+    <string name="memo_msg_export_open_failed">无法打开导出文件</string>
+    <string name="memo_msg_exported">个人数据已导出；录音二进制未打包进 JSON</string>
+    <string name="memo_msg_export_failed">数据导出失败：%1$s</string>
+    <string name="memo_msg_save_file_open_failed">无法打开保存文件</string>
+    <string name="memo_msg_audio_saved">录音已保存到你选择的位置</string>
+    <string name="memo_msg_audio_download_failed">录音下载失败：%1$s</string>
+    <string name="memo_msg_used_server_version">已采用服务端版本</string>
+    <string name="memo_msg_conflict_server_unavailable">暂时无法读取服务端版本，请联网后再处理冲突：%1$s</string>
+    <string name="memo_msg_sync_complete_safe">同步完成，可以安全退出</string>
+    <string name="memo_msg_sync_incomplete">仍有内容未同步，请保持登录后重试</string>
+    <string name="memo_msg_sync_failed_stay">同步未完成，请保持登录后重试：%1$s</string>
+    <string name="memo_msg_idea_saved">灵感已保存</string>
+    <string name="memo_msg_saved_locally_retry">已保存在本机，联网后可重试同步：%1$s</string>
+    <string name="memo_msg_resource_saved">网页资料已保存</string>
+    <string name="memo_msg_duplicate_url">已收藏相同网址，可以查看已有资料或仍然保存。</string>
+    <string name="memo_msg_word_saved">英语单词已收藏</string>
+    <string name="memo_msg_duplicate_word">已收藏相同词形，可以查看、合并例句或仍然保存。</string>
+    <string name="memo_msg_lookup_no_meaning">词典没有返回中文释义，请手动填写</string>
+    <string name="memo_msg_lookup_found">已查到中文释义，可继续选择其他义项</string>
+    <string name="memo_msg_lookup_failed">查词失败：%1$s</string>
+    <string name="memo_msg_merged">已把新语境合并进已有单词</string>
+    <string name="memo_msg_merge_failed">合并失败：%1$s</string>
+    <string name="memo_msg_trashed">已移入回收站，可在 30 天内恢复</string>
+    <string name="memo_msg_trash_failed">移入回收站失败：%1$s</string>
+    <string name="memo_msg_restored">已从回收站恢复</string>
+    <string name="memo_msg_restore_failed">恢复失败：%1$s</string>
+    <string name="memo_msg_purged">已永久删除</string>
+    <string name="memo_msg_purge_failed">永久删除失败：%1$s</string>
+    <string name="memo_msg_undo_done">已撤销刚才的保存，可在回收站恢复</string>
+    <string name="memo_msg_undo_failed">撤销失败：%1$s</string>
+    <string name="memo_msg_voice_saved">语音灵感已保存</string>
+    <string name="memo_msg_voice_saved_locally">录音已保存在本机，稍后重试同步：%1$s</string>
+    <string name="memo_msg_image_saved">图片已收藏</string>
+    <string name="memo_msg_image_compressed_but">图片已自动压缩，但%1$s</string>
+    <string name="memo_msg_original_image_failed">读取原图失败：%1$s</string>
+    <string name="memo_msg_image_too_large">图片不能超过 20 MB</string>
+    <string name="memo_msg_image_invalid">图片文件无效或已损坏</string>
+    <string name="memo_msg_image_conflict">图片已在其他设备更新，请刷新后重新选择</string>
+    <string name="memo_msg_image_failed_kept">图片收藏失败，已保留本机副本，联网后可重试：%1$s</string>
+    <string name="memo_msg_resource_read_only">Android 端网页资料为只读，请在 Web 端整理</string>
+    <string name="memo_msg_edit_synced">修改已同步</string>
+    <string name="memo_msg_edit_conflict_refresh">其他设备已更新这条灵感，请刷新后重新编辑。</string>
+    <string name="memo_msg_edit_conflict_loaded">其他设备已更新这条灵感，已载入最新版本，请确认后重新保存。</string>
+    <string name="memo_msg_edit_saved_locally">修改已保存在本机，稍后重试同步：%1$s</string>
+    <string name="memo_msg_review_recorded">复习结果已记录</string>
+    <string name="memo_msg_review_failed">复习结果提交失败：%1$s</string>
+    <string name="memo_msg_review_skipped">已跳过，明天之前不会再出现</string>
+    <string name="memo_msg_skip_failed">跳过失败：%1$s</string>
+    <string name="memo_msg_review_plan_updated">复习计划已更新</string>
+    <string name="memo_msg_review_plan_failed">复习计划保存失败：%1$s</string>
+    <string name="memo_msg_opened_source">已打开原网页</string>
+    <string name="memo_msg_reading_sync_failed">阅读状态同步失败：%1$s</string>
+    <string name="memo_msg_star_sync_failed">星标同步失败：%1$s</string>
+    <string name="memo_msg_idea_sorted">灵感已整理</string>
+    <string name="memo_msg_sort_saved_locally">整理已保存在本机：%1$s</string>
+    <string name="memo_msg_idea_archived">灵感已归档</string>
+    <string name="memo_msg_archive_saved_locally">归档已保存在本机：%1$s</string>
+    <string name="memo_msg_item_archived">内容已归档</string>
+    <string name="memo_msg_audio_play_failed">录音播放失败：%1$s</string>
+
+    <!-- 21_auth_vm -->
+    <string name="auth_error_login_retry">登录失败，请重新尝试</string>
+    <string name="auth_error_login_later">登录失败，请稍后重试</string>
+    <string name="auth_error_invite_required">请输入邀请码</string>
+    <string name="auth_msg_code_sent">验证码已发送，请查收邮箱（10 分钟内有效）。</string>
+    <string name="auth_error_code_send_failed">验证码发送失败，请稍后重试</string>
+    <string name="auth_msg_reset_sent">如果邮箱已注册，重置链接已发送，请查收邮件。</string>
+    <string name="auth_error_reset_failed">重置链接发送失败，请稍后重试</string>
+    <string name="auth_error_password_mismatch">两次输入的密码不一致</string>
+    <string name="auth_error_code_required">请输入 6 位邮箱验证码</string>
+    <string name="auth_msg_logged_out_no_providers">已退出登录，当前无法读取登录方式</string>
+    <string name="auth_error_session_expired">登录已过期，请重新登录</string>
+    <string name="auth_msg_registered">注册成功，请使用邮箱登录。</string>
+    <string name="auth_error_email_login_failed">邮箱登录失败，请稍后重试</string>
+    <string name="auth_error_server_unreachable">当前无法连接服务端，请检查网络后重试</string>
+
+    <!-- 22_relay_vm -->
+    <string name="relay_poll_session_expired">登录已失效，请重新登录。</string>
+    <string name="relay_poll_reconnecting">与服务器的连接中断，正在重试…</string>
+    <string name="relay_msg_text_sent">文字已发给网页，10 分钟内在网页打开「传输」即可接收。</string>
+    <string name="relay_msg_file_sent">「%1$s」（%2$s）已发给网页，10 分钟内有效。</string>
+    <string name="relay_msg_file_saved">已保存「%1$s」，服务端已删除这份内容。</string>
+    <string name="relay_msg_image_copied">图片已复制到剪贴板，服务端已删除。</string>
+    <string name="relay_msg_clipboard_failed_saved">无法写入剪贴板，已保存「%1$s」。</string>
+    <string name="relay_msg_text_copied">已复制到剪贴板，服务端已删除这段文字。</string>
+    <string name="relay_msg_dismissed">已忽略。</string>
+    <string name="relay_error_gone">这份内容已被取走或已过期。</string>
+    <string name="relay_error_cannot_read">无法读取「%1$s」</string>
+    <string name="relay_error_file_over_limit">「%1$s」超过 20 MB，单个文件不能超过 20 MB。</string>
+    <string name="relay_error_cannot_send">这个文件无法发送。</string>
+    <string name="relay_error_offline">无法连接服务器。传输需要在线使用，请检查网络后重试。</string>
+    <string name="relay_error_permission">没有读取或写入这个文件的权限。</string>
+    <string name="relay_error_generic">传输失败，请稍后重试。</string>
+
+    <!-- 23_update_vm -->
+    <string name="update_error_check_failed">检查更新失败，请检查网络后重试</string>
+    <string name="update_msg_up_to_date">已是最新版本（%1$s）</string>
+    <string name="update_error_download_failed">下载失败，请检查网络后重试</string>
+    <string name="update_error_installer_failed">无法打开系统安装界面，请稍后重试</string>
+
+    <!-- 24_vault_vm -->
+    <string name="vault_msg_verified">验证通过。</string>
+    <string name="vault_msg_unlocked">已解锁，5 分钟无操作或 App 退到后台会自动锁定。</string>
+    <string name="vault_msg_locked">密码库已锁定。</string>
+    <string name="vault_msg_saved">已加密保存「%1$s」。</string>
+    <string name="vault_error_save_conflict">这一条刚在别处修改过，已刷新列表，请重新打开后修改。</string>
+    <string name="vault_msg_deleted">已删除「%1$s」。</string>
+    <string name="vault_error_delete_conflict">这一条刚在别处修改过，请刷新后再删除。</string>
+    <string name="vault_error_operation_failed_code">操作失败（%1$s），请稍后重试。</string>
+    <string name="vault_msg_code_sent">验证码已发送</string>
+
+    <!-- 25_ledger_vm -->
+    <string name="ledger_error_quick_too_long">一句话最多 %1$s 个字。</string>
+    <string name="ledger_conflict_reloading">已在其他设备修改，正在重新读取数据，请重新打开后操作。</string>
+    <string name="ledger_msg_quick_saved">已记下：%1$s</string>
+    <string name="ledger_msg_quick_saved_local">已记下：%1$s（本地模型识别）</string>
+    <string name="ledger_msg_saved">已保存。</string>
+    <string name="ledger_error_image_unusable">这张图片无法用于记账。</string>
+    <string name="ledger_error_offline">无法连接服务器。记账仅支持在线使用，请检查网络后重试。</string>
+    <string name="ledger_error_generic">读取或保存失败，请稍后重试。</string>
+
+    <!-- 26_forget_vm -->
+    <string name="forget_preview_too_large">图片超过 8 MB，请另存后查看。</string>
+    <string name="forget_preview_failed">预览失败，请另存后查看。</string>
+    <string name="forget_msg_recorded">已记下。</string>
+    <string name="forget_msg_deleted">已删除这条事项。</string>
+    <string name="forget_msg_attachment_deleted">已删除附件。</string>
+    <string name="forget_msg_attachment_saved">附件已保存。</string>
+    <string name="forget_msg_file_saved">已保存「%1$s」。</string>
+    <string name="forget_conflict_reloading">已在其他设备修改，正在重新读取。</string>
+    <string name="forget_error_too_many_attachments">每条最多 20 个附件</string>
+    <string name="forget_error_named_file">「%1$s」%2$s</string>
+    <string name="forget_error_cannot_save_file">这个文件无法保存。</string>
+    <string name="forget_error_offline">无法连接服务器。易忘事项需要在线使用，请检查网络后重试。</string>
+
+    <!-- 30_update_ui -->
+    <string name="update_dialog_title">发现新版本 %1$s</string>
+    <string name="update_dialog_current">当前版本 %1$s · 安装包 %2$s</string>
+    <string name="update_downloading">下载中…</string>
+    <string name="update_downloading_progress">下载中 %1$s%%</string>
+    <string name="update_downloaded_hint">已下载并校验通过。点「安装」后在系统界面确认；首次安装需允许 MemoIsle 安装未知应用。</string>
+    <string name="update_failed">更新失败，请稍后重试</string>
+    <string name="update_install">安装</string>
+    <string name="update_retry">重试</string>
+    <string name="update_update">更新</string>
+    <string name="update_ignore_version">忽略此版本</string>
+    <string name="update_later">稍后</string>
+
+    <!-- 31_components -->
+    <string name="kind_word">单词</string>
+    <string name="kind_resource">网页资料</string>
+    <string name="kind_image">图片</string>
+    <string name="kind_voice_idea">语音灵感</string>
+    <string name="kind_idea">灵感</string>
+
+    <!-- 32_quick_access -->
+    <string name="quick_access_title">快速访问</string>
+    <string name="quick_access_sorted">按打开次数排列</string>
+    <string name="quick_access_empty">还没有打开记录。点开网页资料的「打开原网页」后，常用的网页会按打开次数出现在这里。</string>
+    <string name="quick_access_remove">从快速访问移除「%1$s」</string>
+    <string name="quick_access_no_summary">暂无简介</string>
+    <plurals name="quick_access_open_count">
+        <item quantity="other">%1$s 次 · %2$s</item>
+    </plurals>
+
+    <!-- 33_pronunciation -->
+    <string name="pron_playing">播放中…</string>
+    <string name="pron_read_aloud">朗读例句 / 内容</string>
+    <string name="pron_phonetic">音标</string>
+    <string name="pron_phonetic_placeholder">输入单词后自动填入</string>
+    <string name="pron_phonetic_hint_ready">点右侧的美式 / 英式按钮播放读音</string>
+    <string name="pron_phonetic_hint_empty">先输入单词再播放读音</string>
+    <string name="pron_tap_to_play">点击播放读音</string>
+    <string name="pron_us">美</string>
+    <string name="pron_uk">英</string>
+    <string name="pron_play_us">播放美式读音</string>
+    <string name="pron_play_uk">播放英式读音</string>
+
+    <!-- 34_relay_ui -->
+    <string name="relay_ui_clipboard_failed_no_location">无法写入剪贴板，且未选择保存位置，内容可能已从服务器删除。</string>
+    <string name="relay_ui_no_clipboard_image">剪贴板里没有图片</string>
+    <string name="relay_ui_clipboard_failed_choose">无法写入剪贴板，请选择保存位置以免内容丢失。</string>
+    <string name="relay_ui_clipboard_failed_no_manager">无法写入剪贴板，也没有可用的文件管理器来保存文件。</string>
+    <string name="relay_ui_no_file_manager">没有可用的文件管理器来保存文件。</string>
+    <string name="relay_ui_clip_label_image">MemoIsle 图片</string>
+    <string name="relay_ui_title">传输</string>
+    <string name="relay_ui_intro">手机和网页互传文字、图片、小文件；服务器只转发不保存，10 分钟内有效。</string>
+    <string name="relay_ui_send_to_web">发给网页</string>
+    <string name="relay_ui_text_label">要发送的文字</string>
+    <string name="relay_ui_text_placeholder">链接、验证码或一段文字</string>
+    <string name="relay_ui_sending">发送中…</string>
+    <string name="relay_ui_send_text">发送文字</string>
+    <string name="relay_ui_paste_image">粘贴剪贴板图片</string>
+    <string name="relay_ui_choose_file">选择文件</string>
+    <string name="relay_ui_file_limit">单个文件不超过 20 MB。</string>
+    <string name="relay_ui_received">收到的内容</string>
+    <string name="relay_ui_keep_open">保持此页打开即可自动接收</string>
+    <string name="relay_ui_empty">暂时没有。在网页打开「传输」发送文字、图片或文件后，会自动出现在这里。</string>
+    <string name="relay_ui_copying">复制中…</string>
+    <string name="relay_ui_copy_image">复制图片</string>
+    <string name="relay_ui_saving">保存中…</string>
+    <string name="relay_ui_dismiss">忽略</string>
+    <string name="relay_item_meta">来自%1$s · %2$s · 剩余 %3$s</string>
+
+    <!-- 35_forget_ui -->
+    <string name="forget_title">易忘事项</string>
+    <string name="forget_intro">容易忘掉的文字、图片和文件，放在这里。需要联网。</string>
+    <string name="forget_search">搜索标题或正文</string>
+    <string name="forget_new">新建</string>
+    <string name="forget_empty">还没有事项。写下一句容易忘掉的话，或直接放上图片和文件。</string>
+    <string name="forget_new_item">新事项</string>
+    <string name="forget_title_counter">标题 %1$s/100</string>
+    <string name="forget_content_counter">正文 %1$s/10000</string>
+    <string name="forget_pin">置顶</string>
+    <string name="forget_record">记下</string>
+    <string name="forget_save_text">保存文字</string>
+    <string name="forget_delete_item">删除这条</string>
+    <string name="forget_choose_files">选择图片或文件</string>
+    <string name="forget_files_hint">可一次选多个。单个不超过 20 MB，每条最多 20 个。</string>
+    <string name="forget_delete_title">删除这条事项？</string>
+    <string name="forget_delete_text">文字和全部附件都会删掉，磁盘上的文件也会清掉。这不会进回收站。</string>
+    <string name="forget_confirm_delete">确认删除</string>
+    <string name="forget_delete_attachment_title">删除这个附件？</string>
+    <string name="forget_delete_attachment_text">「%1$s」会从这条事项和磁盘上一并删除。</string>
+    <string name="forget_save_as">另存</string>
+    <string name="forget_pinned_title">置顶 · %1$s</string>
+    <string name="forget_no_attachments">没有附件</string>
+    <plurals name="forget_attachment_count">
+        <item quantity="other">%1$s 个附件</item>
+    </plurals>
+    <string name="forget_attachment_meta">%1$s · %2$s</string>
+    <string name="forget_kind_file">文件</string>
+
+    <!-- 36_ledger_ui -->
+    <string name="ledger_title">记账</string>
+    <string name="ledger_online_only">仅在线使用</string>
+    <string name="ledger_recognize_image">识别图片</string>
+    <string name="ledger_add">记一笔</string>
+    <string name="ledger_quick_label">一句话记账</string>
+    <string name="ledger_quick_placeholder">如：今天早饭花了10元</string>
+    <string name="ledger_prev_month">上月</string>
+    <string name="ledger_this_month">本月</string>
+    <string name="ledger_next_month">下月</string>
+    <string name="ledger_reload">重新读取</string>
+    <string name="ledger_all_categories">全部分类</string>
+    <string name="ledger_empty_month">这个月还没有流水，点右下角 + 记一笔</string>
+    <string name="ledger_load_more">加载更多</string>
+    <string name="ledger_delete_title">永久删除这笔流水？</string>
+    <string name="ledger_balance">结余</string>
+    <string name="ledger_summary_unfiltered">不受下方筛选影响</string>
+    <string name="ledger_category_subtotals">分类小计</string>
+    <string name="ledger_collapse_subtotals">收起分类小计</string>
+    <string name="ledger_expand_subtotals">展开分类小计</string>
+    <string name="ledger_edit_entry">编辑流水</string>
+    <string name="ledger_amount">金额</string>
+    <string name="ledger_currency_label">币种，如 CNY / USD</string>
+    <string name="ledger_date_label">日期 YYYY-MM-DD</string>
+    <string name="ledger_category_label">分类，可自定义</string>
+    <string name="ledger_choose_category">选择常用分类</string>
+    <string name="ledger_account_label">账户（选填）</string>
+    <string name="ledger_note_label">备注（选填）</string>
+    <string name="ledger_filter_all">全部</string>
+    <string name="ledger_filter_category">分类：%1$s</string>
+    <plurals name="ledger_month_entry_count">
+        <item quantity="other">本月 · %1$s 笔</item>
+    </plurals>
+    <string name="ledger_avatar_fallback">记</string>
+    <string name="ledger_source_vision">视觉模型</string>
+    <string name="ledger_source_llm">本地模型</string>
+    <string name="ledger_source_rule">规则</string>
+    <string name="ledger_source_hint">识别来源：%1$s。请核对后再保存，尚未写入。</string>
+    <string name="ledger_error_amount_input">请输入大于 0、最多两位小数且不超过 10 亿元的金额。</string>
+
+    <!-- 37_auth_ui -->
+    <string name="auth_title_register_invite">凭邀请码注册</string>
+    <string name="auth_title_register">加入 MemoIsle</string>
+    <string name="auth_title_login">欢迎回到 MemoIsle</string>
+    <string name="auth_subtitle_register">从今天开始，收好每一个值得再次遇见的瞬间</string>
+    <string name="auth_subtitle_login">继续整理那些值得再次遇见的内容</string>
+    <string name="auth_checking">正在检查登录状态…</string>
+    <string name="auth_forgot_password">忘记密码？</string>
+    <string name="auth_entering">正在进入…</string>
+    <string name="auth_dev_login">本地开发登录</string>
+    <string name="auth_register_terms">注册即表示你同意我们只为同步服务保存必要信息</string>
+    <string name="auth_footer">↔  你的资料只属于你 · Web 与 Android 自动同步</string>
+    <string name="auth_nickname_label">昵称（可选）</string>
+    <string name="auth_nickname_placeholder">输入昵称（可选）</string>
+    <string name="auth_email_label">电子邮箱</string>
+    <string name="auth_email_placeholder">输入邮箱地址</string>
+    <string name="auth_email_invalid">请输入有效的邮箱地址</string>
+    <string name="auth_invite_label">邀请码</string>
+    <string name="auth_invite_placeholder">输入邀请码</string>
+    <string name="auth_code_label">邮箱验证码</string>
+    <string name="auth_code_placeholder">输入 6 位验证码</string>
+    <string name="auth_code_digits">请输入 6 位数字</string>
+    <string name="auth_send_code">发送验证码</string>
+    <string name="auth_password_label">密码</string>
+    <string name="auth_password_placeholder_register">设置 8 位以上密码</string>
+    <string name="auth_password_placeholder">输入密码</string>
+    <string name="auth_hide">隐藏</string>
+    <string name="auth_show">显示</string>
+    <string name="auth_password_hint">至少 8 位，建议包含字母和数字</string>
+    <string name="auth_confirm_password_label">确认密码</string>
+    <string name="auth_confirm_password_placeholder">再次输入密码</string>
+    <string name="auth_confirm_password_mismatch">两次输入的密码需保持一致</string>
+    <string name="auth_processing">正在处理…</string>
+    <string name="auth_create_account">创建账号</string>
+    <string name="auth_login">登录</string>
+    <string name="auth_have_account">已有账号？</string>
+    <string name="auth_no_account">还没有账号？</string>
+    <string name="auth_back_to_login">返回登录</string>
+    <string name="auth_register_now">立即注册</string>
+    <string name="auth_other_methods">或使用其他方式</string>
+
+    <!-- 38_home_ui -->
+    <string name="home_logout_busy">当前还有内容正在保存，请稍后再退出</string>
+    <string name="home_logout_sync_failed">同步未完成，当前仍保持登录，内容不会被清理</string>
+    <string name="home_clipboard_filled">已从剪贴板填入「%1$s」</string>
+    <string name="home_meanings_applied">已应用所选释义；手工填写内容已保留</string>
+    <string name="home_transcribing">正在使用设备端 SenseVoice 转写…</string>
+    <string name="home_downloading_model">首次使用正在下载设备端语音模型（约 160 MB）…</string>
+    <string name="home_no_text_recognized">未识别到可用文字，请手动补充。</string>
+    <string name="home_transcribe_done">转写完成，可直接编辑结果。</string>
+    <string name="home_quick_access_remove_failed">暂时无法移除，请检查网络后重试</string>
+    <string name="home_clip_label_link">MemoIsle 网页链接</string>
+    <string name="home_link_copied">网页链接已复制</string>
+    <string name="home_share_resource">分享网页资料</string>
+    <string name="home_share_image">分享图片收藏</string>
+    <string name="home_record_failed">录音没有保存成功，请重试。</string>
+    <string name="home_resume_unsupported">当前设备暂不支持继续录音，请结束当前录音。</string>
+    <string name="home_pause_unsupported">当前设备暂不支持暂停录音，请直接结束录音。</string>
+    <string name="home_title_inbox">收件箱</string>
+    <string name="home_title_trash">回收站</string>
+    <string name="home_title_review">今日回顾</string>
+    <string name="home_title_library">资料库</string>
+    <string name="home_back_home">返回首页</string>
+    <string name="home_inbox_no_match">收件箱里没有匹配内容</string>
+    <string name="home_inbox_empty">收件箱是空的</string>
+    <string name="home_inbox_empty_hint">快速记下的灵感会先放在这里，整理完成或归档后移出。</string>
+    <string name="home_trash_no_match">回收站里没有匹配内容</string>
+    <string name="home_trash_empty">回收站是空的</string>
+    <string name="home_trash_empty_hint">删除的内容会在这里保留 30 天，期间可以恢复。</string>
+    <string name="home_section_search">搜索结果</string>
+    <string name="home_section_all">全部内容</string>
+    <string name="home_section_recent_ideas">最近灵感</string>
+    <string name="home_logout_title">还有内容尚未同步</string>
+    <string name="home_syncing">同步中…</string>
+    <string name="home_sync_and_logout">同步并退出</string>
+    <string name="home_keep_editing">继续编辑</string>
+    <string name="home_duplicate_word_text">“%1$s”已经在资料库中。可以把新例句合并进去，或仍然另外保存。</string>
+    <string name="home_merge_examples">合并例句</string>
+    <string name="home_view">查看</string>
+    <string name="home_save_anyway">仍然保存</string>
+    <string name="home_duplicate_url_text">“%1$s”已经在资料库中。可以查看已有资料，或仍然另外保存。</string>
+    <string name="home_view_existing">查看已有</string>
+    <string name="home_discard_title">放弃这段记录？</string>
+    <string name="home_discard_text">录音和当前文字不会保存，确定要放弃吗？</string>
+    <string name="home_discard">放弃记录</string>
+    <string name="home_move_to_trash">移入回收站</string>
+    <string name="home_move_to_trash_text">「%1$s」将移入回收站，30 天后永久删除。继续吗？</string>
+    <string name="home_purge">永久删除</string>
+    <string name="home_purge_text">将永久删除「%1$s」，此操作不可恢复。确定继续吗？</string>
+    <string name="home_relay_cd">传输：与网页互传文字和文件</string>
+    <string name="home_sync">同步</string>
+    <string name="home_more_actions">更多操作</string>
+    <string name="home_checking">检查中…</string>
+    <string name="home_check_update">检查更新</string>
+    <string name="home_exporting">导出中…</string>
+    <string name="home_export">导出数据</string>
+    <string name="home_logout">退出登录</string>
+    <string name="home_search_placeholder">搜索标题、正文、网址、释义或标签</string>
+    <string name="home_clear_search">清除搜索</string>
+    <string name="home_nav_home">首页</string>
+    <string name="home_nav_review">回顾</string>
+    <string name="home_nav_forget">易忘</string>
+    <string name="home_nav_vault">密码库</string>
+    <string name="word_field_meaning">中文释义</string>
+    <string name="word_field_example">例句</string>
+    <string name="home_auto_filled">已自动填入%1$s</string>
+    <string name="home_model_download_failed">设备端模型下载失败，可手动填写文字。</string>
+    <string name="home_transcribe_failed">设备端转写失败，可手动填写文字。</string>
+    <string name="home_undo">撤销</string>
+    <string name="home_quick_access_removed">已从快速访问移除「%1$s」</string>
+    <plurals name="home_inbox_pending">
+        <item quantity="other">%1$s 条待整理</item>
+    </plurals>
+    <plurals name="home_trash_subtitle">
+        <item quantity="other">%1$s 条 · 保留 30 天后永久删除</item>
+    </plurals>
+    <plurals name="home_count_items">
+        <item quantity="other">%1$s 条内容</item>
+    </plurals>
+    <plurals name="home_count_images">
+        <item quantity="other">%1$s 张图片</item>
+    </plurals>
+    <plurals name="home_count_ideas">
+        <item quantity="other">%1$s 条灵感</item>
+    </plurals>
+    <plurals name="home_count_resources">
+        <item quantity="other">%1$s 条资料</item>
+    </plurals>
+    <plurals name="home_count_words">
+        <item quantity="other">%1$s 个单词</item>
+    </plurals>
+    <plurals name="home_logout_unsynced">
+        <item quantity="other">当前有 %1$s 条内容等待同步或处理。先完成同步再退出，避免本机录音和编辑内容被清理。</item>
+    </plurals>
+    <plurals name="home_inbox_cd">
+        <item quantity="other">收件箱，%1$s 条待整理</item>
+    </plurals>
+
+    <!-- 39_home_composers -->
+    <string name="home_action_write_idea">写灵感</string>
+    <string name="home_action_voice">语音记录</string>
+    <string name="home_action_word">记单词</string>
+    <string name="home_action_browse">看资料</string>
+    <string name="home_image_title">收藏图片</string>
+    <string name="home_image_hint">上传原图，标题取自文件名，可在 Web 端补充备注。</string>
+    <string name="home_uploading">上传中…</string>
+    <string name="home_choose">选择</string>
+    <string name="home_looking_up">正在查词…</string>
+    <string name="home_lookup_again">重新查词</string>
+    <string name="home_clear_preview">清除预览</string>
+    <string name="home_dictionary_preview">词典预览</string>
+    <string name="home_lookup_by_lemma">按词元 %1$s 查询</string>
+    <string name="home_choose_meanings">选择要保存的中文释义</string>
+    <string name="home_collapse">收起</string>
+    <string name="home_no_meaning">词典没有返回中文释义，请手动填写。</string>
+    <string name="home_example_prefix">例句：%1$s</string>
+    <string name="home_use_selected">使用所选释义</string>
+    <string name="home_keep_manual">保留手动填写</string>
+    <string name="home_word_title">收藏英语单词</string>
+    <string name="home_word_filling">正在填入中文释义、音标和例句…</string>
+    <string name="home_word_hint">输入后自动填入释义、音标和例句</string>
+    <string name="home_clipboard">剪贴板</string>
+    <string name="home_word_label">单词或短语</string>
+    <string name="home_word_placeholder">例如 serendipity</string>
+    <string name="home_meaning_label">中文释义（自动填入）</string>
+    <string name="home_example_label">例句（自动填入）</string>
+    <string name="home_save_word">收藏单词</string>
+    <string name="home_resource_hint">手机上只读浏览；收藏网页可在浏览器里分享到 MemoIsle，整理请到 Web 端。</string>
+    <string name="home_idea_placeholder">记下此刻的想法，稍后再整理……</string>
+    <string name="home_idea_inbox_hint">保存后先进入收件箱</string>
+    <string name="home_save_idea">保存灵感</string>
+    <string name="home_action_uploading">上传中</string>
+    <string name="home_filter_resources">资料</string>
+    <string name="home_filter_cat_media">视频音频</string>
+    <string name="home_filter_cat_tool">工具服务</string>
+    <string name="home_filter_cat_book_paper">书籍论文</string>
+    <string name="home_filter_cat_product">商品好物</string>
+
+    <!-- 40_rows -->
+    <string name="row_waiting_meaning">等待补充释义</string>
+    <string name="row_star">星标</string>
+    <string name="row_familiarity">熟悉度 %1$s/5</string>
+    <string name="row_image_pending_upload">图片待上传</string>
+    <string name="row_archive">归档</string>
+    <string name="row_sorted">整理完成</string>
+    <string name="row_restore">恢复</string>
+    <string name="row_sync_pending">待同步</string>
+    <string name="row_sync_failed">同步失败</string>
+    <string name="row_sync_conflict">有冲突</string>
+    <string name="row_conflict_title">发现编辑冲突</string>
+    <string name="row_conflict_text">其他设备已更新「%1$s」。你的本地修改已经保留，请选择要使用的版本。</string>
+    <string name="row_conflict_use_server">采用服务端版本</string>
+    <string name="row_conflict_keep_mine">保留我的修改</string>
+    <string name="row_conflict_later">稍后处理</string>
+    <string name="row_empty_no_match">没有找到匹配内容</string>
+    <string name="row_empty_library">资料库还是空的</string>
+    <string name="row_empty_resource">还没有收藏网页资料</string>
+    <string name="row_empty_word">从第一个英语单词开始</string>
+    <string name="row_empty_image">还没有收藏图片</string>
+    <string name="row_empty_idea">第一条灵感正在等你</string>
+    <string name="row_empty_no_match_hint">换个关键词，或清除搜索后浏览全部收藏。</string>
+    <string name="row_empty_library_hint">从灵感、英语单词、图片或网页资料开始收藏第一条内容。</string>
+    <string name="row_empty_resource_hint">可在 Web 端收藏，或从手机浏览器分享链接到 MemoIsle。</string>
+    <string name="row_empty_word_hint">保存词形、释义和例句，稍后按计划复习。</string>
+    <string name="row_empty_image_hint">从相册选择图片，原图与缩略图会同步到 Web。</string>
+    <string name="row_empty_idea_hint">保存后会进入本地资料库，并在联网时同步到 Web。</string>
+    <string name="row_voice_seconds">语音 %1$s 秒</string>
+    <string name="row_voice">语音</string>
+    <plurals name="row_trash_days_left">
+        <item quantity="other">%1$s · %2$s 天后永久删除</item>
+    </plurals>
+
+    <!-- 41_review -->
+    <string name="review_nothing_today">今天没有需要回顾的内容</string>
+    <string name="review_done_today">今天已完成</string>
+    <string name="review_start">开始回顾</string>
+    <string name="review_plan_title">复习计划</string>
+    <string name="review_plan_text">每日队列会混合单词、待读资料和待整理灵感。单词反馈会使用下面的间隔。</string>
+    <string name="review_daily_limit_label">每日队列上限（1–100）</string>
+    <string name="review_intervals_label">间隔天数（6 个，用逗号分隔）</string>
+    <string name="review_intervals_hint">忘记后、模糊后/熟悉度 1、熟悉度 2–5</string>
+    <string name="review_filter_mixed">混合 %1$s</string>
+    <string name="review_filter_words">单词 %1$s</string>
+    <string name="review_filter_to_read">待读 %1$s</string>
+    <string name="review_filter_to_sort">待整理 %1$s</string>
+    <string name="review_adjust_plan">调整计划</string>
+    <string name="review_all_done">今天的回顾已经完成</string>
+    <string name="review_all_done_hint">到期单词、待读资料和待整理灵感会显示在这里。</string>
+    <string name="review_kind_word">单词复习</string>
+    <string name="review_kind_resource">待阅读</string>
+    <string name="review_kind_idea">待整理灵感</string>
+    <string name="review_last_next">上次 %1$s · 下次 %2$s</string>
+    <string name="review_never">尚未复习</string>
+    <string name="review_unscheduled">待安排</string>
+    <string name="review_show_answer">显示答案</string>
+    <string name="review_forgot">忘记</string>
+    <string name="review_fuzzy">模糊</string>
+    <string name="review_remembered">记得</string>
+    <string name="review_open_source">打开原网页</string>
+    <string name="review_unstar">取消星标</string>
+    <string name="review_skip">跳过这一条</string>
+    <plurals name="review_stat_words">
+        <item quantity="other">个单词</item>
+    </plurals>
+    <plurals name="review_stat_to_read">
+        <item quantity="other">篇待读</item>
+    </plurals>
+    <plurals name="review_stat_to_sort">
+        <item quantity="other">条待整理</item>
+    </plurals>
+    <string name="review_error_daily_limit">每日上限需要是 1–100 的整数</string>
+    <string name="review_error_intervals">间隔需要是 6 个 1–365 天的整数</string>
+    <plurals name="review_plan_remaining">
+        <item quantity="other">今日计划 %1$s 条，还剩 %2$s 条</item>
+    </plurals>
+    <plurals name="review_remaining">
+        <item quantity="other">还剩 %1$s 条</item>
+    </plurals>
+    <plurals name="review_total">
+        <item quantity="other">共 %1$s 项，按计划混合排列</item>
+    </plurals>
+
+    <!-- 42_dialogs -->
+    <string name="dialog_copy_link">复制链接</string>
+    <string name="dialog_share">分享</string>
+    <string name="dialog_link_health">巡检：%1$s</string>
+    <string name="dialog_purpose">用途</string>
+    <string name="dialog_personal_note">个人备注</string>
+    <string name="dialog_saved_at">收藏于 %1$s</string>
+    <string name="dialog_last_checked">最近检查 %1$s</string>
+    <string name="dialog_collapse_original">收起原图</string>
+    <string name="dialog_view_original">查看原图</string>
+    <string name="dialog_note">备注</string>
+    <string name="dialog_image_not_uploaded">图片尚未上传完成，联网后会自动重试</string>
+    <string name="dialog_ocr_title">图片文字识别</string>
+    <string name="dialog_ocr_no_text">没有识别到文字</string>
+    <string name="dialog_auto_tags">自动标签</string>
+    <string name="dialog_ocr_source">来源：%1$s</string>
+    <string name="dialog_updated_at_value">更新于 %1$s</string>
+    <string name="dialog_ocr_failed">图片文字识别失败。</string>
+    <string name="dialog_ocr_disabled">图片文字识别未启用。</string>
+    <string name="dialog_ocr_queued">已排队，等待识别图片文字。</string>
+    <string name="dialog_ocr_processing">正在识别图片文字…</string>
+    <string name="dialog_ocr_not_started">尚未开始识别图片文字。</string>
+    <string name="dialog_updated_at">更新于 %1$s</string>
+    <string name="dialog_save_changes">保存修改</string>
+    <string name="dialog_download_recording">下载录音</string>
+    <string name="dialog_meeting_transcript">会议转写（我 / 对方）</string>
+    <string name="dialog_title">标题</string>
+    <string name="dialog_recall_first">先回想释义和例句</string>
+    <string name="dialog_meaning">释义</string>
+    <string name="dialog_example_context">例句或上下文</string>
+    <string name="dialog_how_well">这次记得怎么样？</string>
+    <string name="dialog_content">内容</string>
+    <string name="home_action_write_idea_title">写灵感</string>
+    <string name="dialog_idea_label">此刻想到什么？</string>
+    <string name="dialog_save_resource">保存资料</string>
+    <string name="dialog_shared_page_title">保存分享的网页</string>
+    <string name="dialog_shared_page_hint">确认浏览器分享的链接；保存后资料在手机上只读，完整整理请使用 Web。</string>
+    <string name="dialog_link_label">网页链接</string>
+    <string name="dialog_title_optional">标题（可选）</string>
+    <string name="dialog_note_optional">个人备注（可选）</string>
+    <string name="dialog_fill_from_clipboard">从剪贴板填入</string>
+    <string name="dialog_word_hint">输入单词后自动填入中文释义、音标和例句</string>
+    <string name="home_action_voice_title">语音记录</string>
+    <string name="dialog_paused">已暂停</string>
+    <string name="dialog_recording">正在录音</string>
+    <string name="dialog_recording_ready">录音已就绪</string>
+    <string name="dialog_waiting_start">等待开始</string>
+    <string name="dialog_input_level">输入音量</string>
+    <string name="dialog_mic_permission">需要麦克风权限才能录音，你仍可使用文字记录。</string>
+    <string name="dialog_transcript_label">转写结果（可编辑，可选）</string>
+    <string name="dialog_transcript_placeholder">录音停止后会自动填入识别结果</string>
+    <string name="dialog_transcribing">正在转写…</string>
+    <string name="dialog_recording_privacy">原始录音只保存到你的私人资料库；没有模型时仍可手动填写文字。</string>
+    <string name="dialog_resume">继续</string>
+    <string name="dialog_pause">暂停</string>
+    <string name="dialog_stop_recording">结束录音</string>
+    <string name="dialog_save_voice">保存语音灵感</string>
+    <string name="dialog_start_recording">开始录音</string>
+    <string name="dialog_record_again">重新录制</string>
+    <string name="word_review_meta">熟悉度 %1$s/5 · 已复习 %2$s 次 · 上次 %3$s · 下次 %4$s</string>
+    <string name="dialog_play_seconds">播放 · %1$s 秒</string>
+    <string name="dialog_play_recording">播放录音</string>
+    <string name="dialog_seconds">%1$s秒</string>
+
+    <!-- 43_vault_ui -->
+    <string name="vault_generate">生成</string>
+    <string name="vault_add_codes">添加恢复码</string>
+    <string name="vault_new_entry">新建条目</string>
+    <string name="vault_copy_username">复制用户名</string>
+    <string name="vault_money_invalid">只接受最多 9 位整数、2 位小数的非负数</string>
+    <string name="vault_due_today">今天到期</string>
+    <string name="vault_field_host">主机</string>
+    <string name="vault_ssh_private_key">SSH 私钥</string>
+    <string name="vault_code">验证码</string>
+    <string name="vault_step_up_title">验证后才能打开密码库</string>
+    <string name="vault_verifying">验证中…</string>
+    <string name="vault_verify">验证</string>
+    <string name="vault_currency_invalid">须为 3 位字母，例如 USD</string>
+    <string name="vault_hide_master">隐藏主密码</string>
+    <string name="vault_lock">锁定</string>
+    <string name="vault_email_code_current">邮箱验证码 · 当前</string>
+    <string name="vault_choose_key">选择密钥</string>
+    <string name="vault_not_set_up">还没有密码库</string>
+    <string name="vault_no_saved_keys">还没有保存的密钥，请先新建一个「密钥」条目。</string>
+    <string name="vault_authenticator">身份验证器</string>
+    <string name="vault_authenticator_current">身份验证器 · 当前</string>
+    <string name="vault_balance">账户余额</string>
+    <string name="vault_field_account">账号</string>
+    <string name="vault_choose_key_ref">请选择要引用的密钥</string>
+    <string name="vault_ip_blocked_hint">请稍后重试。手机端平时不限制 IP，这条提示多半是服务端暂时无法识别地址。</string>
+    <string name="vault_check_network">请检查网络后重试。</string>
+    <string name="vault_date_hint_expiry_key">请按 年-月-日 填写，例如 2027-01-31</string>
+    <string name="vault_date_hint_expiry">请按 年-月-日 填写，例如 2026-11-30</string>
+    <string name="vault_date_hint_start">请按 年-月-日 填写，例如 2026-01-15</string>
+    <string name="vault_setup_on_web">请先在 MemoIsle 网页端设置主密码。之后在手机上输入同一个主密码即可解锁使用。</string>
+    <string name="vault_subscription_account">订阅账号</string>
+    <string name="vault_started_on">订阅开始日期</string>
+    <string name="vault_billing_cycle">计费周期</string>
+    <string name="vault_unlocking">解锁中…</string>
+    <string name="vault_unlock">解锁</string>
+    <string name="vault_field_url">网址</string>
+    <string name="vault_field_port">端口</string>
+    <string name="vault_subtitle">端到端加密 · 服务器只保存密文</string>
+    <string name="vault_key_source">私钥来源</string>
+    <string name="vault_key_passphrase">私钥口令（可选）</string>
+    <string name="vault_private_key">私钥</string>
+    <string name="vault_enter_directly">直接填写</string>
+    <string name="vault_login_user">登录用户</string>
+    <string name="vault_login_password">登录密码</string>
+    <string name="vault_start_blank">留空表示不记录开始日期</string>
+    <string name="vault_expiry_blank_no_reminder">留空表示不提醒到期</string>
+    <string name="vault_expiry_blank_never">留空表示不会过期</string>
+    <string name="vault_currency_blank">留空则保存为 USD</string>
+    <string name="vault_username_or_email">用户名或邮箱</string>
+    <string name="vault_field_username">用户名</string>
+    <string name="vault_empty_hint">点右下角的 + 保存网站账号密码、API Key、服务器或两步验证的恢复码。</string>
+    <string name="vault_no_match">没有匹配的条目。</string>
+    <string name="vault_price">每期费用</string>
+    <string name="vault_loading">正在读取密码库……</string>
+    <string name="vault_unused_code">未用的恢复码</string>
+    <string name="vault_no_host">未填写主机</string>
+    <string name="vault_provider">服务商</string>
+    <string name="vault_discard_text">有未保存的修改，确定放弃吗？</string>
+    <string name="vault_load_failed">暂时无法读取密码库</string>
+    <string name="vault_show_master">显示主密码</string>
+    <string name="vault_discard_changes">放弃修改</string>
+    <string name="vault_reminders_done">提醒都处理完了。</string>
+    <string name="vault_reminders">提醒</string>
+    <string name="vault_search_placeholder">按名称、用户名、网址或备注搜索</string>
+    <string name="vault_paste_codes_placeholder">把网站给的恢复码整段粘贴进来，按空格、换行或逗号自动拆分</string>
+    <string name="vault_codes_used_up">恢复码已用完</string>
+    <string name="vault_manage_on_web">忘记主密码、更改主密码和加密备份请在网页端操作。</string>
+    <string name="vault_ip_blocked_title">当前网络不能打开密码库</string>
+    <string name="vault_ref_deleted">引用的密钥已被删除，请重新选择</string>
+    <string name="vault_use_saved_key">引用已保存的密钥</string>
+    <string name="vault_currency">币种</string>
+    <string name="vault_code_used">已用</string>
+    <string name="vault_linked_account">对应账号</string>
+    <string name="vault_secret_content">密钥内容</string>
+    <string name="vault_password_reminders">密码提醒</string>
+    <string name="vault_empty">密码库还是空的</string>
+    <string name="vault_locked">密码库已锁定</string>
+    <string name="vault_weak_password_hint">密码偏弱：至少 12 位并混合大小写、数字和符号更安全，也可以点「生成」。</string>
+    <string name="vault_rotate">定期更换</string>
+    <string name="vault_plan_placeholder">如 Pro、Max、Plus、SuperGrok</string>
+    <string name="vault_price_placeholder">如 20 或 20.00</string>
+    <string name="vault_balance_placeholder">如 12.50</string>
+    <string name="vault_plan">套餐</string>
+    <string name="vault_copy_account">复制账号</string>
+    <string name="vault_copy_code">复制恢复码</string>
+    <string name="vault_name">名称</string>
+    <string name="vault_code_available">可用</string>
+    <string name="vault_ref_auto_update">原密钥更新后这里会自动使用新内容</string>
+    <string name="vault_totp_code">动态码</string>
+    <string name="vault_encrypting">加密保存中…</string>
+    <string name="vault_expiry_optional">到期日（可选）</string>
+    <string name="vault_expiry_renewal">到期 / 续费日期</string>
+    <string name="vault_delete_code">删除这个恢复码</string>
+    <string name="vault_example_2027">例如 2027-01-31</string>
+    <string name="vault_example_2026_11">例如 2026-11-30</string>
+    <string name="vault_example_2026_01">例如 2026-01-15</string>
+    <string name="vault_balance_value">余额 %1$s</string>
+    <string name="vault_master_password">主密码</string>
+    <string name="vault_skip_checks">不检查这条的密码强度和是否与其他条目重复</string>
+    <string name="vault_expires_on">%1$s 到期</string>
+    <string name="vault_no_username">未填写用户名</string>
+    <plurals name="vault_secret_chars">
+        <item quantity="other">%1$s 个字符</item>
+    </plurals>
+    <string name="vault_no_secret">未填写密钥</string>
+    <string name="vault_codes_remaining">剩余 %1$s / %2$s 个可用</string>
+    <string name="vault_private_key_ref_missing">私钥（引用的密钥已删除）</string>
+    <string name="vault_private_key_ref">私钥（引用「%1$s」）</string>
+    <string name="vault_copied">已复制%1$s，%2$s 秒后清空剪贴板。</string>
+    <plurals name="vault_step_up_hint">
+        <item quantity="other">这台手机每 %1$s 小时需要验证一次，更换网络不用重新验证。验证码会发到账号邮箱。</item>
+    </plurals>
+    <plurals name="vault_unlock_hint_count">
+        <item quantity="other">输入主密码解锁，共 %1$s 条。解锁在手机上完成，主密码不会发送到服务器。</item>
+    </plurals>
+    <string name="vault_unlock_hint">输入主密码解锁。解锁在手机上完成，主密码不会发送到服务器。</string>
+    <plurals name="vault_broken_count">
+        <item quantity="other">有 %1$s 条无法解密，可能已损坏或被篡改，已跳过显示。</item>
+    </plurals>
+    <string name="vault_hint_secret">API Key、SSH 私钥、令牌</string>
+    <string name="vault_hint_server">主机、端口和登录方式</string>
+    <string name="vault_hint_recovery">两步验证的备用恢复码</string>
+    <string name="vault_hint_subscription">Claude、ChatGPT、Grok 订阅</string>
+    <string name="vault_hint_login">网站或应用的用户名和密码</string>
+    <plurals name="vault_reminders_entry_count">
+        <item quantity="other">%1$s 条需要处理</item>
+    </plurals>
+    <plurals name="vault_view_all_reminders">
+        <item quantity="other">查看全部 %1$s 项提醒</item>
+    </plurals>
+    <string name="vault_filter_count">%1$s %2$s</string>
+    <string name="vault_filter_needs_action">需处理</string>
+    <string name="vault_rotate_none">不提醒</string>
+    <plurals name="vault_rotate_every">
+        <item quantity="other">每 %1$s 天</item>
+    </plurals>
+    <string name="vault_changed_on_save">保存后记为今天</string>
+    <string name="vault_changed_never">还没有填写</string>
+    <string name="vault_changed_today">%1$s（今天）</string>
+    <plurals name="vault_changed_days_ago">
+        <item quantity="other">%1$s（%2$s 天前）</item>
+    </plurals>
+    <string name="vault_new_kind">新建%1$s</string>
+    <string name="vault_last_changed">%1$s上次更换：%2$s</string>
+    <string name="vault_login_credentials">登录凭据</string>
+    <plurals name="vault_expired_days">
+        <item quantity="other">已过期 %1$s 天</item>
+    </plurals>
+    <plurals name="vault_expires_in_days">
+        <item quantity="other">还有 %1$s 天到期，到期前 14 天开始提醒</item>
+    </plurals>
+    <string name="vault_delete_confirm">永久删除「%1$s」？删除后无法恢复。</string>
+    <plurals name="vault_delete_referenced">
+        <item quantity="other">有 %1$s 台云服务器引用了这把密钥（%2$s），删除后它们将无法取到私钥。</item>
+    </plurals>
+    <string name="vault_copy_ssh_command">ssh 命令</string>
+</resources>

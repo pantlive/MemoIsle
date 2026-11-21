@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.core.content.FileProvider
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -49,10 +48,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.memoisle.app.R
 import com.memoisle.app.RelayViewModel
 import com.memoisle.app.data.RelayItem
 import com.memoisle.app.data.formatRelayBytes
@@ -84,6 +87,7 @@ private class CreateRelayDocument : ActivityResultContract<Pair<String, String>,
 fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
     val state = viewModel.uiState
     val context = LocalContext.current
+    val resources = LocalResources.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     var text by rememberSaveable { mutableStateOf("") }
@@ -101,7 +105,7 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
         pendingLocalFile = null
         if (uri == null) {
             if (local != null) {
-                viewModel.showError("无法写入剪贴板，且未选择保存位置，内容可能已从服务器删除。")
+                viewModel.showError(UiText.res(R.string.relay_ui_clipboard_failed_no_location))
             }
             return@rememberLauncherForActivityResult
         }
@@ -115,14 +119,14 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
     fun pasteClipboardImage() {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         if (clipboard == null) {
-            viewModel.showError("剪贴板里没有图片")
+            viewModel.showError(UiText.res(R.string.relay_ui_no_clipboard_image))
             return
         }
         try {
             val clip = clipboard.primaryClip
             val description = clip?.description
             if (clip == null || description == null) {
-                viewModel.showError("剪贴板里没有图片")
+                viewModel.showError(UiText.res(R.string.relay_ui_no_clipboard_image))
                 return
             }
             for (index in 0 until clip.itemCount) {
@@ -141,9 +145,9 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                 )
                 return
             }
-            viewModel.showError("剪贴板里没有图片")
+            viewModel.showError(UiText.res(R.string.relay_ui_no_clipboard_image))
         } catch (_: SecurityException) {
-            viewModel.showError("没有读取或写入这个文件的权限。")
+            viewModel.showError(UiText.res(R.string.relay_error_permission))
         }
     }
 
@@ -156,13 +160,13 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                     file,
                 )
                 val clipboard = context.getSystemService(ClipboardManager::class.java)
-                    ?: error("无法访问剪贴板")
-                clipboard.setPrimaryClip(ClipData.newUri(context.contentResolver, "MemoIsle 图片", uri))
+                    ?: error("Clipboard is unavailable")
+                clipboard.setPrimaryClip(ClipData.newUri(context.contentResolver, resources.getString(R.string.relay_ui_clip_label_image), uri))
             }.isSuccess
             if (!copied) {
                 pendingLocalFile = file
                 pendingSave = item
-                viewModel.showError("无法写入剪贴板，请选择保存位置以免内容丢失。")
+                viewModel.showError(UiText.res(R.string.relay_ui_clipboard_failed_choose))
                 runCatching {
                     saveLauncher.launch(
                         (item.filename ?: file.name) to (item.mimeType ?: "image/*"),
@@ -170,7 +174,7 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                 }.onFailure {
                     pendingLocalFile = null
                     pendingSave = null
-                    viewModel.showError("无法写入剪贴板，也没有可用的文件管理器来保存文件。")
+                    viewModel.showError(UiText.res(R.string.relay_ui_clipboard_failed_no_manager))
                 }
             }
         }
@@ -193,7 +197,7 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
     }
     LaunchedEffect(state.message, state.error) {
         val message = state.error ?: state.message ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(message)
+        snackbarHostState.showSnackbar(message.resolve(resources))
         viewModel.clearMessage()
     }
     // 有待接收内容时每秒刷新倒计时。
@@ -214,8 +218,8 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("传输") }, navigationIcon = {
-                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+            TopAppBar(title = { Text(stringResource(R.string.relay_ui_title)) }, navigationIcon = {
+                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.common_back)) }
             })
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -226,7 +230,7 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
         ) {
             item {
                 Text(
-                    "手机和网页互传文字、图片、小文件；服务器只转发不保存，10 分钟内有效。",
+                    stringResource(R.string.relay_ui_intro),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted,
                 )
@@ -234,12 +238,12 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("发给网页", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.relay_ui_send_to_web), style = MaterialTheme.typography.titleMedium)
                         OutlinedTextField(
                             value = text,
                             onValueChange = { text = it },
-                            label = { Text("要发送的文字") },
-                            placeholder = { Text("链接、验证码或一段文字") },
+                            label = { Text(stringResource(R.string.relay_ui_text_label)) },
+                            placeholder = { Text(stringResource(R.string.relay_ui_text_placeholder)) },
                             enabled = !state.sending,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
                             maxLines = 8,
@@ -251,24 +255,24 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                             Button(
                                 enabled = !busy && text.isNotBlank(),
                                 onClick = { viewModel.sendText(text) { text = "" } },
-                            ) { Text(if (state.sending) "发送中…" else "发送文字") }
+                            ) { Text(if (state.sending) stringResource(R.string.relay_ui_sending) else stringResource(R.string.relay_ui_send_text)) }
                             Button(
                                 enabled = !busy,
                                 onClick = { pasteClipboardImage() },
-                            ) { Text("粘贴剪贴板图片") }
+                            ) { Text(stringResource(R.string.relay_ui_paste_image)) }
                             OutlinedButton(
                                 enabled = !busy,
                                 onClick = { filePicker.launch(arrayOf("*/*")) },
-                            ) { Text("选择文件") }
+                            ) { Text(stringResource(R.string.relay_ui_choose_file)) }
                         }
-                        Text("单个文件不超过 20 MB。", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                        Text(stringResource(R.string.relay_ui_file_limit), style = MaterialTheme.typography.bodySmall, color = TextMuted)
                     }
                 }
             }
             item {
-                Text("收到的内容", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.relay_ui_received), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    state.pollError ?: "保持此页打开即可自动接收",
+                    state.pollError?.asString() ?: stringResource(R.string.relay_ui_keep_open),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (state.pollError != null) MaterialTheme.colorScheme.error else TextMuted,
                 )
@@ -276,7 +280,7 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
             if (visible.isEmpty()) {
                 item {
                     Text(
-                        "暂时没有。在网页打开「传输」发送文字、图片或文件后，会自动出现在这里。",
+                        stringResource(R.string.relay_ui_empty),
                         modifier = Modifier.padding(vertical = 24.dp),
                         color = TextMuted,
                     )
@@ -288,8 +292,12 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "来自${relayDeviceLabel(item.source)} · ${formatRelayBytes(item.size)} · " +
-                                "剩余 ${formatRelayRemaining(remaining)}",
+                            stringResource(
+                                R.string.relay_item_meta,
+                                relayDeviceLabel(item.source).asString(),
+                                formatRelayBytes(item.size),
+                                formatRelayRemaining(remaining).asString(),
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = TextMuted,
                         )
@@ -304,11 +312,11 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                         ) {
                             if (item.isText) {
                                 Button(enabled = !busy, onClick = { viewModel.copyText(item, ::copy) }) {
-                                    Text("复制")
+                                    Text(stringResource(R.string.common_copy))
                                 }
                             } else if (item.isImage) {
                                 Button(enabled = !busy, onClick = { copyReceivedImage(item) }) {
-                                    Text(if (itemBusy) "复制中…" else "复制图片")
+                                    Text(if (itemBusy) stringResource(R.string.relay_ui_copying) else stringResource(R.string.relay_ui_copy_image))
                                 }
                                 OutlinedButton(enabled = !busy, onClick = {
                                     pendingLocalFile = null
@@ -320,9 +328,9 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                                         )
                                     }.onFailure {
                                         pendingSave = null
-                                        viewModel.showError("没有可用的文件管理器来保存文件。")
+                                        viewModel.showError(UiText.res(R.string.relay_ui_no_file_manager))
                                     }
-                                }) { Text(if (itemBusy) "保存中…" else "保存") }
+                                }) { Text(if (itemBusy) stringResource(R.string.relay_ui_saving) else stringResource(R.string.common_save)) }
                             } else {
                                 Button(enabled = !busy, onClick = {
                                     pendingLocalFile = null
@@ -334,11 +342,11 @@ fun RelayScreen(viewModel: RelayViewModel, onClose: () -> Unit) {
                                         )
                                     }.onFailure {
                                         pendingSave = null
-                                        viewModel.showError("没有可用的文件管理器来保存文件。")
+                                        viewModel.showError(UiText.res(R.string.relay_ui_no_file_manager))
                                     }
-                                }) { Text(if (itemBusy) "保存中…" else "保存") }
+                                }) { Text(if (itemBusy) stringResource(R.string.relay_ui_saving) else stringResource(R.string.common_save)) }
                             }
-                            TextButton(enabled = !busy, onClick = { viewModel.discard(item) }) { Text("忽略") }
+                            TextButton(enabled = !busy, onClick = { viewModel.discard(item) }) { Text(stringResource(R.string.relay_ui_dismiss)) }
                         }
                     }
                 }

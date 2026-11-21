@@ -8,7 +8,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.memoisle.app.data.VaultCrypto
-import com.memoisle.app.data.VaultDecryptException
 import com.memoisle.app.data.VaultEntry
 import com.memoisle.app.data.VaultItemData
 import com.memoisle.app.data.VaultKeyMaterial
@@ -18,6 +17,8 @@ import com.memoisle.app.data.vaultGate
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
 import com.memoisle.app.network.VaultItemRecord
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
 import java.util.UUID
 import javax.crypto.SecretKey
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +35,8 @@ data class VaultUiState(
     val entries: List<VaultEntry> = emptyList(),
     val brokenCount: Int = 0,
     val busy: Boolean = false,
-    val error: String? = null,
-    val message: String? = null,
+    val error: UiText? = null,
+    val message: UiText? = null,
     val totpEnabled: Boolean = false,
     val accessHours: Int = 24,
 )
@@ -98,7 +99,10 @@ class VaultViewModel(
         viewModelScope.launch {
             try {
                 val message = withContext(Dispatchers.IO) { api.requestVaultAccessCode() }
-                uiState = uiState.copy(busy = false, message = message)
+                uiState = uiState.copy(
+                    busy = false,
+                    message = message?.let(UiText::plain) ?: UiText.res(R.string.vault_msg_code_sent),
+                )
             } catch (error: Exception) {
                 uiState = uiState.copy(busy = false, phase = gatePhase(error) ?: uiState.phase, error = describe(error))
             }
@@ -117,7 +121,7 @@ class VaultViewModel(
                     busy = false,
                     totpEnabled = access.totpEnabled,
                     accessHours = access.hours,
-                    message = "验证通过。",
+                    message = UiText.res(R.string.vault_msg_verified),
                 )
                 if (key != null) {
                     reloadEntries()
@@ -151,7 +155,7 @@ class VaultViewModel(
                 material = latest
                 key = withContext(Dispatchers.Default) { VaultCrypto.unlock(password, latest) }
                 reloadEntries()
-                uiState = uiState.copy(busy = false, message = "已解锁，5 分钟无操作或 App 退到后台会自动锁定。")
+                uiState = uiState.copy(busy = false, message = UiText.res(R.string.vault_msg_unlocked))
                 touch()
             } catch (error: Exception) {
                 if (error is WrongMasterPasswordException) {
@@ -173,7 +177,7 @@ class VaultViewModel(
             phase = if (uiState.phase == VaultPhase.UNLOCKED) VaultPhase.LOCKED else uiState.phase,
             entries = emptyList(),
             brokenCount = 0,
-            message = "密码库已锁定。",
+            message = UiText.res(R.string.vault_msg_locked),
         )
     }
 
@@ -202,7 +206,7 @@ class VaultViewModel(
         uiState = uiState.copy(message = null, error = null)
     }
 
-    fun showMessage(message: String) {
+    fun showMessage(message: UiText) {
         uiState = uiState.copy(message = message)
     }
 
@@ -228,13 +232,13 @@ class VaultViewModel(
                 uiState = uiState.copy(
                     busy = false,
                     entries = listOf(saved) + uiState.entries.filter { it.id != saved.id },
-                    message = "已加密保存「${saved.data.title}」。",
+                    message = UiText.res(R.string.vault_msg_saved, saved.data.title),
                 )
                 onDone()
             } catch (error: ApiException) {
                 if (error.statusCode == 409) {
                     reloadEntries()
-                    uiState = uiState.copy(busy = false, error = "这一条刚在别处修改过，已刷新列表，请重新打开后修改。")
+                    uiState = uiState.copy(busy = false, error = UiText.res(R.string.vault_error_save_conflict))
                     onDone()
                 } else {
                     uiState = uiState.copy(busy = false, error = describe(error))
@@ -254,13 +258,13 @@ class VaultViewModel(
                 uiState = uiState.copy(
                     busy = false,
                     entries = uiState.entries.filter { it.id != entry.id },
-                    message = "已删除「${entry.data.title}」。",
+                    message = UiText.res(R.string.vault_msg_deleted, entry.data.title),
                 )
                 onDone()
             } catch (error: ApiException) {
                 uiState = uiState.copy(
                     busy = false,
-                    error = if (error.statusCode == 409) "这一条刚在别处修改过，请刷新后再删除。" else describe(error),
+                    error = if (error.statusCode == 409) UiText.res(R.string.vault_error_delete_conflict) else describe(error),
                 )
             } catch (error: Exception) {
                 uiState = uiState.copy(busy = false, error = describe(error))
@@ -298,12 +302,13 @@ class VaultViewModel(
         else -> null
     }
 
-    private fun describe(error: Exception): String = when (error) {
-        is WrongMasterPasswordException -> error.message.orEmpty()
-        is VaultDecryptException -> error.message.orEmpty()
-        is ApiException -> error.detailMessage ?: "操作失败（${error.statusCode}），请稍后重试。"
-        is java.io.IOException -> "无法连接服务器，请检查网络后重试。"
-        else -> error.message?.takeIf { it.isNotBlank() } ?: "操作失败，请稍后重试。"
+    private fun describe(error: Exception): UiText = when (error) {
+        is HasUiText -> error.text
+        is ApiException -> error.detailMessage?.let(UiText::plain)
+            ?: UiText.res(R.string.vault_error_operation_failed_code, error.statusCode)
+        is java.io.IOException -> UiText.res(R.string.error_server_unreachable)
+        else -> error.message?.takeIf { it.isNotBlank() }?.let(UiText::plain)
+            ?: UiText.res(R.string.error_operation_failed_later)
     }
 
     override fun onCleared() {

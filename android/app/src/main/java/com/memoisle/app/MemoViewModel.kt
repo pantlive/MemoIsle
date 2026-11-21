@@ -1,8 +1,8 @@
 package com.memoisle.app
 
 import android.content.ContentResolver
-import android.net.Uri
 import android.media.MediaPlayer
+import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +24,9 @@ import com.memoisle.app.network.DuplicateResourceException
 import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.network.ReviewSettings
 import com.memoisle.app.network.WordLookupResponse
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
+import com.memoisle.app.ui.toUiText
 import java.nio.file.Files
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +38,7 @@ data class MemoUiState(
     val isRefreshing: Boolean = false,
     val isSaving: Boolean = false,
     val isExporting: Boolean = false,
-    val message: String? = null,
+    val message: UiText? = null,
     val undoMemo: Memo? = null,
     val duplicateWord: Memo? = null,
     val duplicateResource: Memo? = null,
@@ -111,18 +114,18 @@ class MemoViewModel(
                             result.hasRetryableFailure -> {
                                 uiState.copy(
                                     isRefreshing = false,
-                                    message = "已同步，部分内容将在联网后自动重试",
+                                    message = UiText.res(R.string.memo_msg_synced_partial),
                                 )
                             }
                             else -> {
-                                uiState.copy(isRefreshing = false, message = "已与 Web 端同步")
+                                uiState.copy(isRefreshing = false, message = UiText.res(R.string.memo_msg_synced_with_web))
                             }
                         }
                     },
                     onFailure = { error ->
                         uiState.copy(
                             isRefreshing = false,
-                            message = "当前离线，已显示本地内容：${error.readableMessage()}",
+                            message = UiText.res(R.string.memo_msg_offline, error.toUiText()),
                         )
                     },
                 )
@@ -141,18 +144,18 @@ class MemoViewModel(
             runCatching {
                 withContext(Dispatchers.IO) {
                     val output = contentResolver.openOutputStream(uri)
-                        ?: error("无法打开导出文件")
+                        ?: error(UiText.res(R.string.memo_msg_export_open_failed))
                     output.use { repository.exportUserData(it) }
                 }
             }.onSuccess {
                 uiState = uiState.copy(
                     isExporting = false,
-                    message = "个人数据已导出；录音二进制未打包进 JSON",
+                    message = UiText.res(R.string.memo_msg_exported),
                 )
             }.onFailure { error ->
                 uiState = uiState.copy(
                     isExporting = false,
-                    message = "数据导出失败：${error.readableMessage()}",
+                    message = UiText.res(R.string.memo_msg_export_failed, error.toUiText()),
                 )
             }
         }
@@ -172,18 +175,18 @@ class MemoViewModel(
                 withContext(Dispatchers.IO) {
                     val audioFile = repository.audioFile(memo)
                     val output = contentResolver.openOutputStream(uri)
-                        ?: error("无法打开保存文件")
+                        ?: error(UiText.res(R.string.memo_msg_save_file_open_failed))
                     output.use { Files.copy(audioFile, it) }
                 }
             }.onSuccess {
                 uiState = uiState.copy(
                     isDownloadingAudio = false,
-                    message = "录音已保存到你选择的位置",
+                    message = UiText.res(R.string.memo_msg_audio_saved),
                 )
             }.onFailure { error ->
                 uiState = uiState.copy(
                     isDownloadingAudio = false,
-                    message = "录音下载失败：${error.readableMessage()}",
+                    message = UiText.res(R.string.memo_msg_audio_download_failed, error.toUiText()),
                 )
             }
         }
@@ -191,7 +194,7 @@ class MemoViewModel(
 
     fun resolveConflictWithServer(memo: Memo): Unit {
         repository.resolveConflictWithServer(memo)
-        uiState = uiState.copy(message = "已采用服务端版本")
+        uiState = uiState.copy(message = UiText.res(R.string.memo_msg_used_server_version))
     }
 
     fun loadConflictServer(memo: Memo, onResult: (Memo) -> Unit): Unit {
@@ -203,7 +206,7 @@ class MemoViewModel(
                 .onSuccess(onResult)
                 .onFailure { error ->
                     uiState = uiState.copy(
-                        message = "暂时无法读取服务端版本，请联网后再处理冲突：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_conflict_server_unavailable, error.toUiText()),
                     )
                 }
         }
@@ -231,16 +234,16 @@ class MemoViewModel(
                     uiState.copy(
                         isRefreshing = false,
                         message = if (completed) {
-                            "同步完成，可以安全退出"
+                            UiText.res(R.string.memo_msg_sync_complete_safe)
                         } else {
-                            "仍有内容未同步，请保持登录后重试"
+                            UiText.res(R.string.memo_msg_sync_incomplete)
                         },
                     )
                 },
                 onFailure = { error ->
                     uiState.copy(
                         isRefreshing = false,
-                        message = "同步未完成，请保持登录后重试：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_sync_failed_stay, error.toUiText()),
                     )
                 },
             )
@@ -259,7 +262,7 @@ class MemoViewModel(
                 .onSuccess { created ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "灵感已保存",
+                        message = UiText.res(R.string.memo_msg_idea_saved),
                         undoMemo = created,
                     )
                     onSuccess()
@@ -267,7 +270,7 @@ class MemoViewModel(
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已保存在本机，联网后可重试同步：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_saved_locally_retry, error.toUiText()),
                     )
                     onSuccess()
                 }
@@ -298,7 +301,7 @@ class MemoViewModel(
                 .onSuccess { created ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "网页资料已保存",
+                        message = UiText.res(R.string.memo_msg_resource_saved),
                         undoMemo = created,
                     )
                     onSuccess()
@@ -307,14 +310,14 @@ class MemoViewModel(
                     if (error is DuplicateResourceException) {
                         uiState = uiState.copy(
                             isSaving = false,
-                            message = "已收藏相同网址，可以查看已有资料或仍然保存。",
+                            message = UiText.res(R.string.memo_msg_duplicate_url),
                             duplicateResource = error.existing,
                         )
                         onDuplicate(error.existing)
                     } else {
                         uiState = uiState.copy(
                             isSaving = false,
-                            message = "已保存在本机，联网后可重试同步：${error.readableMessage()}",
+                            message = UiText.res(R.string.memo_msg_saved_locally_retry, error.toUiText()),
                         )
                         onSuccess()
                     }
@@ -355,7 +358,7 @@ class MemoViewModel(
                 .onSuccess { created ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "英语单词已收藏",
+                        message = UiText.res(R.string.memo_msg_word_saved),
                         undoMemo = created,
                     )
                     onSuccess()
@@ -364,14 +367,14 @@ class MemoViewModel(
                     if (error is DuplicateLemmaException) {
                         uiState = uiState.copy(
                             isSaving = false,
-                            message = "已收藏相同词形，可以查看、合并例句或仍然保存。",
+                            message = UiText.res(R.string.memo_msg_duplicate_word),
                             duplicateWord = error.existing,
                         )
                         onDuplicate(error.existing)
                     } else {
                         uiState = uiState.copy(
                             isSaving = false,
-                            message = "已保存在本机，联网后可重试同步：${error.readableMessage()}",
+                            message = UiText.res(R.string.memo_msg_saved_locally_retry, error.toUiText()),
                         )
                         onSuccess()
                     }
@@ -409,8 +412,8 @@ class MemoViewModel(
                     wordLookup = if (showPreview) preview else uiState.wordLookup,
                     message = when {
                         silent -> uiState.message
-                        preview.senses.isEmpty() -> "词典没有返回中文释义，请手动填写"
-                        else -> "已查到中文释义，可继续选择其他义项"
+                        preview.senses.isEmpty() -> UiText.res(R.string.memo_msg_lookup_no_meaning)
+                        else -> UiText.res(R.string.memo_msg_lookup_found)
                     },
                 )
                 if (preview.senses.isNotEmpty()) {
@@ -425,7 +428,7 @@ class MemoViewModel(
                         message = if (silent) {
                             uiState.message
                         } else {
-                            "查词失败：${error.readableMessage()}"
+                            UiText.res(R.string.memo_msg_lookup_failed, error.toUiText())
                         },
                     )
                 }
@@ -450,7 +453,7 @@ class MemoViewModel(
                 .onSuccess {
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已把新语境合并进已有单词",
+                        message = UiText.res(R.string.memo_msg_merged),
                         duplicateWord = null,
                     )
                     onSuccess()
@@ -458,7 +461,7 @@ class MemoViewModel(
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "合并失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_merge_failed, error.toUiText()),
                     )
                 }
         }
@@ -474,14 +477,14 @@ class MemoViewModel(
                 .onSuccess {
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已移入回收站，可在 30 天内恢复",
+                        message = UiText.res(R.string.memo_msg_trashed),
                     )
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "移入回收站失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_trash_failed, error.toUiText()),
                     )
                 }
         }
@@ -497,14 +500,14 @@ class MemoViewModel(
                 .onSuccess {
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已从回收站恢复",
+                        message = UiText.res(R.string.memo_msg_restored),
                     )
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "恢复失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_restore_failed, error.toUiText()),
                     )
                 }
         }
@@ -520,14 +523,14 @@ class MemoViewModel(
                 .onSuccess {
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已永久删除",
+                        message = UiText.res(R.string.memo_msg_purged),
                     )
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "永久删除失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_purge_failed, error.toUiText()),
                     )
                 }
         }
@@ -544,14 +547,14 @@ class MemoViewModel(
                 .onSuccess {
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "已撤销刚才的保存，可在回收站恢复",
+                        message = UiText.res(R.string.memo_msg_undo_done),
                         undoMemo = null,
                     )
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "撤销失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_undo_failed, error.toUiText()),
                     )
                 }
         }
@@ -572,7 +575,7 @@ class MemoViewModel(
                 .onSuccess { created ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "语音灵感已保存",
+                        message = UiText.res(R.string.memo_msg_voice_saved),
                         undoMemo = created,
                     )
                     onSuccess()
@@ -580,7 +583,7 @@ class MemoViewModel(
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "录音已保存在本机，稍后重试同步：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_voice_saved_locally, error.toUiText()),
                     )
                     onSuccess()
                 }
@@ -613,7 +616,7 @@ class MemoViewModel(
                     val displayName = queryDisplayName(contentResolver, uri)
                     val mimeType = normalizeImageMimeType(contentResolver.getType(uri))
                         ?: imageMimeTypeFromFileName(displayName)
-                        ?: throw IllegalArgumentException("仅支持 PNG/JPEG/WebP/GIF 图片")
+                        ?: throw UiTextException(UiText.res(R.string.error_image_unsupported_type))
                     // 超出服务端限制的图片在这里压缩；限制内的图片原样上传。
                     val prepared = ImageCompressor.compress(contentResolver, uri, mimeType)
                     compression = prepared
@@ -638,7 +641,7 @@ class MemoViewModel(
                         message = if (compressed.compressed) {
                             compressed.reminderMessage()
                         } else {
-                            "图片已收藏"
+                            UiText.res(R.string.memo_msg_image_saved)
                         },
                         undoMemo = created,
                     )
@@ -649,7 +652,7 @@ class MemoViewModel(
                         isSaving = false,
                         isUploadingImage = false,
                         message = if (prepared?.compressed == true) {
-                            "图片已自动压缩，但${imageFailureMessage(error)}"
+                            UiText.res(R.string.memo_msg_image_compressed_but, imageFailureMessage(error))
                         } else {
                             imageFailureMessage(error)
                         },
@@ -747,7 +750,7 @@ class MemoViewModel(
                     failedImageKeys.add(key)
                     if (!thumbnail) {
                         uiState = uiState.copy(
-                            message = "读取原图失败：${error.readableMessage()}",
+                            message = UiText.res(R.string.memo_msg_original_image_failed, error.toUiText()),
                         )
                     }
                 }
@@ -776,15 +779,15 @@ class MemoViewModel(
         }.getOrNull()
     }
 
-    private fun imageFailureMessage(error: Throwable): String {
+    private fun imageFailureMessage(error: Throwable): UiText {
         return when {
-            error is ApiException && error.statusCode == 413 -> "图片不能超过 20 MB"
+            error is ApiException && error.statusCode == 413 -> UiText.res(R.string.memo_msg_image_too_large)
             error is ApiException && error.statusCode == 422 ->
-                error.detailMessage ?: "图片文件无效或已损坏"
+                error.detailMessage?.let(UiText::plain) ?: UiText.res(R.string.memo_msg_image_invalid)
             error is ApiException && error.statusCode == 409 ->
-                "图片已在其他设备更新，请刷新后重新选择"
-            error is IllegalArgumentException -> error.readableMessage()
-            else -> "图片收藏失败，已保留本机副本，联网后可重试：${error.readableMessage()}"
+                UiText.res(R.string.memo_msg_image_conflict)
+            error is IllegalArgumentException -> error.toUiText()
+            else -> UiText.res(R.string.memo_msg_image_failed_kept, error.toUiText())
         }
     }
 
@@ -800,7 +803,7 @@ class MemoViewModel(
         onConflict: (Memo) -> Unit = {},
     ) {
         if (memo.type == TYPE_RESOURCE) {
-            uiState = uiState.copy(message = "Android 端网页资料为只读，请在 Web 端整理")
+            uiState = uiState.copy(message = UiText.res(R.string.memo_msg_resource_read_only))
             return
         }
         if (title.isBlank() || body.isBlank() || uiState.isSaving) {
@@ -817,7 +820,7 @@ class MemoViewModel(
             )
             runCatching { repository.updateMemo(updatedMemo, title, body) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "修改已同步")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_edit_synced))
                     onSuccess()
                 }
                 .onFailure { error ->
@@ -825,16 +828,16 @@ class MemoViewModel(
                         uiState = uiState.copy(
                             isSaving = false,
                             message = if (error.current == null) {
-                                "其他设备已更新这条灵感，请刷新后重新编辑。"
+                                UiText.res(R.string.memo_msg_edit_conflict_refresh)
                             } else {
-                                "其他设备已更新这条灵感，已载入最新版本，请确认后重新保存。"
+                                UiText.res(R.string.memo_msg_edit_conflict_loaded)
                             },
                         )
                         error.current?.let(onConflict)
                     } else {
                         uiState = uiState.copy(
                             isSaving = false,
-                            message = "修改已保存在本机，稍后重试同步：${error.readableMessage()}",
+                            message = UiText.res(R.string.memo_msg_edit_saved_locally, error.toUiText()),
                         )
                         onSuccess()
                     }
@@ -862,13 +865,13 @@ class MemoViewModel(
             uiState = uiState.copy(isSaving = true, message = null)
             runCatching { repository.reviewWord(memo, feedback) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "复习结果已记录")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_review_recorded))
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "复习结果提交失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_review_failed, error.toUiText()),
                     )
                 }
         }
@@ -882,13 +885,13 @@ class MemoViewModel(
             uiState = uiState.copy(isSaving = true, message = null)
             runCatching { repository.skipReview(memo) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "已跳过，明天之前不会再出现")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_review_skipped))
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "跳过失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_skip_failed, error.toUiText()),
                     )
                 }
         }
@@ -909,12 +912,12 @@ class MemoViewModel(
                 uiState = uiState.copy(
                     isSaving = false,
                     reviewSettings = settings,
-                    message = "复习计划已更新",
+                    message = UiText.res(R.string.memo_msg_review_plan_updated),
                 )
             }.onFailure { error ->
                 uiState = uiState.copy(
                     isSaving = false,
-                    message = "复习计划保存失败：${error.readableMessage()}",
+                    message = UiText.res(R.string.memo_msg_review_plan_failed, error.toUiText()),
                 )
             }
         }
@@ -964,13 +967,13 @@ class MemoViewModel(
             uiState = uiState.copy(isSaving = true, message = null)
             runCatching { repository.markResourceOpened(memo) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "已打开原网页")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_opened_source))
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "阅读状态同步失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_reading_sync_failed, error.toUiText()),
                     )
                     onSuccess()
                 }
@@ -990,7 +993,7 @@ class MemoViewModel(
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "星标同步失败：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_star_sync_failed, error.toUiText()),
                     )
                 }
         }
@@ -1004,13 +1007,13 @@ class MemoViewModel(
             uiState = uiState.copy(isSaving = true, message = null)
             runCatching { repository.organizeIdea(memo, title, body) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "灵感已整理")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_idea_sorted))
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "整理已保存在本机：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_sort_saved_locally, error.toUiText()),
                     )
                     onSuccess()
                 }
@@ -1025,13 +1028,13 @@ class MemoViewModel(
             uiState = uiState.copy(isSaving = true, message = null)
             runCatching { repository.archiveIdea(memo) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "灵感已归档")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_idea_archived))
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "归档已保存在本机：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_archive_saved_locally, error.toUiText()),
                     )
                     onSuccess()
                 }
@@ -1046,13 +1049,13 @@ class MemoViewModel(
             uiState = uiState.copy(isSaving = true, message = null)
             runCatching { repository.archiveMemo(memo) }
                 .onSuccess {
-                    uiState = uiState.copy(isSaving = false, message = "内容已归档")
+                    uiState = uiState.copy(isSaving = false, message = UiText.res(R.string.memo_msg_item_archived))
                     onSuccess()
                 }
                 .onFailure { error ->
                     uiState = uiState.copy(
                         isSaving = false,
-                        message = "归档已保存在本机：${error.readableMessage()}",
+                        message = UiText.res(R.string.memo_msg_archive_saved_locally, error.toUiText()),
                     )
                     onSuccess()
                 }
@@ -1072,7 +1075,7 @@ class MemoViewModel(
                     }
                 }
             }.onFailure { error ->
-                uiState = uiState.copy(message = "录音播放失败：${error.readableMessage()}")
+                uiState = uiState.copy(message = UiText.res(R.string.memo_msg_audio_play_failed, error.toUiText()))
             }
         }
     }
@@ -1102,6 +1105,26 @@ class MemoViewModel(
     }
 }
 
-private fun Throwable.readableMessage(): String {
-    return message?.take(120) ?: "未知错误"
-}
+
+
+/**
+ * 保存类提示：Snackbar 在有 [MemoUiState.undoMemo] 时为这些提示提供「撤销」。
+ * 以前按中文文案里是否含「已保存 / 已收藏」判断，改成按文案资源判断，与界面语言无关。
+ */
+private val UNDOABLE_SAVE_MESSAGES = setOf(
+    R.string.memo_msg_idea_saved,
+    R.string.memo_msg_saved_locally_retry,
+    R.string.memo_msg_resource_saved,
+    R.string.memo_msg_duplicate_url,
+    R.string.memo_msg_word_saved,
+    R.string.memo_msg_duplicate_word,
+    R.string.memo_msg_voice_saved,
+    R.string.memo_msg_voice_saved_locally,
+    R.string.memo_msg_image_saved,
+    R.string.memo_msg_edit_saved_locally,
+    R.string.memo_msg_sort_saved_locally,
+    R.string.memo_msg_archive_saved_locally,
+    R.string.memo_msg_audio_saved,
+)
+
+fun UiText.isUndoableSaveMessage(): Boolean = this is UiText.Res && id in UNDOABLE_SAVE_MESSAGES

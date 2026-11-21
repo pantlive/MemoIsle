@@ -49,10 +49,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.memoisle.app.R
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.SyncState
 import com.memoisle.app.data.TYPE_IMAGE
@@ -113,7 +116,7 @@ internal fun MemoRow(
         isWord -> listOfNotNull(
             memo.wordPhonetic?.takeIf { it.isNotBlank() },
             memo.wordMeaning?.takeIf { it.isNotBlank() }?.lineSequence()?.firstOrNull(),
-        ).joinToString("  ").ifBlank { "等待补充释义" }
+        ).joinToString("  ").ifBlank { stringResource(R.string.row_waiting_meaning) }
         else -> bodySnippet(memo)
     }
     Card(
@@ -155,7 +158,7 @@ internal fun MemoRow(
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             Icons.Filled.Star,
-                            contentDescription = "星标",
+                            contentDescription = stringResource(R.string.row_star),
                             tint = Color(0xFFE6A23C),
                             modifier = Modifier.size(16.dp),
                         )
@@ -178,12 +181,12 @@ internal fun MemoRow(
                 ) {
                     when {
                         isResource -> InfoPill(
-                            resourceCategoryLabel(memo.resourceCategory, memo.resourceCategoryLabel),
+                            resourceCategoryLabel(memo.resourceCategory, memo.resourceCategoryLabel).asString(),
                             color = ResourceAccent,
                             background = ResourceSoft,
                         )
                         isWord -> InfoPill(
-                            "熟悉度 ${memo.familiarity}/5",
+                            stringResource(R.string.row_familiarity, memo.familiarity),
                             color = WordAccent,
                             background = WordSoft,
                         )
@@ -191,7 +194,8 @@ internal fun MemoRow(
                             InfoPill(it, color = ImageAccent, background = ImageSoft)
                         }
                         memo.audioMimeType != null -> InfoPill(
-                            memo.audioDurationMs?.takeIf { it > 0 }?.let { "语音 ${it / 1_000} 秒" } ?: "语音",
+                            memo.audioDurationMs?.takeIf { it > 0 }?.let { stringResource(R.string.row_voice_seconds, it / 1_000) }
+                                ?: stringResource(R.string.row_voice),
                             color = IdeaAccent,
                             background = IdeaSoft,
                         )
@@ -210,16 +214,17 @@ internal fun MemoRow(
     }
 }
 
+@Composable
 private fun imageRowSubtitle(memo: Memo): String {
     val metadata = listOfNotNull(
-        imageDimensionsLabel(memo.imageWidth, memo.imageHeight),
+        imageDimensionsLabel(memo.imageWidth, memo.imageHeight)?.asString(),
         formatFileSize(memo.imageSizeBytes),
     ).joinToString(" · ")
     return when {
         metadata.isNotBlank() -> metadata
         memo.body.isNotBlank() -> memo.body
-        memo.hasUploadedImage() -> "图片收藏"
-        else -> "图片待上传"
+        memo.hasUploadedImage() -> stringResource(R.string.content_default_image_title)
+        else -> stringResource(R.string.row_image_pending_upload)
     }
 }
 
@@ -323,7 +328,7 @@ internal fun InboxMemoRow(
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "${kind.label} · ${formatTime(memo.updatedAt)}",
+                        "${stringResource(kind.label)} · ${formatTime(memo.updatedAt)}",
                         color = TextMuted,
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -336,12 +341,12 @@ internal fun InboxMemoRow(
                 TextButton(onClick = onArchive, enabled = !isSaving) {
                     Icon(Icons.Outlined.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("归档")
+                    Text(stringResource(R.string.row_archive))
                 }
                 TextButton(onClick = onOrganize, enabled = !isSaving) {
                     Icon(Icons.Outlined.TaskAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("整理完成")
+                    Text(stringResource(R.string.row_sorted))
                 }
             }
         }
@@ -374,7 +379,12 @@ internal fun TrashMemoRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "${kind.label} · ${memo.trashDaysRemaining()} 天后永久删除",
+                        pluralStringResource(
+                            R.plurals.row_trash_days_left,
+                            memo.trashDaysRemaining(),
+                            stringResource(kind.label),
+                            memo.trashDaysRemaining(),
+                        ),
                         color = TextMuted,
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -391,12 +401,12 @@ internal fun TrashMemoRow(
                 ) {
                     Icon(Icons.Outlined.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("永久删除")
+                    Text(stringResource(R.string.home_purge))
                 }
                 TextButton(onClick = onRestore, enabled = !isSaving && memo.id != null) {
                     Icon(Icons.Outlined.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("恢复")
+                    Text(stringResource(R.string.row_restore))
                 }
             }
         }
@@ -408,9 +418,9 @@ internal fun TrashMemoRow(
 private fun SyncBadge(syncState: SyncState) {
     val (label, color, icon) = when (syncState) {
         SyncState.SYNCED -> return
-        SyncState.PENDING -> Triple("待同步", TextMuted, Icons.Outlined.CloudUpload)
-        SyncState.FAILED -> Triple("同步失败", DangerRed, Icons.Outlined.ErrorOutline)
-        SyncState.CONFLICT -> Triple("有冲突", WarmAmberText, Icons.Outlined.ErrorOutline)
+        SyncState.PENDING -> Triple(stringResource(R.string.row_sync_pending), TextMuted, Icons.Outlined.CloudUpload)
+        SyncState.FAILED -> Triple(stringResource(R.string.row_sync_failed), DangerRed, Icons.Outlined.ErrorOutline)
+        SyncState.CONFLICT -> Triple(stringResource(R.string.row_sync_conflict), WarmAmberText, Icons.Outlined.ErrorOutline)
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
@@ -428,28 +438,28 @@ internal fun ConflictResolutionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onLater,
-        title = { Text("发现编辑冲突", fontWeight = FontWeight.SemiBold) },
+        title = { Text(stringResource(R.string.row_conflict_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Text(
-                "其他设备已更新「${serverMemo.title}」。你的本地修改已经保留，请选择要使用的版本。",
+                stringResource(R.string.row_conflict_text, serverMemo.title),
             )
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onUseServer) {
-                    Text("采用服务端版本")
+                    Text(stringResource(R.string.row_conflict_use_server))
                 }
                 Button(
                     onClick = onKeepLocal,
                     colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
                 ) {
-                    Text("保留我的修改")
+                    Text(stringResource(R.string.row_conflict_keep_mine))
                 }
             }
         },
         dismissButton = {
             TextButton(onClick = onLater) {
-                Text("稍后处理")
+                Text(stringResource(R.string.row_conflict_later))
             }
         },
         containerColor = SurfaceWhite,
@@ -473,20 +483,20 @@ internal fun EmptyMemos(
         accent = if (hasQuery || isLibrary) DeepTeal else kind.accent,
         soft = if (hasQuery || isLibrary) TealSoft else kind.soft,
         title = when {
-            hasQuery -> "没有找到匹配内容"
-            isLibrary -> "资料库还是空的"
-            activeType == TYPE_RESOURCE -> "还没有收藏网页资料"
-            activeType == TYPE_WORD -> "从第一个英语单词开始"
-            activeType == TYPE_IMAGE -> "还没有收藏图片"
-            else -> "第一条灵感正在等你"
+            hasQuery -> stringResource(R.string.row_empty_no_match)
+            isLibrary -> stringResource(R.string.row_empty_library)
+            activeType == TYPE_RESOURCE -> stringResource(R.string.row_empty_resource)
+            activeType == TYPE_WORD -> stringResource(R.string.row_empty_word)
+            activeType == TYPE_IMAGE -> stringResource(R.string.row_empty_image)
+            else -> stringResource(R.string.row_empty_idea)
         },
         message = when {
-            hasQuery -> "换个关键词，或清除搜索后浏览全部收藏。"
-            isLibrary -> "从灵感、英语单词、图片或网页资料开始收藏第一条内容。"
-            activeType == TYPE_RESOURCE -> "可在 Web 端收藏，或从手机浏览器分享链接到 MemoIsle。"
-            activeType == TYPE_WORD -> "保存词形、释义和例句，稍后按计划复习。"
-            activeType == TYPE_IMAGE -> "从相册选择图片，原图与缩略图会同步到 Web。"
-            else -> "保存后会进入本地资料库，并在联网时同步到 Web。"
+            hasQuery -> stringResource(R.string.row_empty_no_match_hint)
+            isLibrary -> stringResource(R.string.row_empty_library_hint)
+            activeType == TYPE_RESOURCE -> stringResource(R.string.row_empty_resource_hint)
+            activeType == TYPE_WORD -> stringResource(R.string.row_empty_word_hint)
+            activeType == TYPE_IMAGE -> stringResource(R.string.row_empty_image_hint)
+            else -> stringResource(R.string.row_empty_idea_hint)
         },
     )
 }

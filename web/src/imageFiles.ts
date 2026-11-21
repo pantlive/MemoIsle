@@ -1,4 +1,5 @@
 import type { ImageOcrSource, Memo } from "./types";
+import { t } from "./i18n";
 
 /** 图片条目的文件信息与上传前的类型推断。 */
 
@@ -19,12 +20,12 @@ export function imageDimensionLabel(memo: Memo): string {
   if (memo.image_width && memo.image_height) {
     return `${memo.image_width} × ${memo.image_height}`;
   }
-  return "尺寸未知";
+  return t("尺寸未知");
 }
 
 export function imageInfoLabel(memo: Memo): string {
   if (!memo.image_mime_type) {
-    return "尚未上传图片文件";
+    return t("尚未上传图片文件");
   }
   const parts = [
     imageDimensionLabel(memo),
@@ -36,10 +37,10 @@ export function imageInfoLabel(memo: Memo): string {
 
 export function imageOcrSourceLabel(source: ImageOcrSource | null): string {
   if (source === "local") {
-    return "本地识别";
+    return t("本地识别");
   }
   if (source === "llm") {
-    return "视觉模型";
+    return t("视觉模型");
   }
   return "";
 }
@@ -47,7 +48,7 @@ export function imageOcrSourceLabel(source: ImageOcrSource | null): string {
 export function imageFileTitle(file: File | Blob): string {
   const rawName = file instanceof File ? file.name : "";
   const base = rawName.replace(/\.[^.]+$/, "").trim();
-  return base || "粘贴的图片";
+  return base || t("粘贴的图片");
 }
 
 export function imageMimeFromFile(file: File): string {

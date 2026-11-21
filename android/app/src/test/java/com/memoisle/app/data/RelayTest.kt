@@ -1,5 +1,6 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.TestStrings.zh
 import java.util.Calendar
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -51,13 +52,13 @@ class RelayTest {
 
     @Test
     fun limitsMatchServer() {
-        assertEquals("请输入要发送的内容。", relayTextError("   "))
+        assertEquals("请输入要发送的内容。", zh(relayTextError("   ")))
         assertNull(relayTextError("字".repeat(34_133)))
-        assertTrue(relayTextError("字".repeat(34_134))!!.contains("100 KB"))
+        assertTrue(zh(relayTextError("字".repeat(34_134)))!!.contains("100 KB"))
         assertNull(relayFileError("a.bin", null))
         assertNull(relayFileError("a.bin", RELAY_MAX_FILE_BYTES))
-        assertTrue(relayFileError("大.zip", RELAY_MAX_FILE_BYTES + 1)!!.contains("20 MB"))
-        assertTrue(relayFileError("空.txt", 0)!!.contains("空文件"))
+        assertTrue(zh(relayFileError("大.zip", RELAY_MAX_FILE_BYTES + 1))!!.contains("20 MB"))
+        assertTrue(zh(relayFileError("空.txt", 0))!!.contains("空文件"))
     }
 
     @Test
@@ -65,11 +66,12 @@ class RelayTest {
         assertEquals("512 B", formatRelayBytes(512))
         assertEquals("1.5 KB", formatRelayBytes(1536))
         assertEquals("5.0 MB", formatRelayBytes(5L * 1024 * 1024))
-        assertEquals("10:00", formatRelayRemaining(600))
-        assertEquals("1:01", formatRelayRemaining(61))
-        assertEquals("已过期", formatRelayRemaining(0))
-        assertEquals("手机", relayDeviceLabel(RELAY_DEVICE_ANDROID))
-        assertEquals("网页", relayDeviceLabel(RELAY_DEVICE_WEB))
+        assertEquals("10:00", zh(formatRelayRemaining(600)))
+        assertEquals("1:01", zh(formatRelayRemaining(61)))
+        assertEquals("已过期", zh(formatRelayRemaining(0)))
+        assertEquals("Expired", com.memoisle.app.TestStrings.en(formatRelayRemaining(0)))
+        assertEquals("手机", zh(relayDeviceLabel(RELAY_DEVICE_ANDROID)))
+        assertEquals("网页", zh(relayDeviceLabel(RELAY_DEVICE_WEB)))
     }
 
     @Test

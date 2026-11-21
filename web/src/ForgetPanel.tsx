@@ -24,9 +24,11 @@ import {
   type ForgetItem,
 } from "./forget";
 import Icon from "./Icon";
+import { t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 const describe = (error: unknown): string =>
-  error instanceof Error ? error.message : "操作失败，请重试。";
+  error instanceof Error ? error.message : t("操作失败，请重试。");
 
 function ForgetThumb({ itemId, attachment }: { itemId: string; attachment: ForgetAttachment }) {
   const [url, setUrl] = useState("");
@@ -52,6 +54,7 @@ function ForgetThumb({ itemId, attachment }: { itemId: string; attachment: Forge
 }
 
 export default function ForgetPanel() {
+  const { t } = useI18n();
   const [items, setItems] = useState<ForgetItem[]>([]);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -140,10 +143,10 @@ export default function ForgetPanel() {
         ? await createForgetItem(payload)
         : await updateForgetItem(selectedId, payload, version);
       applyItem(saved, true);
-      setMessage(selectedId === null || version === null ? "已记下。" : "已保存。");
+      setMessage(selectedId === null || version === null ? t("已记下。") : t("已保存。"));
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) {
-        setError("已在其他设备修改，正在重新读取。");
+        setError(t("已在其他设备修改，正在重新读取。"));
         await reload(query);
       } else {
         setError(describe(reason));
@@ -176,21 +179,21 @@ export default function ForgetPanel() {
       for (const file of files) {
         const problem = forgetFileError(file);
         if (problem) {
-          setError(`「${file.name || "未命名文件"}」${problem}`);
+          setError(t("「{value}」{problem}", { value: file.name || t("未命名文件"), problem }));
           continue;
         }
         if (latest.length >= FORGET_MAX_ATTACHMENTS) {
-          setError("每条最多 20 个附件");
+          setError(t("每条最多 20 个附件"));
           break;
         }
         const updated = await uploadForgetAttachment(itemId, file);
         latest = updated.attachments;
         applyItem(updated, false);
       }
-      setMessage("附件已保存。");
+      setMessage(t("附件已保存。"));
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) {
-        setError("已在其他设备修改，正在重新读取。");
+        setError(t("已在其他设备修改，正在重新读取。"));
         await reload(query);
       } else {
         setError(describe(reason));
@@ -207,10 +210,10 @@ export default function ForgetPanel() {
       await deleteForgetItem(selectedId, version);
       setItems((current) => current.filter((item) => item.id !== selectedId));
       startNew();
-      setMessage("已删除这条事项。");
+      setMessage(t("已删除这条事项。"));
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) {
-        setError("已在其他设备修改，正在重新读取。");
+        setError(t("已在其他设备修改，正在重新读取。"));
         setPendingDelete(false);
         await reload(query);
       } else {
@@ -236,7 +239,7 @@ export default function ForgetPanel() {
         ),
       );
       setPendingAttachment(null);
-      setMessage("已删除附件。");
+      setMessage(t("已删除附件。"));
     } catch (reason) {
       setError(describe(reason));
     } finally {
@@ -264,11 +267,11 @@ export default function ForgetPanel() {
     <section className="forget-panel">
       <div className="page-heading">
         <div>
-          <h1>易忘事项</h1>
-          <p className="page-subtitle">容易忘掉的文字、图片和文件，放在这里。</p>
+          <h1>{t("易忘事项")}</h1>
+          <p className="page-subtitle">{t("容易忘掉的文字、图片和文件，放在这里。")}</p>
         </div>
         <button className="primary" type="button" onClick={startNew} disabled={busy}>
-          <Icon name="plus" size={16} /> 新建
+          <Icon name="plus" size={16} />{t(" 新建")}
         </button>
       </div>
       {message && <p className="forget-notice" role="status">{message}</p>}
@@ -278,16 +281,16 @@ export default function ForgetPanel() {
           <label className="forget-search">
             <Icon name="search" size={16} />
             <input
-              aria-label="搜索易忘事项"
+              aria-label={t("搜索易忘事项")}
               value={query}
-              placeholder="搜索标题或正文"
+              placeholder={t("搜索标题或正文")}
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
           {loading && items.length === 0 ? (
-            <p className="forget-empty" role="status">正在读取…</p>
+            <p className="forget-empty" role="status">{t("正在读取…")}</p>
           ) : items.length === 0 ? (
-            <p className="forget-empty">还没有事项。写下一句容易忘掉的话，或直接放上图片和文件。</p>
+            <p className="forget-empty">{t("还没有事项。写下一句容易忘掉的话，或直接放上图片和文件。")}</p>
           ) : (
             <ul className="forget-list">
               {items.map((item) => (
@@ -297,9 +300,9 @@ export default function ForgetPanel() {
                     className={item.id === selectedId ? "active" : ""}
                     onClick={() => selectItem(item)}
                   >
-                    <strong>{item.pinned ? "置顶 · " : ""}{forgetDisplayTitle(item.title)}</strong>
+                    <strong>{item.pinned ? t("置顶 · ") : ""}{forgetDisplayTitle(item.title)}</strong>
                     <small>
-                      {item.attachments.length > 0 ? `${item.attachments.length} 个附件` : "没有附件"}
+                      {item.attachments.length > 0 ? t("{length} 个附件", { length: item.attachments.length }) : t("没有附件")}
                       {item.content.trim() ? ` · ${item.content.trim().slice(0, 40)}` : ""}
                     </small>
                   </button>
@@ -316,9 +319,9 @@ export default function ForgetPanel() {
           }}
         >
           <label>
-            标题
+            {t("标题")}
             <input
-              aria-label="事项标题"
+              aria-label={t("事项标题")}
               value={title}
               maxLength={FORGET_TITLE_MAX + 20}
               onChange={(event) => setTitle(event.target.value)}
@@ -326,9 +329,9 @@ export default function ForgetPanel() {
             <small>{forgetTextLength(title.trim())}/{FORGET_TITLE_MAX}</small>
           </label>
           <label>
-            正文
+            {t("正文")}
             <textarea
-              aria-label="事项正文"
+              aria-label={t("事项正文")}
               value={content}
               rows={8}
               onChange={(event) => setContent(event.target.value)}
@@ -341,11 +344,11 @@ export default function ForgetPanel() {
               checked={pinned}
               onChange={(event) => setPinned(event.target.checked)}
             />
-            置顶
+            {t("置顶")}
           </label>
           <div className="forget-actions">
             <button className="primary" type="submit" disabled={busy}>
-              {selectedId === null ? "记下" : "保存文字"}
+              {selectedId === null ? t("记下") : t("保存文字")}
             </button>
             {selectedId !== null && (
               <button
@@ -354,7 +357,7 @@ export default function ForgetPanel() {
                 disabled={busy}
                 onClick={() => setPendingDelete(true)}
               >
-                删除这条
+                {t("删除这条")}
               </button>
             )}
           </div>
@@ -371,20 +374,20 @@ export default function ForgetPanel() {
               void uploadFiles([...event.dataTransfer.files]);
             }}
           >
-            <p>把图片或文件拖到这里，也可以一次选多个。单个不超过 20 MB，每条最多 20 个。</p>
+            <p>{t("把图片或文件拖到这里，也可以一次选多个。单个不超过 20 MB，每条最多 20 个。")}</p>
             <button
               type="button"
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
             >
-              <Icon name="upload" size={16} /> 选择图片或文件
+              <Icon name="upload" size={16} />{t(" 选择图片或文件")}
             </button>
             <input
               ref={fileInputRef}
               className="sr-only"
               type="file"
               multiple
-              aria-label="选择易忘事项附件"
+              aria-label={t("选择易忘事项附件")}
               onChange={(event) => {
                 const files = [...(event.target.files ?? [])];
                 event.target.value = "";
@@ -406,16 +409,16 @@ export default function ForgetPanel() {
                   <div>
                     <strong>{attachment.original_name}</strong>
                     <small>
-                      {isForgetImage(attachment) ? "图片" : "文件"} · {formatForgetBytes(attachment.size)}
+                      {isForgetImage(attachment) ? t("图片") : t("文件")} · {formatForgetBytes(attachment.size)}
                     </small>
                   </div>
-                  <button type="button" onClick={() => void download(attachment)}>下载</button>
+                  <button type="button" onClick={() => void download(attachment)}>{t("下载")}</button>
                   <button
                     type="button"
                     className="danger-text"
                     onClick={() => setPendingAttachment(attachment)}
                   >
-                    删除
+                    {t("删除")}
                   </button>
                 </li>
               ))}
@@ -426,12 +429,12 @@ export default function ForgetPanel() {
       {pendingDelete && (
         <div className="forget-confirm" role="dialog" aria-modal="true" aria-labelledby="forget-delete-title">
           <div>
-            <h2 id="forget-delete-title">删除这条事项？</h2>
-            <p>文字和全部附件都会删掉，磁盘上的文件也会清掉。这不会进回收站。</p>
+            <h2 id="forget-delete-title">{t("删除这条事项？")}</h2>
+            <p>{t("文字和全部附件都会删掉，磁盘上的文件也会清掉。这不会进回收站。")}</p>
             <div className="forget-actions">
-              <button type="button" onClick={() => setPendingDelete(false)} disabled={busy}>取消</button>
+              <button type="button" onClick={() => setPendingDelete(false)} disabled={busy}>{t("取消")}</button>
               <button className="primary" type="button" onClick={() => void confirmDeleteItem()} disabled={busy}>
-                确认删除
+                {t("确认删除")}
               </button>
             </div>
           </div>
@@ -440,12 +443,12 @@ export default function ForgetPanel() {
       {pendingAttachment && (
         <div className="forget-confirm" role="dialog" aria-modal="true" aria-labelledby="forget-file-title">
           <div>
-            <h2 id="forget-file-title">删除这个附件？</h2>
-            <p>「{pendingAttachment.original_name}」会从这条事项和磁盘上一并删除。</p>
+            <h2 id="forget-file-title">{t("删除这个附件？")}</h2>
+            <p>{t("「{original_name}」会从这条事项和磁盘上一并删除。", { original_name: pendingAttachment.original_name })}</p>
             <div className="forget-actions">
-              <button type="button" onClick={() => setPendingAttachment(null)} disabled={busy}>取消</button>
+              <button type="button" onClick={() => setPendingAttachment(null)} disabled={busy}>{t("取消")}</button>
               <button className="primary" type="button" onClick={() => void confirmDeleteAttachment()} disabled={busy}>
-                确认删除
+                {t("确认删除")}
               </button>
             </div>
           </div>

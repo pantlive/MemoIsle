@@ -28,11 +28,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.memoisle.app.MemoIsleApplication
+import com.memoisle.app.R
 import com.memoisle.app.audio.WordPronouncer
 import java.util.Locale
 
@@ -84,7 +86,7 @@ internal fun SentencePronunciationButton(text: String) {
     ) {
         Icon(Icons.AutoMirrored.Outlined.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(if (playing) "播放中…" else "朗读例句 / 内容")
+        Text(if (playing) stringResource(R.string.pron_playing) else stringResource(R.string.pron_read_aloud))
     }
 }
 
@@ -102,10 +104,10 @@ internal fun PhoneticPlayField(
         value = phonetic,
         onValueChange = onPhoneticChange,
         modifier = Modifier.fillMaxWidth(),
-        label = { Text("音标") },
-        placeholder = { Text("输入单词后自动填入") },
+        label = { Text(stringResource(R.string.pron_phonetic)) },
+        placeholder = { Text(stringResource(R.string.pron_phonetic_placeholder)) },
         supportingText = {
-            Text(if (canPlay) "点右侧的美式 / 英式按钮播放读音" else "先输入单词再播放读音")
+            Text(if (canPlay) stringResource(R.string.pron_phonetic_hint_ready) else stringResource(R.string.pron_phonetic_hint_empty))
         },
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
@@ -114,8 +116,8 @@ internal fun PhoneticPlayField(
                 modifier = Modifier.padding(end = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                PronounceChip("美", playingTag == "us", canPlay) { play("us") }
-                PronounceChip("英", playingTag == "uk", canPlay) { play("uk") }
+                PronounceChip(stringResource(R.string.pron_us), stringResource(R.string.pron_play_us), playingTag == "us", canPlay) { play("us") }
+                PronounceChip(stringResource(R.string.pron_uk), stringResource(R.string.pron_play_uk), playingTag == "uk", canPlay) { play("uk") }
             }
         },
     )
@@ -125,6 +127,7 @@ internal fun PhoneticPlayField(
 @Composable
 private fun PronounceChip(
     accent: String,
+    description: String,
     playing: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -139,7 +142,7 @@ private fun PronounceChip(
     ) {
         Icon(
             Icons.AutoMirrored.Outlined.VolumeUp,
-            contentDescription = "播放${accent}式读音",
+            contentDescription = description,
             tint = if (playing) Color.White else if (enabled) WordAccent else TextMuted,
             modifier = Modifier.size(16.dp),
         )
@@ -161,7 +164,7 @@ internal fun ClickablePhonetic(
 ) {
     val (playingTag, play) = rememberWordPlayer(lemma, usAudioUrl, ukAudioUrl)
     val canPlay = lemma.isNotBlank()
-    val display = phonetic?.takeIf { it.isNotBlank() } ?: "点击播放读音"
+    val display = phonetic?.takeIf { it.isNotBlank() } ?: stringResource(R.string.pron_tap_to_play)
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -177,7 +180,7 @@ internal fun ClickablePhonetic(
             fontSize = 20.sp,
             fontWeight = FontWeight.Medium,
         )
-        PronounceChip("美", playingTag == "us", canPlay) { play("us") }
-        PronounceChip("英", playingTag == "uk", canPlay) { play("uk") }
+        PronounceChip(stringResource(R.string.pron_us), stringResource(R.string.pron_play_us), playingTag == "us", canPlay) { play("us") }
+        PronounceChip(stringResource(R.string.pron_uk), stringResource(R.string.pron_play_uk), playingTag == "uk", canPlay) { play("uk") }
     }
 }

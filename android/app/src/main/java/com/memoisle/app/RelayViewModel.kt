@@ -19,6 +19,12 @@ import com.memoisle.app.data.relayImageExtension
 import com.memoisle.app.data.relayTextError
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,9 +32,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.util.Locale
 
 data class RelayUiState(
     val items: List<RelayItem> = emptyList(),
@@ -36,10 +39,10 @@ data class RelayUiState(
     val deadlines: Map<String, Long> = emptyMap(),
     val sending: Boolean = false,
     val busyId: String? = null,
-    val error: String? = null,
-    val message: String? = null,
+    val error: UiText? = null,
+    val message: UiText? = null,
     /** 收件箱连接状态提示，例如断网重试中。 */
-    val pollError: String? = null,
+    val pollError: UiText? = null,
 )
 
 /**
@@ -62,7 +65,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         uiState = uiState.copy(error = null, message = null)
     }
 
-    fun showError(message: String) {
+    fun showError(message: UiText) {
         uiState = uiState.copy(error = message, message = null)
     }
 
@@ -81,11 +84,11 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
                     throw error
                 } catch (error: Exception) {
                     if (error is ApiException && error.statusCode == 401) {
-                        uiState = uiState.copy(pollError = "登录已失效，请重新登录。")
+                        uiState = uiState.copy(pollError = UiText.res(R.string.relay_poll_session_expired))
                         return@launch
                     }
                     failures += 1
-                    uiState = uiState.copy(pollError = "与服务器的连接中断，正在重试…")
+                    uiState = uiState.copy(pollError = UiText.res(R.string.relay_poll_reconnecting))
                     delay((RETRY_BASE_MS * failures).coerceAtMost(RETRY_MAX_MS))
                 }
             }
@@ -106,7 +109,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         runAction(sending = true) {
             withContext(Dispatchers.IO) { api.sendRelayText(text) }
             onDone()
-            uiState = uiState.copy(message = "文字已发给网页，10 分钟内在网页打开「传输」即可接收。")
+            uiState = uiState.copy(message = UiText.res(R.string.relay_msg_text_sent))
         }
     }
 
@@ -115,16 +118,16 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         runAction(sending = true) {
             val (queriedName, size) = withContext(Dispatchers.IO) { queryNameAndSize(contentResolver, uri) }
             val name = resolveFileName(queriedName, fallbackName)
-            relayFileError(name, size)?.let { throw IllegalArgumentException(it) }
+            relayFileError(name, size)?.let { throw UiTextException(it) }
             val bytes = withContext(Dispatchers.IO) { readLimited(contentResolver, uri, name) }
-            relayFileError(name, bytes.size.toLong())?.let { throw IllegalArgumentException(it) }
+            relayFileError(name, bytes.size.toLong())?.let { throw UiTextException(it) }
             val queriedMime = contentResolver.getType(uri)?.ifBlank { null }
             val mimeType = when {
                 queriedMime?.startsWith("image/") == true -> queriedMime
                 else -> mimeFromFileName(name) ?: queriedMime
             }
             withContext(Dispatchers.IO) { api.sendRelayFile(bytes, name, mimeType) }
-            uiState = uiState.copy(message = "「$name」（${formatRelayBytes(bytes.size.toLong())}）已发给网页，10 分钟内有效。")
+            uiState = uiState.copy(message = UiText.res(R.string.relay_msg_file_sent, name, formatRelayBytes(bytes.size.toLong())))
         }
     }
 
@@ -134,7 +137,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
             try {
                 withContext(Dispatchers.IO) {
                     val output = contentResolver.openOutputStream(uri, "w")
-                        ?: throw java.io.IOException("无法写入所选位置")
+                        ?: throw java.io.IOException("Cannot write to the selected location")
                     output.use { api.downloadRelayItem(item.id, it) }
                 }
             } catch (error: Exception) {
@@ -144,7 +147,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
                 throw error
             }
             removeLocal(item.id)
-            uiState = uiState.copy(message = "已保存「${item.filename ?: "file"}」，服务端已删除这份内容。")
+            uiState = uiState.copy(message = UiText.res(R.string.relay_msg_file_saved, item.filename ?: "file"))
         }
     }
 
@@ -158,7 +161,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
             removeLocal(item.id)
             onReady(file)
             if (uiState.error == null) {
-                uiState = uiState.copy(message = "图片已复制到剪贴板，服务端已删除。")
+                uiState = uiState.copy(message = UiText.res(R.string.relay_msg_image_copied))
             }
         }
     }
@@ -169,7 +172,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
             try {
                 withContext(Dispatchers.IO) {
                     val output = contentResolver.openOutputStream(uri, "w")
-                        ?: throw java.io.IOException("无法写入所选位置")
+                        ?: throw java.io.IOException("Cannot write to the selected location")
                     output.use { out -> file.inputStream().use { input -> input.copyTo(out) } }
                 }
             } catch (error: Exception) {
@@ -178,7 +181,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
                 }
                 throw error
             }
-            uiState = uiState.copy(message = "无法写入剪贴板，已保存「$displayName」。")
+            uiState = uiState.copy(message = UiText.res(R.string.relay_msg_clipboard_failed_saved, displayName))
         }
     }
 
@@ -189,7 +192,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         runAction(busyId = item.id, onNotFound = { removeLocal(item.id) }) {
             withContext(Dispatchers.IO) { api.discardRelayItem(item.id) }
             removeLocal(item.id)
-            uiState = uiState.copy(message = "已复制到剪贴板，服务端已删除这段文字。")
+            uiState = uiState.copy(message = UiText.res(R.string.relay_msg_text_copied))
         }
     }
 
@@ -197,7 +200,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         runAction(busyId = item.id, onNotFound = { removeLocal(item.id) }) {
             withContext(Dispatchers.IO) { api.discardRelayItem(item.id) }
             removeLocal(item.id)
-            uiState = uiState.copy(message = "已忽略。")
+            uiState = uiState.copy(message = UiText.res(R.string.relay_msg_dismissed))
         }
     }
 
@@ -232,7 +235,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
             } catch (error: Exception) {
                 if (error is ApiException && error.statusCode == 404 && onNotFound != null) {
                     onNotFound()
-                    uiState = uiState.copy(error = "这份内容已被取走或已过期。")
+                    uiState = uiState.copy(error = UiText.res(R.string.relay_error_gone))
                 } else {
                     uiState = uiState.copy(error = describe(error))
                 }
@@ -267,7 +270,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
     private fun writeClipboardCache(cacheDir: File, item: RelayItem): File {
         val directory = File(cacheDir, CLIPBOARD_DIRECTORY)
         if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory) {
-            throw java.io.IOException("无法准备剪贴板缓存目录")
+            throw java.io.IOException("Cannot prepare the clipboard cache directory")
         }
         directory.listFiles()?.forEach { old -> old.delete() }
         val target = File(directory, "${item.id}.${relayImageExtension(item.mimeType)}")
@@ -298,7 +301,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
 
     /** 大小未知时边读边数，超过上限立刻停止，避免把大文件整个读进内存。 */
     private fun readLimited(contentResolver: ContentResolver, uri: Uri, name: String): ByteArray {
-        val input = contentResolver.openInputStream(uri) ?: throw IllegalArgumentException("无法读取「$name」")
+        val input = contentResolver.openInputStream(uri) ?: throw UiTextException(UiText.res(R.string.relay_error_cannot_read, name))
         return input.use { stream ->
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(64 * 1024)
@@ -308,7 +311,7 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
                 if (read < 0) break
                 total += read
                 if (total > RELAY_MAX_FILE_BYTES) {
-                    throw IllegalArgumentException("「$name」超过 20 MB，单个文件不能超过 20 MB。")
+                    throw UiTextException(UiText.res(R.string.relay_error_file_over_limit, name))
                 }
                 output.write(buffer, 0, read)
             }
@@ -316,12 +319,14 @@ class RelayViewModel(private val api: MemoApiClient) : ViewModel() {
         }
     }
 
-    private fun describe(error: Exception): String = when (error) {
-        is ApiException -> error.detailMessage ?: "操作失败（${error.statusCode}），请重试。"
-        is IllegalArgumentException -> error.message ?: "这个文件无法发送。"
-        is java.io.IOException -> "无法连接服务器。传输需要在线使用，请检查网络后重试。"
-        is SecurityException -> "没有读取或写入这个文件的权限。"
-        else -> "传输失败，请稍后重试。"
+    private fun describe(error: Exception): UiText = when (error) {
+        is HasUiText -> error.text
+        is ApiException -> error.detailMessage?.let(UiText::plain)
+            ?: UiText.res(R.string.error_operation_failed_retry, error.statusCode)
+        is IllegalArgumentException -> error.message?.let(UiText::plain) ?: UiText.res(R.string.relay_error_cannot_send)
+        is java.io.IOException -> UiText.res(R.string.relay_error_offline)
+        is SecurityException -> UiText.res(R.string.relay_error_permission)
+        else -> UiText.res(R.string.relay_error_generic)
     }
 
     override fun onCleared() {

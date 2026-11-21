@@ -1,5 +1,6 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.TestStrings.zh
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -52,8 +53,8 @@ class ForgetTest {
         assertNull(forgetTextError("", ""))
         assertNull(forgetTextError("  标题  ", "正文"))
         assertNull(forgetTextError("标".repeat(FORGET_TITLE_MAX), ""))
-        assertEquals("标题最多 100 个字", forgetTextError("标".repeat(FORGET_TITLE_MAX + 1), ""))
-        assertEquals("正文最多 10000 个字", forgetTextError("", "文".repeat(FORGET_CONTENT_MAX + 1)))
+        assertEquals("标题最多 100 个字", zh(forgetTextError("标".repeat(FORGET_TITLE_MAX + 1), "")))
+        assertEquals("正文最多 10000 个字", zh(forgetTextError("", "文".repeat(FORGET_CONTENT_MAX + 1))))
         assertEquals(1, forgetTextLength("😀"))
     }
 
@@ -62,9 +63,9 @@ class ForgetTest {
         assertNull(forgetFileError(1))
         assertNull(forgetFileError(FORGET_MAX_ATTACHMENT_BYTES))
         assertNull(forgetFileError(null))
-        assertEquals("附件内容不能为空", forgetFileError(0))
-        assertEquals("附件不能超过 20 MB", forgetFileError(FORGET_MAX_ATTACHMENT_BYTES + 1))
-        assertEquals("未命名", forgetDisplayTitle("  "))
+        assertEquals("附件内容不能为空", zh(forgetFileError(0)))
+        assertEquals("附件不能超过 20 MB", zh(forgetFileError(FORGET_MAX_ATTACHMENT_BYTES + 1)))
+        assertEquals(ContentDefaults.untitled, forgetDisplayTitle("  "))
         assertEquals("钥匙", forgetDisplayTitle(" 钥匙 "))
         assertEquals("12 B", formatForgetBytes(12))
         assertEquals("2 KB", formatForgetBytes(2048))

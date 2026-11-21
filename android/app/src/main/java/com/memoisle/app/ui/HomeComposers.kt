@@ -47,9 +47,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.memoisle.app.R
 import com.memoisle.app.data.TYPE_IDEA
 import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
@@ -69,13 +71,25 @@ internal fun QuickActions(
     onSelectVoice: () -> Unit,
     onSelectImage: () -> Unit,
 ) {
-    data class Action(val kind: MemoKindStyle, val label: String, val selected: Boolean, val onClick: () -> Unit)
+    data class Action(
+        val kind: MemoKindStyle,
+        val label: String,
+        val selected: Boolean,
+        val onClick: () -> Unit,
+        val loading: Boolean = false,
+    )
     val actions = listOf(
-        Action(memoKindStyle(TYPE_IDEA), "写灵感", activeType == TYPE_IDEA, onSelectIdea),
-        Action(memoKindStyle(TYPE_IDEA, isVoice = true), "语音记录", false, onSelectVoice),
-        Action(memoKindStyle(TYPE_WORD), "记单词", activeType == TYPE_WORD, onSelectWord),
-        Action(memoKindStyle(TYPE_RESOURCE), "看资料", activeType == TYPE_RESOURCE, onBrowseResource),
-        Action(memoKindStyle(TYPE_IMAGE), if (isUploadingImage) "上传中" else "图片", activeType == TYPE_IMAGE, onSelectImage),
+        Action(memoKindStyle(TYPE_IDEA), stringResource(R.string.home_action_write_idea), activeType == TYPE_IDEA, onSelectIdea),
+        Action(memoKindStyle(TYPE_IDEA, isVoice = true), stringResource(R.string.home_action_voice), false, onSelectVoice),
+        Action(memoKindStyle(TYPE_WORD), stringResource(R.string.home_action_word), activeType == TYPE_WORD, onSelectWord),
+        Action(memoKindStyle(TYPE_RESOURCE), stringResource(R.string.home_action_browse), activeType == TYPE_RESOURCE, onBrowseResource),
+        Action(
+            memoKindStyle(TYPE_IMAGE),
+            if (isUploadingImage) stringResource(R.string.home_action_uploading) else stringResource(R.string.kind_image),
+            activeType == TYPE_IMAGE,
+            onSelectImage,
+            loading = isUploadingImage,
+        ),
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -104,7 +118,7 @@ internal fun QuickActions(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (action.label == "上传中") {
+                    if (action.loading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(22.dp),
                             strokeWidth = 2.dp,
@@ -137,11 +151,11 @@ internal fun LibraryTypeFilter(
     onSelect: (String) -> Unit,
 ) {
     val filters = listOf(
-        "" to "全部",
-        TYPE_IDEA to "灵感",
-        TYPE_WORD to "单词",
-        TYPE_RESOURCE to "资料",
-        TYPE_IMAGE to "图片",
+        "" to stringResource(R.string.ledger_filter_all),
+        TYPE_IDEA to stringResource(R.string.kind_idea),
+        TYPE_WORD to stringResource(R.string.kind_word),
+        TYPE_RESOURCE to stringResource(R.string.home_filter_resources),
+        TYPE_IMAGE to stringResource(R.string.kind_image),
     )
     Row(
         modifier = Modifier
@@ -179,9 +193,9 @@ internal fun ImageComposerCard(
             KindAvatar(kind, size = 44.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("收藏图片", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.home_image_title), style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "上传原图，标题取自文件名，可在 Web 端补充备注。",
+                    stringResource(R.string.home_image_hint),
                     color = TextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -194,7 +208,7 @@ internal fun ImageComposerCard(
                 colors = ButtonDefaults.buttonColors(containerColor = kind.accent),
                 contentPadding = PaddingValues(horizontal = 14.dp),
             ) {
-                Text(if (isUploading) "上传中…" else "选择")
+                Text(if (isUploading) stringResource(R.string.home_uploading) else stringResource(R.string.home_choose))
             }
         }
     }
@@ -224,11 +238,11 @@ internal fun WordLookupControls(
             ) {
                 Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (isLookingUp) "正在查词…" else "重新查词")
+                Text(if (isLookingUp) stringResource(R.string.home_looking_up) else stringResource(R.string.home_lookup_again))
             }
             if (lookup != null) {
                 TextButton(onClick = onClearLookup, enabled = !isSaving) {
-                    Text("清除预览")
+                    Text(stringResource(R.string.home_clear_preview))
                 }
             }
         }
@@ -279,19 +293,19 @@ private fun WordLookupPreview(
                 verticalAlignment = Alignment.Top,
             ) {
                 Column {
-                    Text("词典预览", style = MaterialTheme.typography.titleSmall, color = WordAccent)
+                    Text(stringResource(R.string.home_dictionary_preview), style = MaterialTheme.typography.titleSmall, color = WordAccent)
                     Text(
                         if (preview.word != preview.lemma) {
-                            "按词元 ${preview.lemma} 查询"
+                            stringResource(R.string.home_lookup_by_lemma, preview.lemma)
                         } else {
-                            "选择要保存的中文释义"
+                            stringResource(R.string.home_choose_meanings)
                         },
                         color = TextMuted,
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
                 TextButton(onClick = onDismiss, enabled = !busy) {
-                    Text("收起")
+                    Text(stringResource(R.string.home_collapse))
                 }
             }
             ClickablePhonetic(
@@ -301,7 +315,7 @@ private fun WordLookupPreview(
                 ukAudioUrl = preview.ukAudioUrl,
             )
             if (preview.senses.isEmpty()) {
-                Text("词典没有返回中文释义，请手动填写。", color = TextMuted)
+                Text(stringResource(R.string.home_no_meaning), color = TextMuted)
             } else {
                 preview.senses.forEach { sense ->
                     Row(
@@ -328,7 +342,7 @@ private fun WordLookupPreview(
                             }
                             Text(sense.definition)
                             sense.example?.takeIf { it.isNotBlank() }?.let {
-                                Text("例句：$it", color = TextMuted, fontSize = 12.sp)
+                                Text(stringResource(R.string.home_example_prefix, it), color = TextMuted, fontSize = 12.sp)
                             }
                         }
                     }
@@ -343,10 +357,10 @@ private fun WordLookupPreview(
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = WordAccent),
                 ) {
-                    Text("使用所选释义")
+                    Text(stringResource(R.string.home_use_selected))
                 }
                 OutlinedButton(onClick = onDismiss, enabled = !busy) {
-                    Text("保留手动填写")
+                    Text(stringResource(R.string.home_keep_manual))
                 }
             }
         }
@@ -390,9 +404,9 @@ internal fun WordComposer(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("收藏英语单词", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.home_word_title), style = MaterialTheme.typography.titleSmall)
                     Text(
-                        if (isLookingUp) "正在填入中文释义、音标和例句…" else "输入后自动填入释义、音标和例句",
+                        if (isLookingUp) stringResource(R.string.home_word_filling) else stringResource(R.string.home_word_hint),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -400,15 +414,15 @@ internal fun WordComposer(
                 TextButton(onClick = onFillClipboard, enabled = !isSaving) {
                     Icon(Icons.Outlined.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("剪贴板")
+                    Text(stringResource(R.string.home_clipboard))
                 }
             }
             OutlinedTextField(
                 value = lemma,
                 onValueChange = onLemmaChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("单词或短语") },
-                placeholder = { Text("例如 serendipity") },
+                label = { Text(stringResource(R.string.home_word_label)) },
+                placeholder = { Text(stringResource(R.string.home_word_placeholder)) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = fieldColors,
@@ -435,7 +449,7 @@ internal fun WordComposer(
                 value = meaning,
                 onValueChange = onMeaningChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("中文释义（自动填入）") },
+                label = { Text(stringResource(R.string.home_meaning_label)) },
                 minLines = 2,
                 maxLines = 5,
                 shape = RoundedCornerShape(12.dp),
@@ -445,7 +459,7 @@ internal fun WordComposer(
                 value = example,
                 onValueChange = onExampleChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("例句（自动填入）") },
+                label = { Text(stringResource(R.string.home_example_label)) },
                 minLines = 2,
                 maxLines = 5,
                 shape = RoundedCornerShape(12.dp),
@@ -460,7 +474,7 @@ internal fun WordComposer(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text(if (isSaving) "保存中…" else "收藏单词")
+                Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.home_save_word))
             }
         }
     }
@@ -478,7 +492,7 @@ internal fun ResourceReadOnlyCard() {
         Icon(Icons.Outlined.Info, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text(
-            "手机上只读浏览；收藏网页可在浏览器里分享到 MemoIsle，整理请到 Web 端。",
+            stringResource(R.string.home_resource_hint),
             color = TextMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -491,14 +505,14 @@ internal fun ResourceCategoryFilter(
     onSelect: (String) -> Unit,
 ) {
     val categories = listOf(
-        "" to "全部分类",
-        "learning" to "学习资料",
-        "article" to "文章阅读",
-        "media" to "视频音频",
-        "tool" to "工具服务",
-        "book_paper" to "书籍论文",
-        "product" to "商品好物",
-        "other" to "其他",
+        "" to stringResource(R.string.ledger_all_categories),
+        "learning" to stringResource(R.string.resource_category_learning),
+        "article" to stringResource(R.string.resource_category_article),
+        "media" to stringResource(R.string.home_filter_cat_media),
+        "tool" to stringResource(R.string.home_filter_cat_tool),
+        "book_paper" to stringResource(R.string.home_filter_cat_book_paper),
+        "product" to stringResource(R.string.home_filter_cat_product),
+        "other" to stringResource(R.string.common_other),
     )
     Row(
         modifier = Modifier
@@ -534,7 +548,7 @@ internal fun IdeaComposer(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
                 maxLines = 7,
-                placeholder = { Text("记下此刻的想法，稍后再整理……", color = TextMuted) },
+                placeholder = { Text(stringResource(R.string.home_idea_placeholder), color = TextMuted) },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
@@ -552,7 +566,7 @@ internal fun IdeaComposer(
                         .size(18.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("保存后先进入收件箱", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.home_idea_inbox_hint), color = TextMuted, style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.weight(1f))
                 Button(
                     onClick = onSave,
@@ -560,7 +574,7 @@ internal fun IdeaComposer(
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
                 ) {
-                    Text(if (isSaving) "保存中…" else "保存灵感")
+                    Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.home_save_idea))
                 }
             }
         }

@@ -4,6 +4,7 @@ import Icon from "./Icon";
 import { resourceSummary } from "./resourceSummary";
 import type { Memo } from "./types";
 import { siteHue, sourceHost } from "./webUrl";
+import { useI18n } from "./I18nProvider";
 
 function avatarLetter(memo: Memo): string {
   const name = memo.resource_site_name || sourceHost(memo.source_url) || memo.title;
@@ -20,16 +21,17 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
   onRemove: (memo: Memo) => void;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   if (!loaded) return null;
   return (
     <section className={`quick-access${compact ? " compact" : ""}`} aria-labelledby="quick-access-title">
       <div className="quick-access-header">
-        <h2 id="quick-access-title">快速访问</h2>
-        <small>按打开次数排列</small>
+        <h2 id="quick-access-title">{t("快速访问")}</h2>
+        <small>{t("按打开次数排列")}</small>
       </div>
       {items.length === 0 && (
         <p className="quick-access-empty">
-          还没有打开记录。在 MemoIsle 里点开网页标题或「打开原网页」后，常用的网页会按打开次数出现在这里。
+          {t("还没有打开记录。在 MemoIsle 里点开网页标题或「打开原网页」后，常用的网页会按打开次数出现在这里。")}
         </p>
       )}
       {items.length > 0 && <ul className="quick-access-grid">
@@ -61,14 +63,14 @@ export default function QuickAccess({ items, loaded, onOpen, onRemove, compact =
                 <span className="quick-access-text">
                   <strong>{memo.title}</strong>
                   {summary && <span className="quick-access-summary">{summary}</span>}
-                  <small>{memo.resource_open_count} 次 · {host}</small>
+                  <small>{t("{resource_open_count} 次 · {host}", { resource_open_count: memo.resource_open_count, host })}</small>
                 </span>
               </a>
               <button
                 type="button"
                 className="quick-access-remove"
-                aria-label={`从快速访问移除「${memo.title}」`}
-                title="从快速访问移除"
+                aria-label={t("从快速访问移除「{title}」", { title: memo.title })}
+                title={t("从快速访问移除")}
                 onClick={() => {
                   // 移除后焦点落到相邻磁贴，键盘操作不会丢失位置。
                   const index = items.findIndex((item) => item.id === memo.id);

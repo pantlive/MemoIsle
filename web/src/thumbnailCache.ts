@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * 图片缩略图的对象 URL 缓存。
  *
@@ -55,7 +56,7 @@ export class ThumbnailCache {
       .then((url) => {
         if (generation !== this.generation) {
           this.revoke(url);
-          throw new Error("缩略图缓存已清空");
+          throw new Error(t("缩略图缓存已清空"));
         }
         this.store(memoId, key, url);
         return url;

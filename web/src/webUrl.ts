@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 // 网页资料共用的网址工具：补全协议并校验，或取出展示用的站点名。
 
 export function normalizeWebUrl(value: string): string | null {
@@ -19,7 +20,7 @@ export function normalizeWebUrl(value: string): string | null {
 
 export function sourceHost(sourceUrl: string | null): string {
   if (!sourceUrl) {
-    return "网页资料";
+    return t("网页资料");
   }
   try {
     return new URL(sourceUrl).hostname.replace(/^www\./, "");

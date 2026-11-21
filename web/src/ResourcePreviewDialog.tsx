@@ -4,9 +4,11 @@ import Icon from "./Icon";
 import ResourceClassificationInsight from "./ResourceClassificationInsight";
 import type { Memo, MemoType } from "./types";
 import { normalizeWebUrl, sourceHost } from "./webUrl";
+import { useI18n } from "./I18nProvider";
+import { dateTimeFormat } from "./i18n";
 
 const MAX_TAGS = 20;
-const openedFormatter = new Intl.DateTimeFormat("zh-CN", {
+const openedFormatter = (): Intl.DateTimeFormat => dateTimeFormat({
   month: "numeric",
   day: "numeric",
   hour: "2-digit",
@@ -74,6 +76,7 @@ export default function ResourcePreviewDialog({
   // 从列表按 E 打开时直接进入编辑。
   initialEditing?: boolean;
 }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -89,7 +92,7 @@ export default function ResourcePreviewDialog({
     setTitle(memo.title);
     setUrl(memo.source_url ?? "");
     setNote(resourceNote(memo));
-    setTagText(memo.tags.join("，"));
+    setTagText(memo.tags.join(t("，")));
     setError("");
     setEditing(true);
   };
@@ -145,7 +148,7 @@ export default function ResourcePreviewDialog({
     event.preventDefault();
     const sourceUrl = normalizeWebUrl(url);
     if (!sourceUrl) {
-      setError("请输入有效的网址，例如 https://example.com/article。");
+      setError(t("请输入有效的网址，例如 https://example.com/article。"));
       return;
     }
     const cleanedNote = note.trim();
@@ -178,13 +181,13 @@ export default function ResourcePreviewDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label"><Icon name="link" size={16} /> 网页资料</span>
-            <h2 id="resource-preview-title">{editing ? "编辑网页资料" : memo.title}</h2>
+            <span className="type-label"><Icon name="link" size={16} />{t(" 网页资料")}</span>
+            <h2 id="resource-preview-title">{editing ? t("编辑网页资料") : memo.title}</h2>
           </div>
           <button
             type="button"
             className="icon-button"
-            aria-label="关闭网页资料预览"
+            aria-label={t("关闭网页资料预览")}
             onClick={onClose}
             disabled={saving}
           >
@@ -196,17 +199,17 @@ export default function ResourcePreviewDialog({
           <form className="resource-edit-form" onSubmit={(event) => void handleSubmit(event)}>
             <div className="dialog-body">
             <label>
-              标题
+              {t("标题")}
               <input
                 ref={titleRef}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="留空时使用站点名"
+                placeholder={t("留空时使用站点名")}
                 maxLength={200}
               />
             </label>
             <label>
-              网址
+              {t("网址")}
               <input
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
@@ -216,11 +219,11 @@ export default function ResourcePreviewDialog({
                 required
               />
               {normalizeWebUrl(url) !== memo.source_url && normalizeWebUrl(url) && (
-                <small>修改网址后会重新读取网页信息并重新分类。</small>
+                <small>{t("修改网址后会重新读取网页信息并重新分类。")}</small>
               )}
             </label>
             <label>
-              备注
+              {t("备注")}
               <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
@@ -229,13 +232,13 @@ export default function ResourcePreviewDialog({
               />
             </label>
             <label>
-              标签
+              {t("标签")}
               <input
                 value={tagText}
                 onChange={(event) => setTagText(event.target.value)}
-                placeholder="用逗号或空格分隔，例如：React，前端"
+                placeholder={t("用逗号或空格分隔，例如：React，前端")}
               />
-              <small>最多 {MAX_TAGS} 个。</small>
+              <small>{t("最多 {MAX_TAGS} 个。", { MAX_TAGS })}</small>
             </label>
             </div>
             <div className="dialog-actions resource-preview-actions">
@@ -248,10 +251,10 @@ export default function ResourcePreviewDialog({
                 }}
                 disabled={saving}
               >
-                取消
+                {t("取消")}
               </button>
               <button type="submit" className="primary" disabled={saving}>
-                {saving ? "保存中…" : "保存"}
+                {saving ? t("保存中…") : t("保存")}
               </button>
             </div>
             {error && <div className="dialog-error" role="alert">{error}</div>}
@@ -262,25 +265,25 @@ export default function ResourcePreviewDialog({
             <div className="resource-preview-content">
               {memo.resource_ai_summary && (
                 <p className="resource-ai-summary">
-                  <span>用途</span>
+                  <span>{t("用途")}</span>
                   {memo.resource_ai_summary}
                 </p>
               )}
               {memo.resource_description && <p>{memo.resource_description}</p>}
               {savedNote && (
                 <div className="resource-preview-note">
-                  <span>个人备注</span>
+                  <span>{t("个人备注")}</span>
                   <p>{savedNote}</p>
                 </div>
               )}
               {memo.tags.length > 0 && (
-                <div className="resource-user-tags" aria-label="我的标签">
+                <div className="resource-user-tags" aria-label={t("我的标签")}>
                   {memo.tags.map((tag) => (
                     <button
                       type="button"
                       key={tag}
                       className="resource-user-tag"
-                      title={`在网页资料中搜索「${tag}」`}
+                      title={t("在网页资料中搜索「{tag}」", { tag })}
                       onClick={() => onTagSearch(tag)}
                     >
                       #{tag}
@@ -289,7 +292,7 @@ export default function ResourcePreviewDialog({
                 </div>
               )}
               <p className="resource-preview-categories">
-                分类：{categoryLabels.length > 0 ? categoryLabels.join(" · ") : "分类中"}
+                {t("分类：")}{categoryLabels.length > 0 ? categoryLabels.join(" · ") : t("分类中")}
               </p>
               <a
                 className="resource-preview-url"
@@ -299,64 +302,64 @@ export default function ResourcePreviewDialog({
                 onClick={() => memo.source_url && onOpenSource()}
                 onAuxClick={(event) => event.button === 1 && memo.source_url && onOpenSource()}
               >
-                {memo.source_url || "暂无来源网址"}
+                {memo.source_url || t("暂无来源网址")}
               </a>
               <span className="resource-preview-meta">
                 {memo.resource_site_name || sourceHost(memo.source_url)}
-                {memo.resource_open_count > 0 && ` · 已打开 ${memo.resource_open_count} 次`}
-                {memo.resource_last_opened_at && ` · 最近 ${openedFormatter.format(new Date(memo.resource_last_opened_at))}`}
-                {memo.link_health_status !== "unchecked" && ` · 巡检：${memo.link_health_status}`}
+                {memo.resource_open_count > 0 && t(" · 已打开 {resource_open_count} 次", { resource_open_count: memo.resource_open_count })}
+                {memo.resource_last_opened_at && t(" · 最近 {value}", { value: openedFormatter().format(new Date(memo.resource_last_opened_at)) })}
+                {memo.link_health_status !== "unchecked" && t(" · 巡检：{link_health_status}", { link_health_status: memo.link_health_status })}
               </span>
               {(memo.resource_open_count > 0 || memo.resource_quick_access_hidden) && (
                 <p className="resource-preview-quick-access">
                   {memo.resource_quick_access_hidden
-                    ? "已从快速访问移除。"
-                    : "会按打开次数出现在快速访问。"}
+                    ? t("已从快速访问移除。")
+                    : t("会按打开次数出现在快速访问。")}
                   <button
                     type="button"
                     onClick={() => onQuickAccessHiddenChange(!memo.resource_quick_access_hidden)}
                   >
-                    {memo.resource_quick_access_hidden ? "重新显示" : "从快速访问移除"}
+                    {memo.resource_quick_access_hidden ? t("重新显示") : t("从快速访问移除")}
                   </button>
                 </p>
               )}
               {hasClassificationDetail(memo) && (
                 <details className="resource-preview-insight">
-                  <summary>分类依据</summary>
+                  <summary>{t("分类依据")}</summary>
                   <ResourceClassificationInsight memo={memo} />
                 </details>
               )}
               <label className="resource-preview-type">
-                转换为
+                {t("转换为")}
                 <select
                   value={memo.type}
                   disabled={typeChanging}
                   onChange={(event) => onChangeType(event.target.value as MemoType)}
                 >
-                  <option value="resource">网页资料</option>
-                  <option value="idea">灵感</option>
-                  <option value="word">英语单词</option>
+                  <option value="resource">{t("网页资料")}</option>
+                  <option value="idea">{t("灵感")}</option>
+                  <option value="word">{t("英语单词")}</option>
                 </select>
               </label>
             </div>
             </div>
             <div className="dialog-actions resource-preview-actions">
-              <button type="button" className="ghost" onClick={startEditing} disabled={busy}>编辑</button>
+              <button type="button" className="ghost" onClick={startEditing} disabled={busy}>{t("编辑")}</button>
               <details className="resource-preview-more">
-                <summary aria-label="更多操作">
+                <summary aria-label={t("更多操作")}>
                   <Icon name="more" size={16} />
                 </summary>
                 <div
                   className="resource-preview-more-menu"
                   onClick={(event) => event.currentTarget.closest("details")?.removeAttribute("open")}
                 >
-                  <button type="button" onClick={onCopyLink} disabled={!memo.source_url}>复制链接</button>
+                  <button type="button" onClick={onCopyLink} disabled={!memo.source_url}>{t("复制链接")}</button>
                   <button type="button" onClick={onArchive} disabled={busy}>
-                    {busy ? "处理中…" : "归档"}
+                    {busy ? t("处理中…") : t("归档")}
                   </button>
                 </div>
               </details>
-              <button type="button" className="danger-button" onClick={onTrash}>回收站</button>
+              <button type="button" className="danger-button" onClick={onTrash}>{t("回收站")}</button>
               <button
                 type="button"
                 className="primary"
@@ -368,7 +371,7 @@ export default function ResourcePreviewDialog({
                 }}
                 disabled={!memo.source_url}
               >
-                打开原网页
+                {t("打开原网页")}
               </button>
             </div>
           </>

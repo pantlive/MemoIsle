@@ -19,6 +19,8 @@ import type {
 } from "./types";
 import { sourceHost } from "./webUrl";
 import Icon from "./Icon";
+import { dateTimeFormat, t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 // 每页条数；服务端单页上限 1000，翻页没有总量限制。
 const PAGE_SIZE = 200;
@@ -28,13 +30,13 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 // 窗口选项：0 表示不限时间。
 const WINDOW_OPTIONS: Array<{ value: number; label: string }> = [
-  { value: 30, label: "最近 30 天" },
-  { value: 90, label: "最近 90 天" },
-  { value: 365, label: "最近一年" },
-  { value: 0, label: "全部时间" },
+  { value: 30, get label() { return t("最近 30 天"); } },
+  { value: 90, get label() { return t("最近 90 天"); } },
+  { value: 365, get label() { return t("最近一年"); } },
+  { value: 0, get label() { return t("全部时间"); } },
 ];
 
-const dayFormatter = new Intl.DateTimeFormat("zh-CN", {
+const dayFormatter = (): Intl.DateTimeFormat => dateTimeFormat({
   year: "numeric",
   month: "long",
   day: "numeric",
@@ -48,7 +50,7 @@ function formatDayLabel(value: string): string {
     return value;
   }
   try {
-    return dayFormatter.format(new Date(year, month - 1, day));
+    return dayFormatter().format(new Date(year, month - 1, day));
   } catch {
     return value;
   }
@@ -74,12 +76,12 @@ function todayInputValue(): string {
 
 function windowLabel(days: number | null): string {
   if (days === null) {
-    return "全部时间";
+    return t("全部时间");
   }
-  return days === 365 ? "最近一年" : `最近 ${days} 天`;
+  return days === 365 ? t("最近一年") : t("最近 {days} 天", { days });
 }
 
-const visitedFormatter = new Intl.DateTimeFormat("zh-CN", {
+const visitedFormatter = (): Intl.DateTimeFormat => dateTimeFormat({
   month: "numeric",
   day: "numeric",
   hour: "2-digit",
@@ -88,7 +90,7 @@ const visitedFormatter = new Intl.DateTimeFormat("zh-CN", {
 
 function formatVisited(value: string): string {
   try {
-    return visitedFormatter.format(new Date(value));
+    return visitedFormatter().format(new Date(value));
   } catch {
     return value;
   }
@@ -117,6 +119,7 @@ export default function BrowserHistoryDialog({
   onOpenSaved,
   onOpenSettings,
 }: BrowserHistoryDialogProps) {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<BrowserHistoryListResponse | null>(null);
   const [entries, setEntries] = useState<BrowserHistoryEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -171,7 +174,7 @@ export default function BrowserHistoryDialog({
       if (requestId !== requestIdRef.current) {
         return;
       }
-      setError(describeChange(loadError, "读取浏览历史失败。"));
+      setError(describeChange(loadError, t("读取浏览历史失败。")));
       setSnapshot(null);
       setEntries([]);
     } finally {
@@ -221,7 +224,7 @@ export default function BrowserHistoryDialog({
         ];
       });
     } catch (loadError) {
-      setError(describeChange(loadError, "继续读取浏览历史失败。"));
+      setError(describeChange(loadError, t("继续读取浏览历史失败。")));
     } finally {
       setLoadingMore(false);
     }
@@ -252,7 +255,7 @@ export default function BrowserHistoryDialog({
             : item,
         ),
       );
-      setNotice(`已把「${title}」收进资料库。`);
+      setNotice(t("已把「{title}」收进资料库。", { title }));
       onSaved(memo);
     } catch (saveError) {
       if (
@@ -270,10 +273,10 @@ export default function BrowserHistoryDialog({
               : item,
           ),
         );
-        setNotice("这条网页已经在资料库里，已定位到原有条目。");
+        setNotice(t("这条网页已经在资料库里，已定位到原有条目。"));
         onSaved(existing);
       } else {
-        setError(describeChange(saveError, "收藏这条浏览记录失败。"));
+        setError(describeChange(saveError, t("收藏这条浏览记录失败。")));
       }
     } finally {
       setSavingUrl(null);
@@ -310,7 +313,7 @@ export default function BrowserHistoryDialog({
   const activeWindowLabel = dateRangeActive
     ? dateFrom === (dateTo || dateFrom)
       ? formatDayLabel(dateFrom)
-      : `${formatDayLabel(dateFrom)} 至 ${formatDayLabel(dateTo || dateFrom)}`
+      : t("{value} 至 {value2}", { value: formatDayLabel(dateFrom), value2: formatDayLabel(dateTo || dateFrom) })
     : windowLabel(snapshot ? snapshot.window_days : windowDays);
   const [clearing, setClearing] = useState(false);
   const [managingDevices, setManagingDevices] = useState(false);
@@ -332,9 +335,9 @@ export default function BrowserHistoryDialog({
     try {
       await renameBrowserHistoryDevice(deviceId, deviceName);
       await refreshDevices();
-      setNotice(`设备已改名为「${deviceName}」。`);
+      setNotice(t("设备已改名为「{deviceName}」。", { deviceName }));
     } catch (renameError) {
-      setError(describeChange(renameError, "重命名设备失败。"));
+      setError(describeChange(renameError, t("重命名设备失败。")));
     }
   };
 
@@ -343,8 +346,8 @@ export default function BrowserHistoryDialog({
     const target = devices.find((item) => item.device_id === targetDeviceId);
     if (
       !window.confirm(
-        `把「${source?.device_name || deviceId}」的历史并进「${target?.device_name || targetDeviceId}」？\n\n` +
-          "合并后两台会变成一台，重复网址的访问次数会相加。确认它们确实是同一台机器再继续。",
+        t("把「{value}」的历史并进「{value2}」？\n\n", { value: source?.device_name || deviceId, value2: target?.device_name || targetDeviceId }) +
+          t("合并后两台会变成一台，重复网址的访问次数会相加。确认它们确实是同一台机器再继续。"),
       )
     ) {
       return;
@@ -356,9 +359,9 @@ export default function BrowserHistoryDialog({
         setDeviceFilter(targetDeviceId);
       }
       await refreshDevices();
-      setNotice("已合并为同一台设备。");
+      setNotice(t("已合并为同一台设备。"));
     } catch (mergeError) {
-      setError(describeChange(mergeError, "合并设备失败。"));
+      setError(describeChange(mergeError, t("合并设备失败。")));
     }
   };
 
@@ -366,8 +369,8 @@ export default function BrowserHistoryDialog({
     const label = device.device_name || device.device_id;
     if (
       !window.confirm(
-        `删除设备「${label}」及其 ${device.total_count} 条历史？\n\n` +
-          "只影响这台设备，其他电脑的记录不受影响。已经收藏进资料库的网页也不会被删除。",
+        t("删除设备「{label}」及其 {total_count} 条历史？\n\n", { label, total_count: device.total_count }) +
+          t("只影响这台设备，其他电脑的记录不受影响。已经收藏进资料库的网页也不会被删除。"),
       )
     ) {
       return;
@@ -379,9 +382,9 @@ export default function BrowserHistoryDialog({
         setDeviceFilter("");
       }
       await refreshDevices();
-      setNotice(`已删除设备「${label}」。`);
+      setNotice(t("已删除设备「{label}」。", { label }));
     } catch (deleteError) {
-      setError(describeChange(deleteError, "删除设备失败。"));
+      setError(describeChange(deleteError, t("删除设备失败。")));
     }
   };
 
@@ -398,7 +401,7 @@ export default function BrowserHistoryDialog({
   const clearHistory = async () => {
     if (
       !window.confirm(
-        "清空后服务端保存的全部浏览历史都会删除，已经收藏进资料库的网页不受影响。继续吗？",
+        t("清空后服务端保存的全部浏览历史都会删除，已经收藏进资料库的网页不受影响。继续吗？"),
       )
     ) {
       return;
@@ -414,9 +417,9 @@ export default function BrowserHistoryDialog({
           : current,
       );
       setEntries([]);
-      setNotice("浏览历史已清空。浏览器里新产生的访问会在下次同步时重新出现。");
+      setNotice(t("浏览历史已清空。浏览器里新产生的访问会在下次同步时重新出现。"));
     } catch (clearError) {
-      setError(describeChange(clearError, "清空浏览历史失败。"));
+      setError(describeChange(clearError, t("清空浏览历史失败。")));
     } finally {
       setClearing(false);
     }
@@ -432,17 +435,15 @@ export default function BrowserHistoryDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label"><Icon name="history" size={16} /> 浏览历史</span>
-            <h2 id="history-dialog-title">最近浏览的网页</h2>
+            <span className="type-label"><Icon name="history" size={16} />{t(" 浏览历史")}</span>
+            <h2 id="history-dialog-title">{t("最近浏览的网页")}</h2>
             <p>
               {snapshot?.extension_connected
-                ? `扩展最近同步于 ${
-                    snapshot.synced_at ? formatVisited(snapshot.synced_at) : "未知时间"
-                  } · 本页显示 ${entries.length} 条`
-                : "还没有收到扩展同步的浏览记录，请确认已安装并登录新版扩展。"}
+                ? t("扩展最近同步于 {value} · 本页显示 {length} 条", { value: snapshot.synced_at ? formatVisited(snapshot.synced_at) : t("未知时间"), length: entries.length })
+                : t("还没有收到扩展同步的浏览记录，请确认已安装并登录新版扩展。")}
             </p>
           </div>
-          <button className="icon-button" aria-label="关闭浏览历史" onClick={onClose}>
+          <button className="icon-button" aria-label={t("关闭浏览历史")} onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -454,19 +455,19 @@ export default function BrowserHistoryDialog({
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={`搜索${activeWindowLabel}历史里的标题或网址`}
+              placeholder={t("搜索{activeWindowLabel}历史里的标题或网址", { activeWindowLabel })}
               maxLength={200}
-              aria-label="搜索浏览历史"
+              aria-label={t("搜索浏览历史")}
             />
             {search && (
-              <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}>
+              <button type="button" aria-label={t("清除搜索")} onClick={() => setSearch("")}>
                 <Icon name="close" size={14} />
               </button>
             )}
           </label>
           {extendedEnabled ? (
             <label className="history-window">
-              时间范围
+              {t("时间范围")}
               <select
                 value={windowDays}
                 onChange={(event) => {
@@ -489,16 +490,16 @@ export default function BrowserHistoryDialog({
               type="button"
               className="history-window-hint"
               onClick={onOpenSettings}
-              title="在设置里打开「搜索更久的历史」后可以按 90 天、一年或全部时间检索"
+              title={t("在设置里打开「搜索更久的历史」后可以按 90 天、一年或全部时间检索")}
             >
-              只看最近 30 天 · 在设置里开启更久
+              {t("只看最近 30 天 · 在设置里开启更久")}
             </button>
           )}
         </div>
 
         <div className="history-dates">
           <label>
-            从
+            {t("从")}
             <input
               type="date"
               value={dateFrom}
@@ -509,18 +510,18 @@ export default function BrowserHistoryDialog({
                   setDateTo(event.target.value);
                 }
               }}
-              aria-label="起始日期"
+              aria-label={t("起始日期")}
             />
           </label>
           <label>
-            到
+            {t("到")}
             <input
               type="date"
               value={dateTo}
               min={dateFrom || undefined}
               max={todayInputValue()}
               onChange={(event) => setDateTo(event.target.value)}
-              aria-label="结束日期"
+              aria-label={t("结束日期")}
               disabled={!dateFrom}
             />
           </label>
@@ -533,25 +534,25 @@ export default function BrowserHistoryDialog({
                 setDateTo("");
               }}
             >
-              清除日期
+              {t("清除日期")}
             </button>
           )}
           {!dateFrom && (
             <span className="history-dates-hint">
-              也可以只选某一天，查那一天的浏览记录
+              {t("也可以只选某一天，查那一天的浏览记录")}
             </span>
           )}
         </div>
 
         {/* 多台电脑同步到同一账号时，各自的记录分开存，可在这里切换查看。 */}
         {devices.length > 1 && (
-          <div className="history-devices" role="group" aria-label="按设备筛选">
+          <div className="history-devices" role="group" aria-label={t("按设备筛选")}>
             <button
               type="button"
               className={deviceFilter === "" ? "active" : ""}
               onClick={() => setDeviceFilter("")}
             >
-              全部设备
+              {t("全部设备")}
             </button>
             {devices.map((device) => (
               <button
@@ -559,7 +560,7 @@ export default function BrowserHistoryDialog({
                 key={device.device_id}
                 className={deviceFilter === device.device_id ? "active" : ""}
                 onClick={() => setDeviceFilter(device.device_id)}
-                title={`${device.total_count} 条 · 最近同步 ${formatVisited(device.synced_at)}`}
+                title={t("{total_count} 条 · 最近同步 {value}", { total_count: device.total_count, value: formatVisited(device.synced_at) })}
               >
                 {device.device_name || device.device_id.slice(0, 8)}
                 <small>{device.total_count}</small>
@@ -570,7 +571,7 @@ export default function BrowserHistoryDialog({
               className="history-device-manage"
               onClick={() => setManagingDevices((current) => !current)}
             >
-              {managingDevices ? "收起" : "管理设备"}
+              {managingDevices ? t("收起") : t("管理设备")}
             </button>
           </div>
         )}
@@ -582,7 +583,7 @@ export default function BrowserHistoryDialog({
               <li key={device.device_id}>
                 <div className="history-device-main">
                   <input
-                    aria-label={`重命名 ${device.device_name || device.device_id}`}
+                    aria-label={t("重命名 {value}", { value: device.device_name || device.device_id })}
                     defaultValue={device.device_name}
                     maxLength={120}
                     onBlur={(event) => {
@@ -593,7 +594,7 @@ export default function BrowserHistoryDialog({
                     }}
                   />
                   <small>
-                    {device.total_count} 条 · 最近同步 {formatVisited(device.synced_at)}
+                    {t("{total_count} 条 · 最近同步 {value}", { total_count: device.total_count, value: formatVisited(device.synced_at) })}
                   </small>
                 </div>
                 {device.possible_same_device_id && (
@@ -604,7 +605,7 @@ export default function BrowserHistoryDialog({
                       void mergeDevice(device.device_id, device.possible_same_device_id!)
                     }
                   >
-                    像是同一台机器？合并
+                    {t("像是同一台机器？合并")}
                   </button>
                 )}
                 <button
@@ -612,7 +613,7 @@ export default function BrowserHistoryDialog({
                   className="history-device-delete"
                   onClick={() => void removeDevice(device)}
                 >
-                  删除
+                  {t("删除")}
                 </button>
               </li>
             ))}
@@ -621,25 +622,25 @@ export default function BrowserHistoryDialog({
 
         <p className="history-hint">
           {extendedEnabled
-            ? `历史记录全部保留在你的资料库里，当前按「${activeWindowLabel}」展示，共 ${snapshot?.total_count ?? 0} 条；其中 ${savedCount} 条已收藏。`
-            : `历史记录全部保留在你的资料库里，默认只展示最近 30 天，共 ${snapshot?.total_count ?? 0} 条；其中 ${savedCount} 条已收藏。`}
+            ? t("历史记录全部保留在你的资料库里，当前按「{activeWindowLabel}」展示，共 {value} 条；其中 {savedCount} 条已收藏。", { activeWindowLabel, value: snapshot?.total_count ?? 0, savedCount })
+            : t("历史记录全部保留在你的资料库里，默认只展示最近 30 天，共 {value} 条；其中 {savedCount} 条已收藏。", { value: snapshot?.total_count ?? 0, savedCount })}
         </p>
 
         {hasMore && (
           <p className="history-notice">
-            还有 {Math.max(0, (snapshot?.total_count ?? 0) - entries.length)} 条更早的记录，继续翻页即可查看。
+            {t("还有 {value} 条更早的记录，继续翻页即可查看。", { value: Math.max(0, (snapshot?.total_count ?? 0) - entries.length) })}
           </p>
         )}
 
         {notice && <p className="history-notice">{notice}</p>}
 
         <div className="history-list">
-          {loading && <div className="history-empty">正在读取浏览历史……</div>}
+          {loading && <div className="history-empty">{t("正在读取浏览历史……")}</div>}
           {!loading && entries.length === 0 && !error && (
             <div className="history-empty">
               {debouncedSearch
-                ? `${activeWindowLabel}里没有标题或网址包含“${debouncedSearch}”的记录。`
-                : `${activeWindowLabel}还没有浏览记录。打开一些网页后，扩展会自动同步到这里。`}
+                ? t("{activeWindowLabel}里没有标题或网址包含“{debouncedSearch}”的记录。", { activeWindowLabel, debouncedSearch })
+                : t("{activeWindowLabel}还没有浏览记录。打开一些网页后，扩展会自动同步到这里。", { activeWindowLabel })}
             </div>
           )}
           {!loading &&
@@ -647,7 +648,7 @@ export default function BrowserHistoryDialog({
               <section className="history-day" key={group.date}>
                 <h3 className="history-day-heading">
                   <span>{formatDayLabel(group.date)}</span>
-                  <small>{group.items.length} 条</small>
+                  <small>{t("{length} 条", { length: group.items.length })}</small>
                 </h3>
                 {group.items.map((entry) => {
                   const saved = Boolean(entry.saved_memo_id);
@@ -670,9 +671,7 @@ export default function BrowserHistoryDialog({
                           {entry.page_title || sourceHost(entry.page_url)}
                         </a>
                         <small>
-                          {sourceHost(entry.page_url)} · 最近访问{" "}
-                          {formatVisited(entry.last_visited_at)} · 共{" "}
-                          {entry.visit_count} 次
+                          {t("{host} · 最近访问 {time} · 共 {visit_count} 次", { host: sourceHost(entry.page_url), time: formatVisited(entry.last_visited_at), visit_count: entry.visit_count })}
                           {/* 合并视图下标出来源设备，单设备视图下不必重复。 */}
                           {!deviceFilter && entry.device_name
                             ? ` · ${entry.device_name}`
@@ -692,13 +691,13 @@ export default function BrowserHistoryDialog({
                           }
                           void saveEntry(entry);
                         }}
-                        title={saved ? "在资料库中查看" : "收藏到 MemoIsle"}
+                        title={saved ? t("在资料库中查看") : t("收藏到 MemoIsle")}
                       >
                         {saved
-                          ? "已收藏"
+                          ? t("已收藏")
                           : savingUrl === entry.page_url
-                            ? "收藏中…"
-                            : "收藏"}
+                            ? t("收藏中…")
+                            : t("收藏")}
                       </button>
                     </article>
                   );
@@ -712,8 +711,8 @@ export default function BrowserHistoryDialog({
           {hasMore && (
             <button type="button" className="ghost" onClick={() => void loadMore()} disabled={loadingMore}>
               {loadingMore
-                ? "加载中…"
-                : `加载下一页（已显示 ${entries.length} / ${snapshot?.total_count ?? 0}）`}
+                ? t("加载中…")
+                : t("加载下一页（已显示 {length} / {value}）", { length: entries.length, value: snapshot?.total_count ?? 0 })}
             </button>
           )}
           {/* 清空只删历史，已经收藏进资料库的网页不会被动到。 */}
@@ -723,10 +722,10 @@ export default function BrowserHistoryDialog({
             onClick={() => void clearHistory()}
             disabled={clearing || entries.length === 0}
           >
-            {clearing ? "清空中…" : "清空历史"}
+            {clearing ? t("清空中…") : t("清空历史")}
           </button>
           <button type="button" className="primary" onClick={onClose}>
-            关闭
+            {t("关闭")}
           </button>
         </div>
         {error && <div className="dialog-error" role="alert">{error}</div>}

@@ -74,6 +74,7 @@ import type {
   WeeklySummary,
 } from "./types";
 import extensionManifest from "../../extension/manifest.json";
+import { t } from "./i18n";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 const ACCESS_TOKEN_STORAGE_KEY = "memoisle_access_token";
@@ -224,7 +225,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // API_BASE_URL 默认就是 /api/v1，调用方再写一遍会变成
     // /api/v1/api/v1/...，而 tsc 与打包都不会报错，只有运行时 404。
     // 开发期直接抛错，避免同类问题再次悄悄上线。
-    throw new Error(`路径不要自带 /api 前缀：${path}`);
+    throw new Error(t("路径不要自带 /api 前缀：{path}", { path }));
   }
   const accessToken = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -251,7 +252,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       } | Array<{ msg?: string }>;
     } | null;
     const detail = payload?.detail;
-    const message = readApiErrorDetail(detail, `请求失败（${response.status}）`);
+    const message = readApiErrorDetail(detail, t("请求失败（{status}）", { status: response.status }));
     const code = detail && !Array.isArray(detail) && typeof detail === "object"
       ? detail.code
       : undefined;
@@ -416,7 +417,7 @@ export async function downloadUserData(
       detail?: string;
     } | null;
     throw new ApiError(
-      payload?.detail ?? `数据导出失败（${response.status}）`,
+      payload?.detail ?? t("数据导出失败（{status}）", { status: response.status }),
       response.status,
     );
   }
@@ -443,7 +444,7 @@ export async function importLibraryData(file: File): Promise<WordImportResponse>
       detail?: string;
     } | null;
     throw new ApiError(
-      payload?.detail ?? `数据导入失败（${response.status}）`,
+      payload?.detail ?? t("数据导入失败（{status}）", { status: response.status }),
       response.status,
     );
   }
@@ -471,7 +472,7 @@ export async function importWords(file: File): Promise<WordImportResponse> {
       detail?: string;
     } | null;
     throw new ApiError(
-      payload?.detail ?? `单词导入失败（${response.status}）`,
+      payload?.detail ?? t("单词导入失败（{status}）", { status: response.status }),
       response.status,
     );
   }
@@ -942,7 +943,7 @@ export async function recognizeLedgerImage(file: Blob, today: string): Promise<L
     const detail = payload?.detail;
     const message = typeof detail === "string"
       ? detail
-      : detail?.message ?? `图片识别失败（${response.status}）`;
+      : detail?.message ?? t("图片识别失败（{status}）", { status: response.status });
     throw new ApiError(message, response.status);
   }
   return (await response.json()) as LedgerImageDraft;
@@ -1039,7 +1040,7 @@ export async function uploadForgetAttachment(itemId: string, file: File): Promis
       },
       body: file,
     },
-    `上传失败（附件）`,
+    t("上传失败（附件）"),
   );
   return (await response.json()) as ForgetItem;
 }
@@ -1049,7 +1050,7 @@ export async function downloadForgetAttachment(itemId: string, attachmentId: str
   const response = await forgetBinary(
     `/forget/items/${encodeURIComponent(itemId)}/attachments/${encodeURIComponent(attachmentId)}`,
     { headers: {} },
-    "下载失败",
+    t("下载失败"),
   );
   return response.blob();
 }
@@ -1119,7 +1120,7 @@ export async function sendRelayFile(file: File, target: RelayDevice = RELAY_PEER
       detail?: string | { message?: string } | Array<{ msg?: string }>;
     } | null;
     throw new ApiError(
-      readApiErrorDetail(payload?.detail, `发送失败（${response.status}）`),
+      readApiErrorDetail(payload?.detail, t("发送失败（{status}）", { status: response.status })),
       response.status,
     );
   }
@@ -1149,7 +1150,7 @@ export async function downloadRelayItem(id: string): Promise<Blob> {
       clearAccessToken();
     }
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(payload?.detail ?? `下载失败（${response.status}）`, response.status);
+    throw new ApiError(payload?.detail ?? t("下载失败（{status}）", { status: response.status }), response.status);
   }
   return response.blob();
 }
@@ -1244,7 +1245,7 @@ export async function listOpenBrowserTabs(): Promise<BrowserOpenTab[]> {
     return response.items;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("读取当前浏览器网页超时，请确认扩展已连接后重试。");
+      throw new Error(t("读取当前浏览器网页超时，请确认扩展已连接后重试。"));
     }
     throw error;
   } finally {
@@ -1288,7 +1289,7 @@ export async function listBrowserHistory(options?: {
     );
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("读取浏览历史超时，请确认扩展已连接后重试。");
+      throw new Error(t("读取浏览历史超时，请确认扩展已连接后重试。"));
     }
     throw error;
   } finally {
@@ -1449,7 +1450,7 @@ export async function synthesizeSpeech(
     const message =
       typeof detail === "string"
         ? detail
-        : detail?.message ?? `语音合成失败（${response.status}）`;
+        : detail?.message ?? t("语音合成失败（{status}）", { status: response.status });
     throw new ApiError(message, response.status);
   }
   return response.blob();
@@ -1644,7 +1645,7 @@ export async function uploadMemoAudio(
     const message =
       typeof detail === "string"
         ? detail
-        : detail?.message ?? `录音上传失败（${response.status}）`;
+        : detail?.message ?? t("录音上传失败（{status}）", { status: response.status });
     throw new ApiError(message, response.status);
   }
   return (await response.json()) as Memo;
@@ -1660,7 +1661,7 @@ export async function loadMemoAudioUrl(memoId: string): Promise<string> {
   });
   if (!response.ok) {
     clearAccessToken();
-    throw new ApiError(`录音读取失败（${response.status}）`, response.status);
+    throw new ApiError(t("录音读取失败（{status}）", { status: response.status }), response.status);
   }
   const audio = await response.blob();
   return URL.createObjectURL(audio);
@@ -1719,7 +1720,7 @@ export async function uploadMemoImage(
     const message =
       typeof detail === "string"
         ? detail
-        : detail?.message ?? `图片上传失败（${response.status}）`;
+        : detail?.message ?? t("图片上传失败（{status}）", { status: response.status });
     const code = typeof detail === "object" ? detail?.code : undefined;
     const current = typeof detail === "object" ? detail?.current : undefined;
     throw new ApiError(message, response.status, code, current);
@@ -1749,8 +1750,8 @@ export async function loadMemoImageUrl(
     }
     throw new ApiError(
       variant === "original"
-        ? `原图读取失败（${response.status}）`
-        : `缩略图读取失败（${response.status}）`,
+        ? t("原图读取失败（{status}）", { status: response.status })
+        : t("缩略图读取失败（{status}）", { status: response.status }),
       response.status,
     );
   }

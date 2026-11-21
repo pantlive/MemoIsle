@@ -8,6 +8,8 @@ import {
   verifyCloudAccount,
 } from "./api";
 import type { CloudAccount, CloudProvider } from "./types";
+import { dateTimeFormat, t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 interface CloudAccountDialogProps {
   onClose: () => void;
@@ -15,8 +17,8 @@ interface CloudAccountDialogProps {
 }
 
 const providerLabels: Record<CloudProvider, string> = {
-  aliyun: "阿里云盘",
-  baidu: "百度网盘",
+  get aliyun() { return t("阿里云盘"); },
+  get baidu() { return t("百度网盘"); },
 };
 
 const credentialPlaceholder: Record<CloudProvider, string> = {
@@ -26,13 +28,11 @@ const credentialPlaceholder: Record<CloudProvider, string> = {
 };
 
 const credentialHint: Record<CloudProvider, string> = {
-  aliyun:
-    "阿里云盘使用官方 OpenAPI：请在阿里云盘开放平台注册应用，粘贴 refresh_token 与配套的 client_id / client_secret，或一个尚未过期的 access_token。",
-  baidu:
-    "百度网盘走浏览器登录态：粘贴 BDUSS（可带 STOKEN）。上传还需要开放平台应用的 access_token，只给 cookie 时上传会被拒绝，目录与分享转存不受影响。",
+  get aliyun() { return t("阿里云盘使用官方 OpenAPI：请在阿里云盘开放平台注册应用，粘贴 refresh_token 与配套的 client_id / client_secret，或一个尚未过期的 access_token。"); },
+  get baidu() { return t("百度网盘走浏览器登录态：粘贴 BDUSS（可带 STOKEN）。上传还需要开放平台应用的 access_token，只给 cookie 时上传会被拒绝，目录与分享转存不受影响。"); },
 };
 
-const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
+const dateFormatter = (): Intl.DateTimeFormat => dateTimeFormat({
   month: "short",
   day: "numeric",
   hour: "2-digit",
@@ -40,20 +40,21 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 function formatTime(value: string | null): string {
-  return value ? dateFormatter.format(new Date(value)) : "尚未校验";
+  return value ? dateFormatter().format(new Date(value)) : t("尚未校验");
 }
 
 export default function CloudAccountDialog({
   onClose,
   onChanged,
 }: CloudAccountDialogProps) {
+  const { t } = useI18n();
   const [accounts, setAccounts] = useState<CloudAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [provider, setProvider] = useState<CloudProvider>("aliyun");
   const [credential, setCredential] = useState("");
-  const [defaultFolder, setDefaultFolder] = useState("/MemoIsle/电子书");
+  const [defaultFolder, setDefaultFolder] = useState(t("/MemoIsle/电子书"));
 
   const loadAccounts = useCallback(async () => {
     setLoading(true);
@@ -61,7 +62,7 @@ export default function CloudAccountDialog({
       setAccounts(await listCloudAccounts());
       setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "读取云盘绑定失败");
+      setMessage(error instanceof Error ? error.message : t("读取云盘绑定失败"));
     } finally {
       setLoading(false);
     }
@@ -76,7 +77,7 @@ export default function CloudAccountDialog({
       return;
     }
     if (!credential.trim()) {
-      setMessage("请先粘贴云盘登录态");
+      setMessage(t("请先粘贴云盘登录态"));
       return;
     }
     setBusy(true);
@@ -87,11 +88,11 @@ export default function CloudAccountDialog({
         default_folder: defaultFolder.trim() || null,
       });
       setCredential("");
-      setMessage("绑定成功，凭据已加密保存");
+      setMessage(t("绑定成功，凭据已加密保存"));
       await loadAccounts();
       onChanged();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "绑定失败");
+      setMessage(error instanceof Error ? error.message : t("绑定失败"));
     } finally {
       setBusy(false);
     }
@@ -106,13 +107,13 @@ export default function CloudAccountDialog({
       const updated = await verifyCloudAccount(accountId);
       setMessage(
         updated.status === "active"
-          ? "凭据可用"
-          : updated.last_error || "凭据已失效，请重新绑定",
+          ? t("凭据可用")
+          : updated.last_error || t("凭据已失效，请重新绑定"),
       );
       await loadAccounts();
       onChanged();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "校验失败");
+      setMessage(error instanceof Error ? error.message : t("校验失败"));
     } finally {
       setBusy(false);
     }
@@ -125,11 +126,11 @@ export default function CloudAccountDialog({
     setBusy(true);
     try {
       await deleteCloudAccount(accountId);
-      setMessage("已解绑");
+      setMessage(t("已解绑"));
       await loadAccounts();
       onChanged();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "解绑失败");
+      setMessage(error instanceof Error ? error.message : t("解绑失败"));
     } finally {
       setBusy(false);
     }
@@ -151,49 +152,47 @@ export default function CloudAccountDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label"><Icon name="cloud" size={16} /> 电子书转存</span>
-            <h2 id="cloud-dialog-title">云盘绑定</h2>
+            <span className="type-label"><Icon name="cloud" size={16} />{t(" 电子书转存")}</span>
+            <h2 id="cloud-dialog-title">{t("云盘绑定")}</h2>
           </div>
           <button
             autoFocus
             type="button"
             className="icon-button"
-            aria-label="关闭云盘绑定"
+            aria-label={t("关闭云盘绑定")}
             onClick={onClose}
           ><Icon name="close" size={16} /></button>
         </div>
 
         <div className="dialog-body">
           <p className="cloud-dialog-note">
-            电子书收藏需要先把文件存进你自己的云盘。请在浏览器登录阿里云盘后，
-            从开发者工具复制登录态（refresh_token，或包含 refresh_token 的
-            cookie）粘贴到下面。凭据会加密保存，页面只显示末尾四位。
+            {t("电子书收藏需要先把文件存进你自己的云盘。请在浏览器登录阿里云盘后， 从开发者工具复制登录态（refresh_token，或包含 refresh_token 的 cookie）粘贴到下面。凭据会加密保存，页面只显示末尾四位。")}
           </p>
 
           <section className="cloud-bind-form">
             <label>
-              <span>云盘</span>
+              <span>{t("云盘")}</span>
               <select
                 value={provider}
                 onChange={(event) =>
                   setProvider(event.target.value as CloudProvider)
                 }
               >
-                <option value="aliyun">阿里云盘</option>
-                <option value="baidu">百度网盘</option>
+                <option value="aliyun">{t("阿里云盘")}</option>
+                <option value="baidu">{t("百度网盘")}</option>
               </select>
             </label>
             <label>
-              <span>默认转存目录</span>
+              <span>{t("默认转存目录")}</span>
               <input
                 value={defaultFolder}
                 onChange={(event) => setDefaultFolder(event.target.value)}
-                placeholder="/MemoIsle/电子书"
+                placeholder={t("/MemoIsle/电子书")}
                 maxLength={500}
               />
             </label>
             <label className="cloud-credential-field">
-              <span>登录态</span>
+              <span>{t("登录态")}</span>
               <textarea
                 value={credential}
                 onChange={(event) => setCredential(event.target.value)}
@@ -206,52 +205,52 @@ export default function CloudAccountDialog({
             <p className="cloud-dialog-hint">{credentialHint[provider]}</p>
           </section>
 
-          <section className="cloud-account-list" aria-label="已绑定云盘">
-            {loading && <div className="cloud-empty">正在读取绑定…</div>}
+          <section className="cloud-account-list" aria-label={t("已绑定云盘")}>
+            {loading && <div className="cloud-empty">{t("正在读取绑定…")}</div>}
             {!loading && !accounts.length && (
-              <div className="cloud-empty">还没有绑定任何云盘。</div>
+              <div className="cloud-empty">{t("还没有绑定任何云盘。")}</div>
             )}
             {!loading && accounts.map((account) => (
               <article className="cloud-account" key={account.id}>
                 <div className="cloud-account-heading">
                   <div>
                     <span className={`cloud-status ${account.status}`}>
-                      {account.status === "active" ? "可用" : "已失效"}
+                      {account.status === "active" ? t("可用") : t("已失效")}
                     </span>
                     <h3>{providerLabels[account.provider]} · {account.display_name}</h3>
                   </div>
                   <span className="cloud-account-hint">{account.credential_hint}</span>
                 </div>
                 <div className="cloud-account-meta">
-                  <span>默认目录：{account.default_folder}</span>
-                  <span>最近校验：{formatTime(account.last_checked_at)}</span>
-                  {account.last_error && <span>问题：{account.last_error}</span>}
+                  <span>{t("默认目录：{default_folder}", { default_folder: account.default_folder })}</span>
+                  <span>{t("最近校验：{value}", { value: formatTime(account.last_checked_at) })}</span>
+                  {account.last_error && <span>{t("问题：{last_error}", { last_error: account.last_error })}</span>}
                 </div>
                 <div className="cloud-account-actions">
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => void handleVerify(account.id)}
-                  >重新校验</button>
+                  >{t("重新校验")}</button>
                   <button
                     type="button"
                     className="danger-button"
                     disabled={busy}
                     onClick={() => void handleDelete(account.id)}
-                  >解绑</button>
+                  >{t("解绑")}</button>
                 </div>
               </article>
             ))}
           </section>
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={onClose}>关闭</button>
+          <button type="button" onClick={onClose}>{t("关闭")}</button>
           <button
             type="button"
             className="primary"
             disabled={busy}
             onClick={() => void handleBind()}
-          >绑定云盘</button>
+          >{t("绑定云盘")}</button>
         </div>
         {message && <p className="dialog-error cloud-dialog-message" role="status">{message}</p>}
       </section>
