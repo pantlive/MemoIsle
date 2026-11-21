@@ -10,8 +10,10 @@ import {
   relayDeviceLabels, relayFileError, relayTextError,
 } from "./relay";
 import type { RelayItem } from "./types";
+import { t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
-const describe = (error: unknown): string => error instanceof Error ? error.message : "操作失败，请重试。";
+const describe = (error: unknown): string => error instanceof Error ? error.message : t("操作失败，请重试。");
 const RETRY_BASE_MS = 2_000;
 const RETRY_MAX_MS = 30_000;
 
@@ -52,12 +54,12 @@ function saveBlob(blob: Blob, filename: string): void {
 
 function clipboardReadHint(error: unknown): string {
   if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) {
-    return "没有读取剪贴板的权限，请允许后重试，或在本页按 Ctrl+V。";
+    return t("没有读取剪贴板的权限，请允许后重试，或在本页按 Ctrl+V。");
   }
   if (error instanceof DOMException && error.name === "NotFoundError") {
-    return "剪贴板里没有图片，请先截图或复制图片，也可以在本页按 Ctrl+V。";
+    return t("剪贴板里没有图片，请先截图或复制图片，也可以在本页按 Ctrl+V。");
   }
-  return "无法读取剪贴板图片，请在本页按 Ctrl+V。";
+  return t("无法读取剪贴板图片，请在本页按 Ctrl+V。");
 }
 
 function namedClipboardFile(blob: Blob, mime: string): File {
@@ -94,11 +96,11 @@ async function blobAsPng(blob: Blob, fallbackMime: string | null): Promise<Blob>
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("无法转换图片格式。");
+    if (!ctx) throw new Error(t("无法转换图片格式。"));
     ctx.drawImage(bitmap, 0, 0);
     const png = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
-        (result) => (result ? resolve(result) : reject(new Error("无法转换成 PNG。"))),
+        (result) => (result ? resolve(result) : reject(new Error(t("无法转换成 PNG。")))),
         "image/png",
       );
     });
@@ -113,6 +115,7 @@ async function blobAsPng(blob: Blob, fallbackMime: string | null): Promise<Blob>
  * 面板打开期间循环长轮询收件箱，页面隐藏时暂停。
  */
 export default function RelayPanel() {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
@@ -170,11 +173,11 @@ export default function RelayPanel() {
           if (stopped()) return;
           // 登录失效由全局处理（请求层已清掉令牌），这里不再重试。
           if (caught instanceof ApiError && caught.status === 401) {
-            setPollError("登录已失效，请重新登录。");
+            setPollError(t("登录已失效，请重新登录。"));
             return;
           }
           failures += 1;
-          setPollError("与服务器的连接中断，正在重试…");
+          setPollError(t("与服务器的连接中断，正在重试…"));
           await sleep(Math.min(RETRY_MAX_MS, RETRY_BASE_MS * failures), controller.signal);
         }
       }
@@ -198,7 +201,7 @@ export default function RelayPanel() {
     try {
       await sendRelayText(text);
       setText("");
-      setNotice("文字已发给手机，10 分钟内在手机上打开「传输」即可接收。");
+      setNotice(t("文字已发给手机，10 分钟内在手机上打开「传输」即可接收。"));
     } catch (caught) {
       setError(describe(caught));
     } finally {
@@ -214,15 +217,15 @@ export default function RelayPanel() {
     let sent = 0;
     try {
       for (const file of files) {
-        setNotice(`正在发送「${file.name}」（${formatBytes(file.size)}）…`);
+        setNotice(t("正在发送「{name}」（{value}）…", { name: file.name, value: formatBytes(file.size) }));
         await sendRelayFile(file);
         sent += 1;
       }
       setNotice(sent === 1
-        ? `「${files[0].name}」已发给手机，10 分钟内有效。`
-        : `${sent} 个文件已发给手机，10 分钟内有效。`);
+        ? t("「{name}」已发给手机，10 分钟内有效。", { name: files[0].name })
+        : t("{sent} 个文件已发给手机，10 分钟内有效。", { sent }));
     } catch (caught) {
-      setNotice(sent > 0 ? `已发送 ${sent} 个文件。` : "");
+      setNotice(sent > 0 ? t("已发送 {sent} 个文件。", { sent }) : "");
       setError(describe(caught));
     } finally {
       setSending(false);
@@ -233,7 +236,7 @@ export default function RelayPanel() {
     if (sending) return;
     setError(""); setNotice("");
     if (!navigator.clipboard?.read) {
-      setError("当前浏览器无法读取剪贴板图片（需要 HTTPS 或 localhost），请在本页按 Ctrl+V。");
+      setError(t("当前浏览器无法读取剪贴板图片（需要 HTTPS 或 localhost），请在本页按 Ctrl+V。"));
       return;
     }
     try {
@@ -250,7 +253,7 @@ export default function RelayPanel() {
         }
       }
       if (files.length === 0) {
-        setError("剪贴板里没有图片，请先截图或复制图片，也可以在本页按 Ctrl+V。");
+        setError(t("剪贴板里没有图片，请先截图或复制图片，也可以在本页按 Ctrl+V。"));
         return;
       }
       await sendFiles(files);
@@ -272,11 +275,11 @@ export default function RelayPanel() {
       const blob = await downloadRelayItem(item.id);
       saveBlob(blob, item.filename ?? "file");
       removeLocal(item.id);
-      setNotice(`已保存「${item.filename ?? "file"}」，服务端已删除这份内容。`);
+      setNotice(t("已保存「{value}」，服务端已删除这份内容。", { value: item.filename ?? "file" }));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 404) {
         removeLocal(item.id);
-        setError("这份内容已被取走或已过期。");
+        setError(t("这份内容已被取走或已过期。"));
       } else {
         setError(describe(caught));
       }
@@ -292,18 +295,18 @@ export default function RelayPanel() {
       await navigator.clipboard.writeText(item.text);
     } catch {
       setBusyId(null);
-      setError("浏览器不允许写入剪贴板，请手动选中文字复制。");
+      setError(t("浏览器不允许写入剪贴板，请手动选中文字复制。"));
       return;
     }
     try {
       await discardRelayItem(item.id);
     } catch (caught) {
       if (!(caught instanceof ApiError && caught.status === 404)) {
-        setError(`已复制，但没能从服务端移除：${describe(caught)}`);
+        setError(t("已复制，但没能从服务端移除：{value}", { value: describe(caught) }));
       }
     }
     removeLocal(item.id);
-    setNotice("已复制到剪贴板，服务端已删除这段文字。");
+    setNotice(t("已复制到剪贴板，服务端已删除这段文字。"));
     setBusyId(null);
   }
 
@@ -320,11 +323,11 @@ export default function RelayPanel() {
         const blob = original ?? await pngPromise;
         saveBlob(blob, item.filename ?? "image");
         removeLocal(item.id);
-        setError(`无法写入剪贴板，已改为下载。${reason ? ` ${reason}` : ""}`);
+        setError(t("无法写入剪贴板，已改为下载。{value}", { value: reason ? ` ${reason}` : "" }));
       } catch (caught) {
         if (caught instanceof ApiError && caught.status === 404) {
           removeLocal(item.id);
-          setError("这份内容已被取走或已过期。");
+          setError(t("这份内容已被取走或已过期。"));
         } else {
           setError(describe(caught));
         }
@@ -333,20 +336,20 @@ export default function RelayPanel() {
 
     try {
       if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
-        await fallbackDownload("当前浏览器不支持写入剪贴板图片。");
+        await fallbackDownload(t("当前浏览器不支持写入剪贴板图片。"));
         return;
       }
       // ClipboardItem 必须在用户点击的同步栈里构造，Safari 才会保留用户手势。
       await navigator.clipboard.write([new ClipboardItem({ "image/png": pngPromise })]);
       removeLocal(item.id);
-      setNotice("图片已复制到剪贴板，服务端已删除。");
+      setNotice(t("图片已复制到剪贴板，服务端已删除。"));
     } catch (caught) {
       const downloadError = await pngPromise.then(() => null, (error: unknown) => error);
       if (downloadError instanceof ApiError && downloadError.status === 404) {
         removeLocal(item.id);
-        setError("这份内容已被取走或已过期。");
+        setError(t("这份内容已被取走或已过期。"));
       } else {
-        await fallbackDownload(caught instanceof Error ? caught.message : "写入失败。");
+        await fallbackDownload(caught instanceof Error ? caught.message : t("写入失败。"));
       }
     } finally {
       setBusyId(null);
@@ -357,7 +360,7 @@ export default function RelayPanel() {
     setBusyId(item.id); setError("");
     try {
       await discardRelayItem(item.id);
-      setNotice("已忽略。");
+      setNotice(t("已忽略。"));
     } catch (caught) {
       if (!(caught instanceof ApiError && caught.status === 404)) {
         setError(describe(caught));
@@ -377,15 +380,15 @@ export default function RelayPanel() {
 
   const visible = items.filter((item) => (deadlines.current.get(item.id) ?? 0) > now);
 
-  return <section className="relay-panel" aria-label="传输" onPaste={handlePaste}>
-    <div className="page-heading"><div><h1>传输</h1>
-      <p className="page-subtitle">网页和手机互传文字、图片、小文件；服务器只转发不保存，10 分钟内有效</p></div></div>
+  return <section className="relay-panel" aria-label={t("传输")} onPaste={handlePaste}>
+    <div className="page-heading"><div><h1>{t("传输")}</h1>
+      <p className="page-subtitle">{t("网页和手机互传文字、图片、小文件；服务器只转发不保存，10 分钟内有效")}</p></div></div>
 
     <form className="relay-card relay-send" onSubmit={(event) => void submitText(event)}>
-      <h2>发给手机</h2>
-      <label className="sr-only" htmlFor="relay-text">要发送的文字</label>
+      <h2>{t("发给手机")}</h2>
+      <label className="sr-only" htmlFor="relay-text">{t("要发送的文字")}</label>
       <textarea id="relay-text" value={text} rows={4} readOnly={sending}
-        placeholder="粘贴链接、验证码或一段文字，Ctrl + Enter 发送"
+        placeholder={t("粘贴链接、验证码或一段文字，Ctrl + Enter 发送")}
         onChange={(event) => { setText(event.target.value); setError(""); }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -394,14 +397,14 @@ export default function RelayPanel() {
           }
         }} />
       <div className="relay-actions">
-        <button className="primary" disabled={sending || !text.trim()}><Icon name="arrowRight" size={16} /> 发送文字</button>
+        <button className="primary" disabled={sending || !text.trim()}><Icon name="arrowRight" size={16} />{t(" 发送文字")}</button>
         <button type="button" className="primary" disabled={sending} onClick={() => void pasteClipboardImage()}>
-          <Icon name="image" size={16} /> 粘贴剪贴板图片
+          <Icon name="image" size={16} />{t(" 粘贴剪贴板图片")}
         </button>
         <button type="button" disabled={sending} onClick={() => fileInput.current?.click()}>
-          <Icon name="upload" size={16} /> 选择文件
+          <Icon name="upload" size={16} />{t(" 选择文件")}
         </button>
-        <input ref={fileInput} type="file" multiple hidden aria-label="选择要发送的文件"
+        <input ref={fileInput} type="file" multiple hidden aria-label={t("选择要发送的文件")}
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
@@ -412,40 +415,40 @@ export default function RelayPanel() {
         onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}>
-        把文件拖到这里发送（单个不超过 20 MB），也可按 Ctrl+V 发送剪贴板图片
+        {t("把文件拖到这里发送（单个不超过 20 MB），也可按 Ctrl+V 发送剪贴板图片")}
       </div>
       {notice && <p role="status" className="relay-notice">{notice}</p>}
       {error && <p role="alert" className="relay-error">{error}</p>}
     </form>
 
     <div className="relay-card">
-      <h2>收到的内容 <small>{pollError || "保持此页打开即可自动接收"}</small></h2>
-      {visible.length === 0 ? <p className="relay-empty">暂时没有。在手机上打开「传输」发送文字、图片或文件后，会自动出现在这里。</p>
+      <h2>{t("收到的内容 ")}<small>{pollError || t("保持此页打开即可自动接收")}</small></h2>
+      {visible.length === 0 ? <p className="relay-empty">{t("暂时没有。在手机上打开「传输」发送文字、图片或文件后，会自动出现在这里。")}</p>
         : <ul className="relay-items">
           {visible.map((item) => {
             const remaining = ((deadlines.current.get(item.id) ?? now) - now) / 1000;
             const busy = busyId === item.id;
             return <li key={item.id} className="relay-item">
               <div className="relay-item-info">
-                <small>来自{relayDeviceLabels[item.source]} · {formatBytes(item.size)} · 剩余 {formatRemaining(remaining)}</small>
+                <small>{t("来自{value} · {value2} · 剩余 {value3}", { value: relayDeviceLabels[item.source], value2: formatBytes(item.size), value3: formatRemaining(remaining) })}</small>
                 {item.kind === "text"
                   ? <pre>{item.text}</pre>
                   : <strong>{item.filename ?? "file"}</strong>}
               </div>
               <div className="relay-actions">
                 {item.kind === "text"
-                  ? <button className="primary" disabled={busy} onClick={() => void copyAndRemove(item)}><Icon name="copy" size={16} /> 复制</button>
+                  ? <button className="primary" disabled={busy} onClick={() => void copyAndRemove(item)}><Icon name="copy" size={16} />{t(" 复制")}</button>
                   : isRelayImage(item)
                     ? <>
                       <button className="primary" disabled={busy} onClick={() => void copyImage(item)}>
-                        <Icon name="copy" size={16} /> 复制图片
+                        <Icon name="copy" size={16} />{t(" 复制图片")}
                       </button>
                       <button disabled={busy} onClick={() => void download(item)}>
-                        <Icon name="download" size={16} /> 下载
+                        <Icon name="download" size={16} />{t(" 下载")}
                       </button>
                     </>
-                    : <button className="primary" disabled={busy} onClick={() => void download(item)}><Icon name="download" size={16} /> 下载</button>}
-                <button disabled={busy} onClick={() => void discard(item)}>忽略</button>
+                    : <button className="primary" disabled={busy} onClick={() => void download(item)}><Icon name="download" size={16} />{t(" 下载")}</button>}
+                <button disabled={busy} onClick={() => void discard(item)}>{t("忽略")}</button>
               </div>
             </li>;
           })}

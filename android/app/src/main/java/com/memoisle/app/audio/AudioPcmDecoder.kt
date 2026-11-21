@@ -4,6 +4,10 @@ import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextStateException
+import com.memoisle.app.ui.requireUi
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
@@ -21,19 +25,19 @@ object AudioPcmDecoder {
     private const val BUFFER_TIMEOUT_US = 10_000L
 
     fun decode(path: Path, targetSampleRate: Int = DEFAULT_SAMPLE_RATE): FloatArray {
-        require(targetSampleRate > 0) { "目标采样率必须大于 0" }
-        require(Files.isRegularFile(path)) { "录音文件不存在" }
+        requireUi(targetSampleRate > 0) { UiText.res(R.string.audio_error_sample_rate) }
+        requireUi(Files.isRegularFile(path)) { UiText.res(R.string.audio_error_file_missing) }
 
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
             extractor.setDataSource(path.toString())
             val trackIndex = findAudioTrack(extractor)
-            require(trackIndex >= 0) { "录音不包含音频轨道" }
+            requireUi(trackIndex >= 0) { UiText.res(R.string.audio_error_no_audio_track) }
             extractor.selectTrack(trackIndex)
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mimeType = inputFormat.getString(MediaFormat.KEY_MIME)
-                ?: error("录音格式缺少 MIME 类型")
+                ?: throw UiTextStateException(UiText.res(R.string.audio_error_no_mime))
             codec = MediaCodec.createDecoderByType(mimeType)
             codec.configure(inputFormat, null, null, 0)
             codec.start()
@@ -57,7 +61,7 @@ object AudioPcmDecoder {
                     val inputIndex = codec.dequeueInputBuffer(BUFFER_TIMEOUT_US)
                     if (inputIndex >= 0) {
                         val inputBuffer = codec.getInputBuffer(inputIndex)
-                            ?: error("无法获取解码输入缓冲区")
+                            ?: throw UiTextStateException(UiText.res(R.string.audio_error_no_input_buffer))
                         inputBuffer.clear()
                         val sampleSize = extractor.readSampleData(inputBuffer, 0)
                         if (sampleSize < 0) {
@@ -123,7 +127,7 @@ object AudioPcmDecoder {
                     }
                 }
             }
-            require(samples.size > 0) { "录音没有可用的 PCM 数据" }
+            requireUi(samples.size > 0) { UiText.res(R.string.audio_error_no_pcm) }
             return resample(samples.toArray(), sampleRate, targetSampleRate)
         } finally {
             runCatching { codec?.stop() }
@@ -179,7 +183,7 @@ object AudioPcmDecoder {
         if (sourceSampleRate == targetSampleRate) {
             return source
         }
-        require(sourceSampleRate > 0) { "源采样率无效" }
+        requireUi(sourceSampleRate > 0) { UiText.res(R.string.audio_error_source_sample_rate) }
         val targetSize = ceil(
             source.size.toDouble() * targetSampleRate / sourceSampleRate,
         ).toInt()

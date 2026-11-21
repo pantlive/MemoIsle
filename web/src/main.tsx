@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import AuthGate from "./AuthGate";
+import { I18nProvider } from "./I18nProvider";
 import { applyTheme, readThemePreference } from "./theme";
 import "./styles.css";
 
@@ -10,6 +11,8 @@ applyTheme(readThemePreference());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AuthGate />
+    <I18nProvider>
+      <AuthGate />
+    </I18nProvider>
   </StrictMode>,
 );

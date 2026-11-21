@@ -1,4 +1,5 @@
 import { type LevelStore, useLevel } from "./levelStore";
+import { useI18n } from "./I18nProvider";
 
 interface VoiceLevelMeterProps {
   store: LevelStore;
@@ -15,6 +16,7 @@ export default function VoiceLevelMeter({
   ariaSubject,
   missing = false,
 }: VoiceLevelMeterProps) {
+  const { t } = useI18n();
   const level = useLevel(store);
   return (
     <div
@@ -25,7 +27,7 @@ export default function VoiceLevelMeter({
       <div className="voice-meter-track" aria-hidden="true">
         <span style={{ width: `${level}%` }} />
       </div>
-      <strong>{missing ? "未接入" : `${level}%`}</strong>
+      <strong>{missing ? t("未接入") : `${level}%`}</strong>
     </div>
   );
 }

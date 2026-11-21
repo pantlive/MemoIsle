@@ -1,4 +1,5 @@
 import type { Memo } from "./types";
+import { t } from "./i18n";
 
 export function audioFileExtension(mimeType: string | null): string {
   switch ((mimeType ?? "").split(";")[0].trim().toLowerCase()) {
@@ -26,7 +27,7 @@ export function isMeetingRecording(memo: Memo): boolean {
 }
 
 export function audioDownloadFileName(memo: Memo): string {
-  const fallback = isMeetingRecording(memo) ? "会议录音" : "语音灵感";
+  const fallback = isMeetingRecording(memo) ? t("会议录音") : t("语音灵感");
   const title = (memo.title || fallback)
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
     .trim()

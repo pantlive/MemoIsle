@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -23,16 +24,17 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Close
@@ -42,12 +44,12 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SwapHoriz
-import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -88,16 +90,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.memoisle.app.MemoViewModel
-import com.memoisle.app.VaultViewModel
+import com.memoisle.app.AppLanguage
 import com.memoisle.app.ForgetViewModel
 import com.memoisle.app.LedgerViewModel
+import com.memoisle.app.MemoViewModel
+import com.memoisle.app.R
 import com.memoisle.app.RelayViewModel
+import com.memoisle.app.VaultViewModel
 import com.memoisle.app.audio.SherpaOnnxSpeechToText
 import com.memoisle.app.audio.VoiceRecorder
 import com.memoisle.app.audio.VoiceRecording
@@ -120,16 +127,17 @@ import com.memoisle.app.data.normalizeResourceUrl
 import com.memoisle.app.data.parseClipboardWord
 import com.memoisle.app.data.todayReviewCounts
 import com.memoisle.app.data.todayReviewItems
+import com.memoisle.app.isUndoableSaveMessage
 import com.memoisle.app.network.WordLookupResponse
 import com.memoisle.app.network.WordLookupSense
 import java.nio.file.Paths
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val displayTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 
 @Composable
 fun MemoHomeScreen(
@@ -141,15 +149,18 @@ fun MemoHomeScreen(
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onLogout: () -> Unit = {},
-    updateCheckMessage: String? = null,
+    updateCheckMessage: UiText? = null,
     isCheckingUpdate: Boolean = false,
     onCheckUpdate: () -> Unit = {},
     onUpdateMessageShown: () -> Unit = {},
+    languagePreference: AppLanguage = AppLanguage.SYSTEM,
+    onLanguageChange: (AppLanguage) -> Unit = {},
 ) {
     val memos by viewModel.memos.collectAsState()
     val uiState = viewModel.uiState
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     val voiceRecorder = remember { VoiceRecorder(context.applicationContext) }
@@ -166,8 +177,9 @@ fun MemoHomeScreen(
         val message = updateCheckMessage ?: return@LaunchedEffect
         onUpdateMessageShown()
         // 放到外层作用域显示：上面清掉消息会让本 effect 重启，不能让它取消 Snackbar。
-        coroutineScope.launch { snackbarHostState.showSnackbar(message) }
+        coroutineScope.launch { snackbarHostState.showSnackbar(message.resolve(resources)) }
     }
+    var showLanguageDialog by remember { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf("") }
     var selectedMemo by remember { mutableStateOf<Memo?>(null) }
     var pendingAudioDownload by remember { mutableStateOf<Memo?>(null) }
@@ -364,7 +376,7 @@ fun MemoHomeScreen(
     fun requestLogout(): Unit {
         if (uiState.isSaving || isPreparingLogout) {
             coroutineScope.launch {
-                snackbarHostState.showSnackbar("当前还有内容正在保存，请稍后再退出")
+                snackbarHostState.showSnackbar(resources.getString(R.string.home_logout_busy))
             }
             return
         }
@@ -387,7 +399,7 @@ fun MemoHomeScreen(
                 onLogout()
             } else {
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("同步未完成，当前仍保持登录，内容不会被清理")
+                    snackbarHostState.showSnackbar(resources.getString(R.string.home_logout_sync_failed))
                 }
             }
         }
@@ -417,7 +429,7 @@ fun MemoHomeScreen(
             wordExample = draft.example
         }
         coroutineScope.launch {
-            snackbarHostState.showSnackbar("已从剪贴板填入「${draft.lemma}」")
+            snackbarHostState.showSnackbar(resources.getString(R.string.home_clipboard_filled, draft.lemma))
         }
         return true
     }
@@ -444,7 +456,7 @@ fun MemoHomeScreen(
         ) {
             wordPhonetic = phonetic
             wordDraft.autoPhonetic = phonetic
-            filled += "音标"
+            filled += resources.getString(R.string.pron_phonetic)
         }
         if (
             meaning.isNotBlank() &&
@@ -452,7 +464,7 @@ fun MemoHomeScreen(
         ) {
             wordMeaning = meaning
             wordDraft.autoMeaning = meaning
-            filled += "中文释义"
+            filled += resources.getString(R.string.word_field_meaning)
         }
         if (
             example.isNotBlank() &&
@@ -460,7 +472,7 @@ fun MemoHomeScreen(
         ) {
             wordExample = example
             wordDraft.autoExample = example
-            filled += "例句"
+            filled += resources.getString(R.string.word_field_example)
         }
         return filled
     }
@@ -472,7 +484,7 @@ fun MemoHomeScreen(
         }
         viewModel.clearWordLookup()
         coroutineScope.launch {
-            snackbarHostState.showSnackbar("已应用所选释义；手工填写内容已保留")
+            snackbarHostState.showSnackbar(resources.getString(R.string.home_meanings_applied))
         }
     }
 
@@ -523,18 +535,20 @@ fun MemoHomeScreen(
         }
         isVoiceTranscribing = true
         voiceTranscriptionMessage = if (speechToText.isAvailable) {
-            "正在使用设备端 SenseVoice 转写…"
+            resources.getString(R.string.home_transcribing)
         } else {
-            "首次使用正在下载设备端语音模型（约 160 MB）…"
+            resources.getString(R.string.home_downloading_model)
         }
         val modelResult = speechToText.ensureAvailable()
         if (modelResult.isFailure) {
             isVoiceTranscribing = false
-            voiceTranscriptionMessage = modelResult.exceptionOrNull()?.message
-                ?: "设备端模型下载失败，可手动填写文字。"
+            voiceTranscriptionMessage = (
+                modelResult.exceptionOrNull()?.toUiText(R.string.home_model_download_failed)
+                    ?: UiText.res(R.string.home_model_download_failed)
+                ).resolve(resources)
             return@LaunchedEffect
         }
-        voiceTranscriptionMessage = "正在使用设备端 SenseVoice 转写…"
+        voiceTranscriptionMessage = resources.getString(R.string.home_transcribing)
         val result = speechToText.transcribe(Paths.get(recording.path))
         result.onSuccess { transcript ->
             if (voiceText.isBlank()) {
@@ -542,13 +556,13 @@ fun MemoHomeScreen(
             }
             isVoiceTranscribing = false
             voiceTranscriptionMessage = if (transcript.isBlank()) {
-                "未识别到可用文字，请手动补充。"
+                resources.getString(R.string.home_no_text_recognized)
             } else {
-                "转写完成，可直接编辑结果。"
+                resources.getString(R.string.home_transcribe_done)
             }
         }.onFailure { error ->
             isVoiceTranscribing = false
-            voiceTranscriptionMessage = error.message ?: "设备端转写失败，可手动填写文字。"
+            voiceTranscriptionMessage = error.toUiText(R.string.home_transcribe_failed).resolve(resources)
         }
     }
 
@@ -569,7 +583,12 @@ fun MemoHomeScreen(
             val filled = applyDictionaryPreview(preview)
             if (filled.isNotEmpty()) {
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("已自动填入${filled.joinToString("、")}")
+                    snackbarHostState.showSnackbar(
+                        resources.getString(
+                            R.string.home_auto_filled,
+                            filled.joinToString(resources.getString(R.string.common_list_separator)),
+                        ),
+                    )
                 }
             }
         }
@@ -578,12 +597,9 @@ fun MemoHomeScreen(
     LaunchedEffect(uiState.message) {
         uiState.message?.let { message ->
             val result = snackbarHostState.showSnackbar(
-                message = message,
-                actionLabel = if (
-                    uiState.undoMemo != null &&
-                    (message.contains("已保存") || message.contains("已收藏"))
-                ) {
-                    "撤销"
+                message = message.resolve(resources),
+                actionLabel = if (uiState.undoMemo != null && message.isUndoableSaveMessage()) {
+                    resources.getString(R.string.home_undo)
                 } else {
                     null
                 },
@@ -657,22 +673,22 @@ fun MemoHomeScreen(
         topBar = {
             MemoTopBar(
                 title = when {
-                    showInbox -> "收件箱"
-                    showTrash -> "回收站"
-                    showReview -> "今日回顾"
-                    showAllMemos -> "资料库"
+                    showInbox -> stringResource(R.string.home_title_inbox)
+                    showTrash -> stringResource(R.string.home_title_trash)
+                    showReview -> stringResource(R.string.home_title_review)
+                    showAllMemos -> stringResource(R.string.home_title_library)
                     else -> "MemoIsle"
                 },
                 subtitle = when {
-                    showInbox -> "${inboxMemos.size} 条待整理"
-                    showTrash -> "${trashMemos.size} 条 · 保留 30 天后永久删除"
+                    showInbox -> pluralStringResource(R.plurals.home_inbox_pending, inboxMemos.size, inboxMemos.size)
+                    showTrash -> pluralStringResource(R.plurals.home_trash_subtitle, trashMemos.size, trashMemos.size)
                     else -> null
                 },
                 brand = isHome,
                 navigationIcon = if (showInbox || showTrash) {
                     {
                         IconButton(onClick = ::showHome) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回首页")
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.home_back_home))
                         }
                     }
                 } else {
@@ -709,6 +725,7 @@ fun MemoHomeScreen(
                     },
                     onRefresh = viewModel::refresh,
                     onCheckUpdate = onCheckUpdate,
+                    onShowLanguage = { showLanguageDialog = true },
                     onExport = { exportLauncher.launch("memoisle-export.json") },
                     onLogout = ::requestLogout,
                 )
@@ -765,7 +782,7 @@ fun MemoHomeScreen(
                 contentColor = Color.White,
                 shape = RoundedCornerShape(18.dp),
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "新建", modifier = Modifier.size(26.dp))
+                Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.forget_new), modifier = Modifier.size(26.dp))
             }
         },
     ) { innerPadding ->
@@ -800,8 +817,8 @@ fun MemoHomeScreen(
                     item {
                         EmptyState(
                             icon = Icons.Outlined.Inbox,
-                            title = if (normalizedSearchQuery.isNotEmpty()) "收件箱里没有匹配内容" else "收件箱是空的",
-                            message = "快速记下的灵感会先放在这里，整理完成或归档后移出。",
+                            title = if (normalizedSearchQuery.isNotEmpty()) stringResource(R.string.home_inbox_no_match) else stringResource(R.string.home_inbox_empty),
+                            message = stringResource(R.string.home_inbox_empty_hint),
                         )
                     }
                 } else {
@@ -822,8 +839,8 @@ fun MemoHomeScreen(
                     item {
                         EmptyState(
                             icon = Icons.Outlined.DeleteOutline,
-                            title = if (normalizedSearchQuery.isNotEmpty()) "回收站里没有匹配内容" else "回收站是空的",
-                            message = "删除的内容会在这里保留 30 天，期间可以恢复。",
+                            title = if (normalizedSearchQuery.isNotEmpty()) stringResource(R.string.home_trash_no_match) else stringResource(R.string.home_trash_empty),
+                            message = stringResource(R.string.home_trash_empty_hint),
                         )
                     }
                 } else {
@@ -1007,12 +1024,12 @@ fun MemoHomeScreen(
                                     viewModel.setQuickAccessHidden(memo, true) { succeeded ->
                                         coroutineScope.launch {
                                             if (!succeeded) {
-                                                snackbarHostState.showSnackbar("暂时无法移除，请检查网络后重试")
+                                                snackbarHostState.showSnackbar(resources.getString(R.string.home_quick_access_remove_failed))
                                                 return@launch
                                             }
                                             val result = snackbarHostState.showSnackbar(
-                                                message = "已从快速访问移除「${memo.title}」",
-                                                actionLabel = "撤销",
+                                                message = resources.getString(R.string.home_quick_access_removed, memo.title),
+                                                actionLabel = resources.getString(R.string.home_undo),
                                             )
                                             if (result == SnackbarResult.ActionPerformed) {
                                                 viewModel.setQuickAccessHidden(memo, false)
@@ -1047,22 +1064,27 @@ fun MemoHomeScreen(
             if (!showReview && !showTrash && !showInbox) item {
                 SectionHeader(
                     title = when {
-                        normalizedSearchQuery.isNotEmpty() -> "搜索结果"
-                        showAllMemos -> "全部内容"
-                        activeType == TYPE_RESOURCE -> "网页资料"
-                        activeType == TYPE_WORD -> "单词"
-                        activeType == TYPE_IMAGE -> "图片"
-                        else -> "最近灵感"
+                        normalizedSearchQuery.isNotEmpty() -> stringResource(R.string.home_section_search)
+                        showAllMemos -> stringResource(R.string.home_section_all)
+                        activeType == TYPE_RESOURCE -> stringResource(R.string.kind_resource)
+                        activeType == TYPE_WORD -> stringResource(R.string.kind_word)
+                        activeType == TYPE_IMAGE -> stringResource(R.string.kind_image)
+                        else -> stringResource(R.string.home_section_recent_ideas)
                     },
                     trailing = when {
-                            normalizedSearchQuery.isNotEmpty() -> "${visibleMemos.size} 条内容"
+                            normalizedSearchQuery.isNotEmpty() ->
+                                pluralStringResource(R.plurals.home_count_items, visibleMemos.size, visibleMemos.size)
                             showAllMemos && libraryTypeFilter == TYPE_IMAGE ->
-                                "${visibleMemos.size} 张图片"
-                            showAllMemos -> "${visibleMemos.size} 条内容"
-                            activeType == TYPE_IDEA -> "${visibleMemos.size} 条灵感"
-                            activeType == TYPE_RESOURCE -> "${visibleMemos.size} 条资料"
-                            activeType == TYPE_IMAGE -> "${visibleMemos.size} 张图片"
-                        else -> "${visibleMemos.size} 个单词"
+                                pluralStringResource(R.plurals.home_count_images, visibleMemos.size, visibleMemos.size)
+                            showAllMemos ->
+                                pluralStringResource(R.plurals.home_count_items, visibleMemos.size, visibleMemos.size)
+                            activeType == TYPE_IDEA ->
+                                pluralStringResource(R.plurals.home_count_ideas, visibleMemos.size, visibleMemos.size)
+                            activeType == TYPE_RESOURCE ->
+                                pluralStringResource(R.plurals.home_count_resources, visibleMemos.size, visibleMemos.size)
+                            activeType == TYPE_IMAGE ->
+                                pluralStringResource(R.plurals.home_count_images, visibleMemos.size, visibleMemos.size)
+                        else -> pluralStringResource(R.plurals.home_count_words, visibleMemos.size, visibleMemos.size)
                     },
                 )
             }
@@ -1107,9 +1129,9 @@ fun MemoHomeScreen(
                 onCopy = {
                     val clipboard = context.getSystemService(ClipboardManager::class.java)
                     clipboard.setPrimaryClip(
-                        ClipData.newPlainText("MemoIsle 网页链接", memo.sourceUrl.orEmpty()),
+                        ClipData.newPlainText(resources.getString(R.string.home_clip_label_link), memo.sourceUrl.orEmpty()),
                     )
-                    coroutineScope.launch { snackbarHostState.showSnackbar("网页链接已复制") }
+                    coroutineScope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.home_link_copied)) }
                 },
                 onShare = {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -1119,7 +1141,7 @@ fun MemoHomeScreen(
                             listOfNotNull(memo.title, memo.sourceUrl).joinToString("\n"),
                         )
                     }
-                    context.startActivity(Intent.createChooser(shareIntent, "分享网页资料"))
+                    context.startActivity(Intent.createChooser(shareIntent, resources.getString(R.string.home_share_resource)))
                 },
             )
         } else if (memo.type == TYPE_IMAGE) {
@@ -1149,7 +1171,7 @@ fun MemoHomeScreen(
                             ).joinToString("\n"),
                         )
                     }
-                    context.startActivity(Intent.createChooser(shareIntent, "分享图片收藏"))
+                    context.startActivity(Intent.createChooser(shareIntent, resources.getString(R.string.home_share_image)))
                 },
             )
         } else {
@@ -1216,6 +1238,17 @@ fun MemoHomeScreen(
         )
     }
 
+    if (showLanguageDialog) {
+        LanguageDialog(
+            current = languagePreference,
+            onSelect = { language ->
+                showLanguageDialog = false
+                onLanguageChange(language)
+            },
+            onDismiss = { showLanguageDialog = false },
+        )
+    }
+
     if (showLogoutDialog) {
         val unsyncedCount = viewModel.unsyncedCount()
         AlertDialog(
@@ -1224,11 +1257,9 @@ fun MemoHomeScreen(
                     showLogoutDialog = false
                 }
             },
-            title = { Text("还有内容尚未同步") },
+            title = { Text(stringResource(R.string.home_logout_title)) },
             text = {
-                Text(
-                    "当前有 $unsyncedCount 条内容等待同步或处理。先完成同步再退出，避免本机录音和编辑内容被清理。",
-                )
+                Text(pluralStringResource(R.plurals.home_logout_unsynced, unsyncedCount, unsyncedCount))
             },
             confirmButton = {
                 Button(
@@ -1236,7 +1267,7 @@ fun MemoHomeScreen(
                     enabled = !isPreparingLogout && !uiState.isRefreshing,
                     colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
                 ) {
-                    Text(if (isPreparingLogout) "同步中…" else "同步并退出")
+                    Text(if (isPreparingLogout) stringResource(R.string.home_syncing) else stringResource(R.string.home_sync_and_logout))
                 }
             },
             dismissButton = {
@@ -1244,7 +1275,7 @@ fun MemoHomeScreen(
                     onClick = { showLogoutDialog = false },
                     enabled = !isPreparingLogout,
                 ) {
-                    Text("继续编辑")
+                    Text(stringResource(R.string.home_keep_editing))
                 }
             },
             containerColor = SurfaceWhite,
@@ -1345,9 +1376,9 @@ fun MemoHomeScreen(
     uiState.duplicateWord?.let { existing ->
         AlertDialog(
             onDismissRequest = { viewModel.clearDuplicate() },
-            title = { Text("已收藏相同词形") },
+            title = { Text(stringResource(R.string.error_duplicate_word)) },
             text = {
-                Text("“${existing.title}”已经在资料库中。可以把新例句合并进去，或仍然另外保存。")
+                Text(stringResource(R.string.home_duplicate_word_text, existing.title))
             },
             confirmButton = {
                 Button(
@@ -1363,7 +1394,7 @@ fun MemoHomeScreen(
                             showCreateDialog = false
                         }
                     },
-                ) { Text("合并例句") }
+                ) { Text(stringResource(R.string.home_merge_examples)) }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1373,7 +1404,7 @@ fun MemoHomeScreen(
                             viewModel.clearDuplicate()
                             showCreateDialog = false
                         },
-                    ) { Text("查看") }
+                    ) { Text(stringResource(R.string.home_view)) }
                     TextButton(
                         onClick = {
                             viewModel.createWord(
@@ -1390,7 +1421,7 @@ fun MemoHomeScreen(
                                 showCreateDialog = false
                             }
                         },
-                    ) { Text("仍然保存") }
+                    ) { Text(stringResource(R.string.home_save_anyway)) }
                 }
             },
         )
@@ -1398,9 +1429,9 @@ fun MemoHomeScreen(
     uiState.duplicateResource?.let { existing ->
         AlertDialog(
             onDismissRequest = { viewModel.clearDuplicateResource() },
-            title = { Text("已收藏相同网址") },
+            title = { Text(stringResource(R.string.error_duplicate_url)) },
             text = {
-                Text("“${existing.title}”已经在资料库中。可以查看已有资料，或仍然另外保存。")
+                Text(stringResource(R.string.home_duplicate_url_text, existing.title))
             },
             confirmButton = {
                 Button(
@@ -1410,12 +1441,12 @@ fun MemoHomeScreen(
                         sharedResourcePending = false
                         showCreateDialog = false
                     },
-                ) { Text("查看已有") }
+                ) { Text(stringResource(R.string.home_view_existing)) }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { viewModel.clearDuplicateResource() }) {
-                        Text("稍后")
+                        Text(stringResource(R.string.update_later))
                     }
                     TextButton(
                         onClick = {
@@ -1432,7 +1463,7 @@ fun MemoHomeScreen(
                                 showCreateDialog = false
                             }
                         },
-                    ) { Text("仍然保存") }
+                    ) { Text(stringResource(R.string.home_save_anyway)) }
                 }
             },
         )
@@ -1478,7 +1509,7 @@ fun MemoHomeScreen(
                 voiceAmplitude = 0
                 voiceElapsedMs = voiceRecording?.durationMs ?: 0
                 if (voiceRecording == null) {
-                    voiceTranscriptionMessage = "录音没有保存成功，请重试。"
+                    voiceTranscriptionMessage = resources.getString(R.string.home_record_failed)
                 }
             },
             onReset = {
@@ -1489,13 +1520,13 @@ fun MemoHomeScreen(
                     if (voiceRecorder.resume()) {
                         isVoicePaused = false
                     } else {
-                        voiceTranscriptionMessage = "当前设备暂不支持继续录音，请结束当前录音。"
+                        voiceTranscriptionMessage = resources.getString(R.string.home_resume_unsupported)
                     }
                 } else if (voiceRecorder.pause()) {
                     isVoicePaused = true
                     voiceAmplitude = 0
                 } else {
-                    voiceTranscriptionMessage = "当前设备暂不支持暂停录音，请直接结束录音。"
+                    voiceTranscriptionMessage = resources.getString(R.string.home_pause_unsupported)
                 }
             },
             onRequestDismiss = ::requestVoiceDismiss,
@@ -1520,19 +1551,19 @@ fun MemoHomeScreen(
     if (showVoiceDiscardConfirm) {
         AlertDialog(
             onDismissRequest = { showVoiceDiscardConfirm = false },
-            title = { Text("放弃这段记录？") },
-            text = { Text("录音和当前文字不会保存，确定要放弃吗？") },
+            title = { Text(stringResource(R.string.home_discard_title)) },
+            text = { Text(stringResource(R.string.home_discard_text)) },
             confirmButton = {
                 Button(
                     onClick = ::discardVoiceCapture,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                     ),
-                ) { Text("放弃记录") }
+                ) { Text(stringResource(R.string.home_discard)) }
             },
             dismissButton = {
                 TextButton(onClick = { showVoiceDiscardConfirm = false }) {
-                    Text("继续编辑")
+                    Text(stringResource(R.string.home_keep_editing))
                 }
             },
         )
@@ -1541,9 +1572,9 @@ fun MemoHomeScreen(
     pendingMoveToTrash?.let { memo ->
         AlertDialog(
             onDismissRequest = { pendingMoveToTrash = null },
-            title = { Text("移入回收站") },
+            title = { Text(stringResource(R.string.home_move_to_trash)) },
             text = {
-                Text("「${memo.title}」将移入回收站，30 天后永久删除。继续吗？")
+                Text(stringResource(R.string.home_move_to_trash_text, memo.title))
             },
             confirmButton = {
                 Button(
@@ -1555,12 +1586,12 @@ fun MemoHomeScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
                 ) {
-                    Text("移入回收站")
+                    Text(stringResource(R.string.home_move_to_trash))
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { pendingMoveToTrash = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.common_cancel))
                 }
             },
             containerColor = SurfaceWhite,
@@ -1571,9 +1602,9 @@ fun MemoHomeScreen(
     pendingPermanentDelete?.let { memo ->
         AlertDialog(
             onDismissRequest = { pendingPermanentDelete = null },
-            title = { Text("永久删除") },
+            title = { Text(stringResource(R.string.home_purge)) },
             text = {
-                Text("将永久删除「${memo.title}」，此操作不可恢复。确定继续吗？")
+                Text(stringResource(R.string.home_purge_text, memo.title))
             },
             confirmButton = {
                 Button(
@@ -1583,12 +1614,12 @@ fun MemoHomeScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB84A4A)),
                 ) {
-                    Text("永久删除")
+                    Text(stringResource(R.string.home_purge))
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { pendingPermanentDelete = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.common_cancel))
                 }
             },
             containerColor = SurfaceWhite,
@@ -1612,6 +1643,7 @@ private fun TopBarActions(
     onShowRelay: () -> Unit,
     onRefresh: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onShowLanguage: () -> Unit,
     onExport: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -1624,18 +1656,21 @@ private fun TopBarActions(
                     }
                 },
             ) {
-                Icon(Icons.Outlined.Inbox, contentDescription = "收件箱，$inboxCount 条待整理")
+                Icon(
+                    Icons.Outlined.Inbox,
+                    contentDescription = pluralStringResource(R.plurals.home_inbox_cd, inboxCount, inboxCount),
+                )
             }
         }
     }
     IconButton(onClick = onShowRelay) {
-        Icon(Icons.Outlined.SwapHoriz, contentDescription = "传输：与网页互传文字和文件")
+        Icon(Icons.Outlined.SwapHoriz, contentDescription = stringResource(R.string.home_relay_cd))
     }
     IconButton(onClick = onRefresh, enabled = !isRefreshing) {
         if (isRefreshing) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = DeepTeal)
         } else {
-            Icon(Icons.Outlined.Sync, contentDescription = "同步")
+            Icon(Icons.Outlined.Sync, contentDescription = stringResource(R.string.home_sync))
         }
     }
     var menuOpen by remember { mutableStateOf(false) }
@@ -1644,7 +1679,7 @@ private fun TopBarActions(
             if (isExporting) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = DeepTeal)
             } else {
-                Icon(Icons.Outlined.MoreVert, contentDescription = "更多操作")
+                Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.home_more_actions))
             }
         }
         DropdownMenu(
@@ -1655,7 +1690,7 @@ private fun TopBarActions(
         ) {
             if (showTrashAction) {
                 DropdownMenuItem(
-                    text = { Text("回收站") },
+                    text = { Text(stringResource(R.string.home_title_trash)) },
                     leadingIcon = { Icon(Icons.Outlined.DeleteOutline, contentDescription = null) },
                     onClick = {
                         menuOpen = false
@@ -1664,7 +1699,15 @@ private fun TopBarActions(
                 )
             }
             DropdownMenuItem(
-                text = { Text(if (isCheckingUpdate) "检查中…" else "检查更新") },
+                text = { Text(stringResource(R.string.language_menu)) },
+                leadingIcon = { Icon(Icons.Outlined.Translate, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    onShowLanguage()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(if (isCheckingUpdate) stringResource(R.string.home_checking) else stringResource(R.string.home_check_update)) },
                 leadingIcon = { Icon(Icons.Outlined.SystemUpdate, contentDescription = null) },
                 enabled = !isCheckingUpdate,
                 onClick = {
@@ -1673,7 +1716,7 @@ private fun TopBarActions(
                 },
             )
             DropdownMenuItem(
-                text = { Text(if (isExporting) "导出中…" else "导出数据") },
+                text = { Text(if (isExporting) stringResource(R.string.home_exporting) else stringResource(R.string.home_export)) },
                 leadingIcon = { Icon(Icons.Outlined.FileDownload, contentDescription = null) },
                 enabled = !isRefreshing && !isSaving && !isExporting,
                 onClick = {
@@ -1683,7 +1726,7 @@ private fun TopBarActions(
             )
             HorizontalDivider(color = Border)
             DropdownMenuItem(
-                text = { Text("退出登录") },
+                text = { Text(stringResource(R.string.home_logout)) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null) },
                 onClick = {
                     menuOpen = false
@@ -1705,12 +1748,12 @@ private fun MemoSearchField(
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
-        placeholder = { Text("搜索标题、正文、网址、释义或标签") },
+        placeholder = { Text(stringResource(R.string.home_search_placeholder)) },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = TextMuted) },
         trailingIcon = if (value.isNotEmpty()) {
             {
                 IconButton(onClick = onClear) {
-                    Icon(Icons.Outlined.Close, contentDescription = "清除搜索")
+                    Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.home_clear_search))
                 }
             }
         } else {
@@ -1782,7 +1825,7 @@ private fun MemoBottomNavigation(
             selected = homeSelected,
             onClick = onShowHome,
             icon = { Icon(if (homeSelected) Icons.Filled.Home else Icons.Outlined.Home, contentDescription = null) },
-            label = { Text("首页") },
+            label = { Text(stringResource(R.string.home_nav_home)) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
@@ -1794,28 +1837,28 @@ private fun MemoBottomNavigation(
                     contentDescription = null,
                 )
             },
-            label = { Text("资料库") },
+            label = { Text(stringResource(R.string.home_title_library)) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
             selected = showReview,
             onClick = onShowReview,
             icon = { Icon(Icons.Outlined.Autorenew, contentDescription = null) },
-            label = { Text("回顾") },
+            label = { Text(stringResource(R.string.home_nav_review)) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
             selected = false,
             onClick = onShowLedger,
             icon = { Icon(Icons.Outlined.AccountBalanceWallet, contentDescription = null) },
-            label = { Text("记账") },
+            label = { Text(stringResource(R.string.ledger_title)) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
             selected = false,
             onClick = onShowForget,
             icon = { Icon(Icons.AutoMirrored.Outlined.StickyNote2, contentDescription = null) },
-            label = { Text("易忘") },
+            label = { Text(stringResource(R.string.home_nav_forget)) },
             colors = memoNavigationColors(),
         )
         NavigationBarItem(
@@ -1827,7 +1870,7 @@ private fun MemoBottomNavigation(
                     Icon(Icons.Outlined.Lock, contentDescription = null)
                 }
             },
-            label = { Text("密码库") },
+            label = { Text(stringResource(R.string.home_nav_vault)) },
             colors = memoNavigationColors(),
         )
     }
@@ -1844,10 +1887,13 @@ private fun memoNavigationColors() = NavigationBarItemDefaults.colors(
     disabledTextColor = TextMuted.copy(alpha = 0.42f),
 )
 
+/** 列表里的时间按当前界面语言显示，如中文「11月21日 09:30」、英文「Nov 21, 09:30」。 */
 internal fun formatTime(value: String): String {
     return runCatching {
         val dateTime = Instant.parse(value).atZone(ZoneId.systemDefault())
-        displayTimeFormatter.format(dateTime)
+        val locale = Locale.getDefault()
+        val pattern = DateFormat.getBestDateTimePattern(locale, "MMMdHHmm")
+        DateTimeFormatter.ofPattern(pattern, locale).format(dateTime)
     }.getOrDefault(value)
 }
 

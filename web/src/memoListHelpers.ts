@@ -1,5 +1,6 @@
 import { ApiError } from "./api";
 import type { Memo, MemoSort } from "./types";
+import { t } from "./i18n";
 
 export const TRASH_RETENTION_DAYS = 30;
 
@@ -20,10 +21,10 @@ export function trashDaysRemaining(memo: Memo): number {
 
 export function describeError(error: unknown): string {
   if (error instanceof ApiError && error.status === 409) {
-    return "内容已在其他设备更新，请处理编辑冲突后再保存。";
+    return t("内容已在其他设备更新，请处理编辑冲突后再保存。");
   }
   if (error instanceof Error) {
     return error.message;
   }
-  return "操作失败，请稍后重试。";
+  return t("操作失败，请稍后重试。");
 }

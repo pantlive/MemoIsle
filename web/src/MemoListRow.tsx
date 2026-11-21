@@ -15,6 +15,7 @@ import { resourceSummary } from "./resourceSummary";
 import type { Memo, ResourceCategoryOption } from "./types";
 import { siteHue, sourceHost } from "./webUrl";
 import { type ActiveView, timeFormatter, viewCopy } from "./workspaceViews";
+import { useI18n } from "./I18nProvider";
 
 /**
  * 列表行与图片卡片。
@@ -45,6 +46,7 @@ interface ImageCardProps {
 }
 
 function ImageCardView({ memo, selected, batchSelected, batchBusy, actions }: ImageCardProps) {
+  const { t } = useI18n();
   return (
     <article
       className={`image-card${selected ? " selected" : ""}${batchSelected ? " batch-selected" : ""}`}
@@ -69,22 +71,22 @@ function ImageCardView({ memo, selected, batchSelected, batchBusy, actions }: Im
             className="image-card-thumb"
           />
         ) : (
-          <span className="image-card-empty">尚未上传图片</span>
+          <span className="image-card-empty">{t("尚未上传图片")}</span>
         )}
       </div>
       <div className="image-card-body">
         <label className="memo-batch-check" onClick={(event) => event.stopPropagation()}>
-          <input type="checkbox" aria-label={`选择 ${memo.title}`} disabled={batchBusy} checked={batchSelected} onChange={() => actions.toggleBatch(memo)} />
-          <span>选择</span>
+          <input type="checkbox" aria-label={t("选择 {title}", { title: memo.title })} disabled={batchBusy} checked={batchSelected} onChange={() => actions.toggleBatch(memo)} />
+          <span>{t("选择")}</span>
         </label>
         <strong>{memo.starred && <Icon name="star" size={16} className="is-filled" />}{memo.title}</strong>
-        {memo.resource_category_label && <small>分类：{memo.resource_category_label}</small>}
+        {memo.resource_category_label && <small>{t("分类：{resource_category_label}", { resource_category_label: memo.resource_category_label })}</small>}
         <small>
-          {timeFormatter.format(new Date(memo.created_at))} ·{" "}
+          {timeFormatter().format(new Date(memo.created_at))} ·{" "}
           {imageDimensionLabel(memo)}
         </small>
         <small>
-          {formatImageBytes(memo.image_size_bytes) || "等待上传文件"}
+          {formatImageBytes(memo.image_size_bytes) || t("等待上传文件")}
         </small>
         {memo.image_ocr_status === "ready" &&
           (memo.image_auto_tags ?? []).length > 0 && (
@@ -130,6 +132,7 @@ function MemoListRowView({
   categories,
   actions,
 }: MemoListRowProps) {
+  const { t } = useI18n();
   const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <article
@@ -163,7 +166,7 @@ function MemoListRowView({
         view === "trash" ? undefined : 0
       }
       >
-      <input className="memo-batch-check" type="checkbox" aria-label={`选择 ${memo.title}`}
+      <input className="memo-batch-check" type="checkbox" aria-label={t("选择 {title}", { title: memo.title })}
         disabled={batchBusy} checked={batchSelected} onClick={(event) => event.stopPropagation()}
         onChange={() => actions.toggleBatch(memo)} />
       <span
@@ -214,9 +217,9 @@ function MemoListRowView({
           {memo.type === "resource"
             ? resourceSummary(memo) || sourceHost(memo.source_url)
             : memo.type === "word"
-              ? memo.word_phonetic || memo.word_meaning || "等待补充释义"
+              ? memo.word_phonetic || memo.word_meaning || t("等待补充释义")
               : memo.type === "image"
-                ? memo.body || "图片收藏"
+                ? memo.body || t("图片收藏")
                 : memo.body}
         </span>
         {memo.type === "resource" && <ResourceClassificationInsight memo={memo} compact />}
@@ -229,10 +232,10 @@ function MemoListRowView({
                   <span className="memo-source-host">{sourceHost(memo.source_url)}</span>
                 )}
                 {memo.resource_open_count > 0 && (
-                  <span className="memo-open-count">打开 {memo.resource_open_count} 次</span>
+                  <span className="memo-open-count">{t("打开 {resource_open_count} 次", { resource_open_count: memo.resource_open_count })}</span>
                 )}
                 {memo.tags.length > 0 && (
-                  <span className="memo-tags" aria-label="我的标签">
+                  <span className="memo-tags" aria-label={t("我的标签")}>
                     {memo.tags.map((tag) => (
                       <span key={tag} className="memo-tag">#{tag}</span>
                     ))}
@@ -243,7 +246,7 @@ function MemoListRowView({
                     className="memo-ebook-badge"
                     title={memo.ebook_path}
                   >
-                    云盘
+                    {t("云盘")}
                     {memo.ebook_format
                       ? ` · ${memo.ebook_format.toUpperCase()}`
                       : ""}
@@ -255,27 +258,23 @@ function MemoListRowView({
               </>
             )
             : memo.type === "word"
-              ? `熟悉度 ${memo.familiarity}/5 · 已复习 ${memo.review_count} 次 · 下次 ${
-                memo.next_review_at
-                  ? timeFormatter.format(new Date(memo.next_review_at))
-                  : "待安排"
-              }`
+              ? t("熟悉度 {familiarity}/5 · 已复习 {review_count} 次 · 下次 {value}", { familiarity: memo.familiarity, review_count: memo.review_count, value: memo.next_review_at
+                  ? timeFormatter().format(new Date(memo.next_review_at))
+                  : t("待安排") })
               : memo.type === "image"
                 ? memo.image_mime_type
-                  ? `图片 · ${imageDimensionLabel(memo)} · ${
-                      formatImageBytes(memo.image_size_bytes) || "处理中"
-                    }`
-                  : "尚未上传图片"
-                : memo.audio_mime_type ? "语音灵感" : "灵感"}
-          {memo.type !== "resource" && ` · 版本 ${memo.version}`}
+                  ? t("图片 · {value} · {value2}", { value: imageDimensionLabel(memo), value2: formatImageBytes(memo.image_size_bytes) || t("处理中") })
+                  : t("尚未上传图片")
+                : memo.audio_mime_type ? t("语音灵感") : t("灵感")}
+          {memo.type !== "resource" && t(" · 版本 {version}", { version: memo.version })}
           {view === "trash" &&
-            ` · 还剩 ${trashDaysRemaining(memo)} 天`}
-          {view === "inbox" && " · 待整理"}
+            t(" · 还剩 {value} 天", { value: trashDaysRemaining(memo) })}
+          {view === "inbox" && t(" · 待整理")}
         </small>
       </span>
       <span className="memo-row-side">
         <time dateTime={memo.updated_at}>
-          {timeFormatter.format(new Date(memo.updated_at))}
+          {timeFormatter().format(new Date(memo.updated_at))}
         </time>
         {view === "inbox" && (
           <span
@@ -286,13 +285,13 @@ function MemoListRowView({
               type="button"
               onClick={() => actions.organizeInbox(memo)}
             >
-              整理完成
+              {t("整理完成")}
             </button>
             <button
               type="button"
               onClick={() => actions.archiveInbox(memo)}
             >
-              归档
+              {t("归档")}
             </button>
           </span>
         )}
@@ -306,7 +305,7 @@ function MemoListRowView({
               onClick={() => actions.restore(memo)}
               disabled={trashBusy}
             >
-              恢复
+              {t("恢复")}
             </button>
             <button
               type="button"
@@ -314,7 +313,7 @@ function MemoListRowView({
               onClick={() => actions.permanentDelete(memo)}
               disabled={trashBusy}
             >
-              永久删除
+              {t("永久删除")}
             </button>
           </span>
         )}
@@ -328,10 +327,10 @@ function MemoListRowView({
               onToggle={(event) => setPickerOpen(event.currentTarget.open)}
             >
               <summary
-                title={memoCategoryLabels(memo, categories).join("、")}
+                title={memoCategoryLabels(memo, categories).join(t("、"))}
               >
-                {memoCategoryLabels(memo, categories).join("、")
-                  || "分类中"}
+                {memoCategoryLabels(memo, categories).join(t("、"))
+                  || t("分类中")}
               </summary>
               {/* 收起时不渲染菜单：每行一整套分类复选框会让长列表的 DOM 膨胀。 */}
               {pickerOpen && (
@@ -366,16 +365,16 @@ function MemoListRowView({
                         </label>
                       );
                     })}
-                  <small>最多 8 个分类</small>
+                  <small>{t("最多 8 个分类")}</small>
                 </div>
               )}
             </details>
             <button
               type="button"
               className={memo.starred ? "starred" : ""}
-              aria-label={memo.starred ? "取消星标" : "添加星标"}
+              aria-label={memo.starred ? t("取消星标") : t("添加星标")}
               aria-pressed={memo.starred}
-              title={memo.starred ? "取消星标" : "添加星标"}
+              title={memo.starred ? t("取消星标") : t("添加星标")}
               disabled={updating}
               onClick={() =>
                 actions.toggleStar(memo)
@@ -386,8 +385,8 @@ function MemoListRowView({
             <button
               type="button"
               className="resource-trash-button"
-              aria-label={`将“${memo.title}”移入回收站`}
-              title="移入回收站"
+              aria-label={t("将“{title}”移入回收站", { title: memo.title })}
+              title={t("移入回收站")}
               disabled={updating}
               onClick={() => actions.moveToTrash(memo)}
             >

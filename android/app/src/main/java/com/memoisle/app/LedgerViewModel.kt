@@ -23,12 +23,15 @@ import com.memoisle.app.data.normalizeImageMimeType
 import com.memoisle.app.data.shiftLedgerMonth
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
+import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.time.LocalDate
 
 data class LedgerUiState(
     val month: String = currentLedgerMonth(),
@@ -40,8 +43,8 @@ data class LedgerUiState(
     val loading: Boolean = false,
     val busy: Boolean = false,
     val hasMore: Boolean = false,
-    val error: String? = null,
-    val message: String? = null,
+    val error: UiText? = null,
+    val message: UiText? = null,
     /** 一句话刚记下的那一笔，提示旁边提供「编辑」入口。 */
     val quickEntry: LedgerEntry? = null,
 )
@@ -143,7 +146,7 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
                     val displayName = queryDisplayName(contentResolver, uri)
                     val mimeType = normalizeImageMimeType(contentResolver.getType(uri))
                         ?: imageMimeTypeFromFileName(displayName)
-                        ?: throw IllegalArgumentException("仅支持 PNG、JPEG、WebP、GIF 图片")
+                        ?: throw UiTextException(UiText.res(R.string.error_image_unsupported_type))
                     val prepared = ImageCompressor.compress(contentResolver, uri, mimeType)
                     api.recognizeLedgerImage(prepared.bytes, prepared.mimeType, LocalDate.now().toString())
                 }
@@ -162,7 +165,7 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
         val sentence = text.trim()
         if (sentence.isEmpty() || uiState.busy || uiState.loading) return
         if (sentence.codePointCount(0, sentence.length) > QUICK_TEXT_MAX_LENGTH) {
-            uiState = uiState.copy(error = "一句话最多 $QUICK_TEXT_MAX_LENGTH 个字。", message = null)
+            uiState = uiState.copy(error = UiText.res(R.string.ledger_error_quick_too_long, QUICK_TEXT_MAX_LENGTH), message = null)
             return
         }
         val today = LocalDate.now().toString()
@@ -170,20 +173,23 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
             val entry = result.entry
             // 记到别的月份时切过去，刷新后能在列表里看到这一笔。
             uiState = uiState.copy(month = entry.data.occurredOn.take(7), quickEntry = entry)
-            "已记下：${describeQuickEntry(entry)}" + if (result.byLocalModel) "（本地模型识别）" else ""
+            UiText.res(
+                if (result.byLocalModel) R.string.ledger_msg_quick_saved_local else R.string.ledger_msg_quick_saved,
+                describeQuickEntry(entry),
+            )
         }) { api.quickCreateLedgerEntry(sentence, today) }
     }
 
     private fun <T> mutate(
         onDone: () -> Unit,
-        onSuccess: (T) -> String = { "已保存。" },
+        onSuccess: (T) -> UiText = { UiText.res(R.string.ledger_msg_saved) },
         action: () -> T,
     ) {
         if (uiState.busy || uiState.loading) return
         loadJob?.cancel()
         uiState = uiState.copy(busy = true, error = null, message = null, quickEntry = null)
         mutationJob = viewModelScope.launch {
-            var message: String
+            var message: UiText
             try {
                 val result = withContext(Dispatchers.IO) { action() }
                 message = onSuccess(result)
@@ -193,7 +199,7 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
                 throw error
             } catch (error: Exception) {
                 if (error is ApiException && error.statusCode == 409) {
-                    message = "已在其他设备修改，正在重新读取数据，请重新打开后操作。"
+                    message = UiText.res(R.string.ledger_conflict_reloading)
                     onDone()
                 } else {
                     uiState = uiState.copy(busy = false, error = describe(error))
@@ -236,11 +242,13 @@ class LedgerViewModel(private val api: MemoApiClient) : ViewModel() {
         }.getOrNull()
     }
 
-    private fun describe(error: Exception): String = when (error) {
-        is ApiException -> error.detailMessage ?: "操作失败（${error.statusCode}），请重试。"
-        is IllegalArgumentException -> error.message ?: "这张图片无法用于记账。"
-        is java.io.IOException -> "无法连接服务器。记账仅支持在线使用，请检查网络后重试。"
-        else -> "读取或保存失败，请稍后重试。"
+    private fun describe(error: Exception): UiText = when (error) {
+        is HasUiText -> error.text
+        is ApiException -> error.detailMessage?.let(UiText::plain)
+            ?: UiText.res(R.string.error_operation_failed_retry, error.statusCode)
+        is IllegalArgumentException -> error.message?.let(UiText::plain) ?: UiText.res(R.string.ledger_error_image_unusable)
+        is java.io.IOException -> UiText.res(R.string.ledger_error_offline)
+        else -> UiText.res(R.string.ledger_error_generic)
     }
 
     companion object {

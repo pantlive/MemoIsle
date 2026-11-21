@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.memoisle.app.data.AndroidRelease
 import com.memoisle.app.data.shouldAutoCheck
 import com.memoisle.app.data.shouldPromptRelease
+import com.memoisle.app.ui.UiText
 import com.memoisle.app.update.AppUpdater
 import com.memoisle.app.update.UpdateVerificationException
 import java.io.File
@@ -36,7 +37,7 @@ data class UpdateUiState(
     val progress: Float? = null,
     val downloadedFile: File? = null,
     /** 失败原因或「已是最新」提示。 */
-    val message: String? = null,
+    val message: UiText? = null,
     /** 下载刚完成，界面应自动打开一次系统安装器；打开后调用 [UpdateViewModel.installRequestHandled]。 */
     val installRequested: Boolean = false,
 ) {
@@ -48,7 +49,7 @@ data class UpdateUiState(
         }
 
     /** 手动检查的结果用 Snackbar 提示：已是最新，或检查本身失败。 */
-    val snackbarMessage: String?
+    val snackbarMessage: UiText?
         get() = message?.takeIf {
             phase == UpdatePhase.UP_TO_DATE || (phase == UpdatePhase.FAILED && release == null)
         }
@@ -97,7 +98,7 @@ class UpdateViewModel(
                 throw error
             } catch (_: Exception) {
                 _uiState.value = if (manual) {
-                    UpdateUiState(phase = UpdatePhase.FAILED, message = "检查更新失败，请检查网络后重试")
+                    UpdateUiState(phase = UpdatePhase.FAILED, message = UiText.res(R.string.update_error_check_failed))
                 } else {
                     // 自动检查静默失败，不记时间，下次启动或登录再试。
                     UpdateUiState()
@@ -116,7 +117,7 @@ class UpdateViewModel(
                 prompt -> UpdateUiState(phase = UpdatePhase.AVAILABLE, release = release)
                 manual -> UpdateUiState(
                     phase = UpdatePhase.UP_TO_DATE,
-                    message = "已是最新版本（${updater.currentVersionName}）",
+                    message = UiText.res(R.string.update_msg_up_to_date, updater.currentVersionName),
                 )
                 else -> UpdateUiState()
             }
@@ -155,14 +156,14 @@ class UpdateViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: UpdateVerificationException) {
-                fail(error.message ?: "安装包校验失败")
+                fail(error.text)
             } catch (_: Exception) {
-                fail("下载失败，请检查网络后重试")
+                fail(UiText.res(R.string.update_error_download_failed))
             }
         }
     }
 
-    private fun fail(message: String) {
+    private fun fail(message: UiText) {
         _uiState.update {
             it.copy(
                 phase = UpdatePhase.FAILED,
@@ -180,7 +181,7 @@ class UpdateViewModel(
 
     /** 系统没有能处理安装包的界面等情况；重试会复用已校验的文件。 */
     fun reportInstallFailure() {
-        fail("无法打开系统安装界面，请稍后重试")
+        fail(UiText.res(R.string.update_error_installer_failed))
     }
 
     /** 「稍后」：关闭对话框，正在下载就取消（临时文件随之删除）。 */

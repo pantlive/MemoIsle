@@ -1,10 +1,9 @@
 package com.memoisle.app.ui
 
 import android.util.Patterns
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,8 +37,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -88,9 +89,9 @@ fun AuthScreen(
             val inviteRequired = state.providers?.inviteRequired == true
             Text(
                 text = when {
-                    isRegisterMode && inviteRequired -> "凭邀请码注册"
-                    isRegisterMode -> "加入 MemoIsle"
-                    else -> "欢迎回到 MemoIsle"
+                    isRegisterMode && inviteRequired -> stringResource(R.string.auth_title_register_invite)
+                    isRegisterMode -> stringResource(R.string.auth_title_register)
+                    else -> stringResource(R.string.auth_title_login)
                 },
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.SemiBold,
@@ -99,9 +100,9 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(7.dp))
             Text(
                 text = if (isRegisterMode) {
-                    "从今天开始，收好每一个值得再次遇见的瞬间"
+                    stringResource(R.string.auth_subtitle_register)
                 } else {
-                    "继续整理那些值得再次遇见的内容"
+                    stringResource(R.string.auth_subtitle_login)
                 },
                 color = TextMuted,
                 style = MaterialTheme.typography.bodyMedium,
@@ -112,7 +113,7 @@ fun AuthScreen(
             if (state.status == AuthStatus.LOADING) {
                 CircularProgressIndicator(color = DeepTeal)
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("正在检查登录状态…", color = TextMuted)
+                Text(stringResource(R.string.auth_checking), color = TextMuted)
             } else {
                 AuthForm(
                     isRegisterMode = isRegisterMode,
@@ -157,7 +158,7 @@ fun AuthScreen(
                         enabled = !state.isBusy && email.isNotBlank(),
                         contentPadding = PaddingValues(horizontal = 12.dp),
                     ) {
-                        Text("忘记密码？", color = DeepTealHover)
+                        Text(stringResource(R.string.auth_forgot_password), color = DeepTealHover)
                     }
                 }
 
@@ -178,7 +179,7 @@ fun AuthScreen(
                         enabled = !state.isBusy,
                         shape = RoundedCornerShape(10.dp),
                     ) {
-                        Text(if (state.isBusy) "正在进入…" else "本地开发登录")
+                        Text(if (state.isBusy) stringResource(R.string.auth_entering) else stringResource(R.string.auth_dev_login))
                     }
                 }
                 if (enabledProviders.isNotEmpty()) {
@@ -189,7 +190,7 @@ fun AuthScreen(
                 }
                 if (isRegisterMode) {
                     Text(
-                        text = "注册即表示你同意我们只为同步服务保存必要信息",
+                        text = stringResource(R.string.auth_register_terms),
                         color = TextMuted,
                         style = MaterialTheme.typography.labelSmall,
                         textAlign = TextAlign.Center,
@@ -197,7 +198,7 @@ fun AuthScreen(
                     )
                 }
                 Text(
-                    text = "↔  你的资料只属于你 · Web 与 Android 自动同步",
+                    text = stringResource(R.string.auth_footer),
                     color = TextMuted,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
@@ -205,7 +206,7 @@ fun AuthScreen(
                 )
                 state.message?.let { message ->
                     Text(
-                        text = message,
+                        text = message.asString(),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (state.messageTone == AuthMessageTone.NOTICE) {
                             DeepTealHover
@@ -302,8 +303,8 @@ private fun AuthForm(
                 value = displayName,
                 onValueChange = onDisplayNameChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("昵称（可选）") },
-                placeholder = { Text("输入昵称（可选）") },
+                label = { Text(stringResource(R.string.auth_nickname_label)) },
+                placeholder = { Text(stringResource(R.string.auth_nickname_placeholder)) },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp),
             )
@@ -312,12 +313,12 @@ private fun AuthForm(
             value = email,
             onValueChange = onEmailChange,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("电子邮箱") },
-            placeholder = { Text("输入邮箱地址") },
+            label = { Text(stringResource(R.string.auth_email_label)) },
+            placeholder = { Text(stringResource(R.string.auth_email_placeholder)) },
             singleLine = true,
             isError = emailError,
             supportingText = if (emailError) {
-                { Text("请输入有效的邮箱地址") }
+                { Text(stringResource(R.string.auth_email_invalid)) }
             } else {
                 null
             },
@@ -329,12 +330,12 @@ private fun AuthForm(
                 value = inviteCode,
                 onValueChange = onInviteCodeChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("邀请码") },
-                placeholder = { Text("输入邀请码") },
+                label = { Text(stringResource(R.string.auth_invite_label)) },
+                placeholder = { Text(stringResource(R.string.auth_invite_placeholder)) },
                 singleLine = true,
                 isError = inviteMissing,
                 supportingText = if (inviteMissing) {
-                    { Text("请输入邀请码") }
+                    { Text(stringResource(R.string.auth_error_invite_required)) }
                 } else {
                     null
                 },
@@ -352,13 +353,13 @@ private fun AuthForm(
                     value = verificationCode,
                     onValueChange = onVerificationCodeChange,
                     modifier = Modifier.weight(0.58f),
-                    label = { Text("邮箱验证码") },
-                    placeholder = { Text("输入 6 位验证码") },
+                    label = { Text(stringResource(R.string.auth_code_label)) },
+                    placeholder = { Text(stringResource(R.string.auth_code_placeholder)) },
                     singleLine = true,
                     maxLines = 1,
                     isError = verificationCodeError,
                     supportingText = if (verificationCodeError) {
-                        { Text("请输入 6 位数字") }
+                        { Text(stringResource(R.string.auth_code_digits)) }
                     } else {
                         null
                     },
@@ -379,10 +380,10 @@ private fun AuthForm(
                 ) {
                     Text(
                         when {
-                            state.isSendingVerificationCode -> "发送中…"
+                            state.isSendingVerificationCode -> stringResource(R.string.relay_ui_sending)
                             state.verificationCodeCooldownSeconds > 0 ->
                                 "${state.verificationCodeCooldownSeconds}s"
-                            else -> "发送验证码"
+                            else -> stringResource(R.string.auth_send_code)
                         },
                     )
                 }
@@ -392,9 +393,9 @@ private fun AuthForm(
             value = password,
             onValueChange = onPasswordChange,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("密码") },
+            label = { Text(stringResource(R.string.auth_password_label)) },
             placeholder = {
-                Text(if (isRegisterMode) "设置 8 位以上密码" else "输入密码")
+                Text(if (isRegisterMode) stringResource(R.string.auth_password_placeholder_register) else stringResource(R.string.auth_password_placeholder))
             },
             singleLine = true,
             isError = isRegisterMode && password.isNotEmpty() &&
@@ -409,7 +410,7 @@ private fun AuthForm(
                     onClick = { onShowPasswordChange(!showPassword) },
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
-                    Text(if (showPassword) "隐藏" else "显示", color = TextMuted)
+                    Text(if (showPassword) stringResource(R.string.auth_hide) else stringResource(R.string.auth_show), color = TextMuted)
                 }
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -417,7 +418,7 @@ private fun AuthForm(
         )
         if (isRegisterMode) {
             Text(
-                text = "至少 8 位，建议包含字母和数字",
+                text = stringResource(R.string.auth_password_hint),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(start = 4.dp),
@@ -426,12 +427,12 @@ private fun AuthForm(
                 value = confirmPassword,
                 onValueChange = onConfirmPasswordChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("确认密码") },
-                placeholder = { Text("再次输入密码") },
+                label = { Text(stringResource(R.string.auth_confirm_password_label)) },
+                placeholder = { Text(stringResource(R.string.auth_confirm_password_placeholder)) },
                 singleLine = true,
                 isError = confirmPasswordError,
                 supportingText = if (confirmPasswordError) {
-                    { Text("两次输入的密码需保持一致") }
+                    { Text(stringResource(R.string.auth_confirm_password_mismatch)) }
                 } else {
                     null
                 },
@@ -446,7 +447,7 @@ private fun AuthForm(
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) {
                         Text(
-                            if (showConfirmPassword) "隐藏" else "显示",
+                            if (showConfirmPassword) stringResource(R.string.auth_hide) else stringResource(R.string.auth_show),
                             color = TextMuted,
                         )
                     }
@@ -465,9 +466,9 @@ private fun AuthForm(
         ) {
             Text(
                 when {
-                    state.isBusy -> "正在处理…"
-                    isRegisterMode -> "创建账号"
-                    else -> "登录"
+                    state.isBusy -> stringResource(R.string.auth_processing)
+                    isRegisterMode -> stringResource(R.string.auth_create_account)
+                    else -> stringResource(R.string.auth_login)
                 },
             )
         }
@@ -486,7 +487,7 @@ private fun AuthModeSwitch(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (isRegisterMode) "已有账号？" else "还没有账号？",
+            text = if (isRegisterMode) stringResource(R.string.auth_have_account) else stringResource(R.string.auth_no_account),
             color = TextMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -496,7 +497,7 @@ private fun AuthModeSwitch(
             contentPadding = PaddingValues(horizontal = 5.dp),
         ) {
             Text(
-                text = if (isRegisterMode) "返回登录" else "立即注册",
+                text = if (isRegisterMode) stringResource(R.string.auth_back_to_login) else stringResource(R.string.auth_register_now),
                 color = DeepTealHover,
             )
         }
@@ -523,7 +524,7 @@ private fun AuthProviderButtons(
                 color = Border,
             )
             Text(
-                text = "或使用其他方式",
+                text = stringResource(R.string.auth_other_methods),
                 color = TextMuted,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 10.dp),

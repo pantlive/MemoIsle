@@ -1,6 +1,7 @@
 package com.memoisle.app
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -15,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import com.memoisle.app.data.ContentDefaults
 import com.memoisle.app.sync.MemoSyncScheduler
 import com.memoisle.app.ui.AuthScreen
 import com.memoisle.app.ui.MemoHomeScreen
@@ -58,8 +60,15 @@ class MainActivity : ComponentActivity() {
     /** 去系统设置授权「安装未知应用」后回来，自动继续安装。 */
     private var installAfterPermission = false
 
+    override fun attachBaseContext(newBase: Context) {
+        // Android 12 及以下按应用内语言偏好换成对应语言的 Context；13+ 由系统处理。
+        super.attachBaseContext(LocaleController.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        updateContentDefaults()
+        val languagePreference = LocaleController.currentPreference(this)
         sharedText = extractSharedText(intent)
         extractAuthToken(intent)?.let(authViewModel::completeLogin)
         enableEdgeToEdge()
@@ -108,6 +117,12 @@ class MainActivity : ComponentActivity() {
                         isCheckingUpdate = updateState.phase == UpdatePhase.CHECKING,
                         onCheckUpdate = updateViewModel::manualCheck,
                         onUpdateMessageShown = updateViewModel::messageShown,
+                        languagePreference = languagePreference,
+                        onLanguageChange = { language ->
+                            if (language != languagePreference) {
+                                LocaleController.setPreference(this@MainActivity, language)
+                            }
+                        },
                     )
                     AuthStatus.LOADING, AuthStatus.ANONYMOUS -> AuthScreen(
                         viewModel = authViewModel,
@@ -128,6 +143,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** 新建内容时写进数据的默认标题按当前界面语言填写（切换语言后 Activity 重建会再次调用）。 */
+    private fun updateContentDefaults() {
+        ContentDefaults.ideaTitle = getString(R.string.content_default_idea_title)
+        ContentDefaults.voiceBody = getString(R.string.content_default_voice_body)
+        ContentDefaults.resourceTitle = getString(R.string.content_default_resource_title)
+        ContentDefaults.imageTitle = getString(R.string.content_default_image_title)
+        ContentDefaults.meetingRecording = getString(R.string.content_default_meeting_recording)
+        ContentDefaults.voiceRecording = getString(R.string.content_default_voice_recording)
+        ContentDefaults.untitled = getString(R.string.content_default_untitled)
+        ContentDefaults.otherProvider = getString(R.string.common_other)
     }
 
     override fun onResume() {

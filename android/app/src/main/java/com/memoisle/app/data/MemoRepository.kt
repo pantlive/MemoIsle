@@ -1,5 +1,6 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.R
 import com.memoisle.app.network.ApiException
 import com.memoisle.app.network.DuplicateLemmaException
 import com.memoisle.app.network.DuplicateResourceException
@@ -7,6 +8,9 @@ import com.memoisle.app.network.MemoApiClient
 import com.memoisle.app.network.QuickAccessEntry
 import com.memoisle.app.network.ReviewSettings
 import com.memoisle.app.network.WordLookupResponse
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
+import com.memoisle.app.ui.UiTextStateException
 import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -90,7 +94,7 @@ class MemoRepository(
 
     suspend fun loadConflictServer(memo: Memo): Memo {
         return withContext(Dispatchers.IO) {
-            api.getMemo(requireNotNull(memo.id) { "冲突条目必须包含服务端标识" })
+            api.getMemo((memo.id ?: throw UiTextException(UiText.res(R.string.error_conflict_needs_server_id))))
         }
     }
 
@@ -503,7 +507,7 @@ class MemoRepository(
             ?.let(Paths::get)
             ?.takeIf(Files::exists)
             ?.let { return it }
-        val memoId = requireNotNull(memo.id) { "播放录音前必须先完成同步" }
+        val memoId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_audio_play_needs_sync)))
         val target = cacheDirectory.resolve("memoisle-$memoId.audio")
         return api.downloadAudio(memoId, target)
     }
@@ -519,7 +523,7 @@ class MemoRepository(
             val bytes = if (memo.id == null) {
                 // 尚未上传的离线草稿直接用本机原图，联网后由后台同步补传。
                 val pending = pendingImageFile(memo)
-                    ?: throw IllegalStateException("图片收藏尚未同步，暂时无法查看原图")
+                    ?: throw UiTextStateException(UiText.res(R.string.error_image_not_synced))
                 Files.readAllBytes(pending)
             } else {
                 val cachedFile = imageCacheFile(memo, thumbnail)
@@ -596,7 +600,7 @@ class MemoRepository(
     }
 
     private fun downloadMemoImage(memo: Memo, thumbnail: Boolean): ByteArray {
-        val remoteId = requireNotNull(memo.id) { "查看图片前必须先完成同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_image_view_needs_sync)))
         val bytes = try {
             api.fetchMemoImage(remoteId, thumbnail)
         } catch (error: ApiException) {

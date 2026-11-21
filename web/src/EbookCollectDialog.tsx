@@ -9,6 +9,8 @@ import {
 } from "./api";
 import type { CloudAccount, EbookJob, EbookJobStatus } from "./types";
 import { visibleInterval } from "./visibleInterval";
+import { t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 interface EbookCollectDialogProps {
   onClose: () => void;
@@ -16,15 +18,15 @@ interface EbookCollectDialogProps {
 }
 
 const statusLabels: Record<EbookJobStatus, string> = {
-  pending: "排队中",
-  running: "处理中",
-  success: "已完成",
-  failed: "失败",
+  get pending() { return t("排队中"); },
+  get running() { return t("处理中"); },
+  get success() { return t("已完成"); },
+  get failed() { return t("失败"); },
 };
 
 const modeLabels: Record<EbookJob["mode"], string> = {
-  transfer: "云盘转存",
-  upload: "下载后上传",
+  get transfer() { return t("云盘转存"); },
+  get upload() { return t("下载后上传"); },
 };
 
 const ACTIVE_STATUSES: EbookJobStatus[] = ["pending", "running"];
@@ -42,6 +44,7 @@ export default function EbookCollectDialog({
   onClose,
   onChanged,
 }: EbookCollectDialogProps) {
+  const { t } = useI18n();
   const [accounts, setAccounts] = useState<CloudAccount[]>([]);
   const [jobs, setJobs] = useState<EbookJob[]>([]);
   const [url, setUrl] = useState("");
@@ -70,7 +73,7 @@ export default function EbookCollectDialog({
         onChanged();
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "读取任务失败");
+      setMessage(error instanceof Error ? error.message : t("读取任务失败"));
     }
   }, [onChanged]);
 
@@ -95,7 +98,7 @@ export default function EbookCollectDialog({
         }
       } catch (error) {
         if (active) {
-          setMessage(error instanceof Error ? error.message : "初始化失败");
+          setMessage(error instanceof Error ? error.message : t("初始化失败"));
         }
       }
     })();
@@ -116,7 +119,7 @@ export default function EbookCollectDialog({
       return;
     }
     if (!url.trim()) {
-      setMessage("请粘贴电子书链接");
+      setMessage(t("请粘贴电子书链接"));
       return;
     }
     setBusy(true);
@@ -132,9 +135,9 @@ export default function EbookCollectDialog({
       setUrl("");
       setSharePassword("");
       setNote("");
-      setMessage(`已提交：${modeLabels[job.mode]}，正在处理`);
+      setMessage(t("已提交：{value}，正在处理", { value: modeLabels[job.mode] }));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "提交失败");
+      setMessage(error instanceof Error ? error.message : t("提交失败"));
     } finally {
       setBusy(false);
     }
@@ -150,9 +153,9 @@ export default function EbookCollectDialog({
       setJobs((current) =>
         current.map((item) => (item.id === job.id ? job : item)),
       );
-      setMessage("已重新排队");
+      setMessage(t("已重新排队"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "重试失败");
+      setMessage(error instanceof Error ? error.message : t("重试失败"));
     } finally {
       setBusy(false);
     }
@@ -174,14 +177,14 @@ export default function EbookCollectDialog({
       >
         <div className="dialog-header">
           <div>
-            <span className="type-label"><Icon name="book" size={16} /> 电子书</span>
-            <h2 id="ebook-dialog-title">收藏电子书</h2>
+            <span className="type-label"><Icon name="book" size={16} />{t(" 电子书")}</span>
+            <h2 id="ebook-dialog-title">{t("收藏电子书")}</h2>
           </div>
           <button
             autoFocus
             type="button"
             className="icon-button"
-            aria-label="关闭收藏电子书"
+            aria-label={t("关闭收藏电子书")}
             onClick={onClose}
           ><Icon name="close" size={16} /></button>
         </div>
@@ -189,68 +192,66 @@ export default function EbookCollectDialog({
         <div className="dialog-body">
           {!activeAccount && (
             <p className="cloud-dialog-note">
-              还没有可用的云盘绑定。请先关闭本窗口，在「云盘绑定」里绑定阿里云盘，
-              电子书才有地方存放。
+              {t("还没有可用的云盘绑定。请先关闭本窗口，在「云盘绑定」里绑定阿里云盘， 电子书才有地方存放。")}
             </p>
           )}
 
           <section className="cloud-bind-form">
             <label className="cloud-credential-field">
-              <span>电子书链接</span>
+              <span>{t("电子书链接")}</span>
               <input
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
-                placeholder="云盘分享链接，或出版社/图书馆的下载直链"
+                placeholder={t("云盘分享链接，或出版社/图书馆的下载直链")}
                 maxLength={2048}
               />
             </label>
             <label>
-              <span>分享提取码（可选）</span>
+              <span>{t("分享提取码（可选）")}</span>
               <input
                 value={sharePassword}
                 onChange={(event) => setSharePassword(event.target.value)}
-                placeholder="链接里带 ?pwd= 时可留空"
+                placeholder={t("链接里带 ?pwd= 时可留空")}
                 maxLength={100}
               />
             </label>
             <label>
-              <span>转存目录</span>
+              <span>{t("转存目录")}</span>
               <input
                 value={targetFolder}
                 onChange={(event) => setTargetFolder(event.target.value)}
                 placeholder={
-                  activeAccount ? activeAccount.default_folder : "/MemoIsle/电子书"
+                  activeAccount ? activeAccount.default_folder : t("/MemoIsle/电子书")
                 }
                 maxLength={500}
               />
             </label>
             <label>
-              <span>标签（逗号分隔）</span>
+              <span>{t("标签（逗号分隔）")}</span>
               <input
                 value={tagsInput}
                 onChange={(event) => setTagsInput(event.target.value)}
-                placeholder="编程, 待读"
+                placeholder={t("编程, 待读")}
               />
             </label>
             <label className="cloud-credential-field">
-              <span>备注（可选）</span>
+              <span>{t("备注（可选）")}</span>
               <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder="从哪看到的、为什么想读"
+                placeholder={t("从哪看到的、为什么想读")}
                 rows={2}
                 maxLength={2000}
               />
             </label>
 
             <p className="cloud-dialog-hint">
-              云盘分享链接会被转存到你的云盘；普通直链由服务端下载后上传。
-              MemoIsle 只保存云盘链接与元数据快照，不保存电子书本体。
+              {t("云盘分享链接会被转存到你的云盘；普通直链由服务端下载后上传。 MemoIsle 只保存云盘链接与元数据快照，不保存电子书本体。")}
             </p>
           </section>
 
-          <section className="cloud-account-list" aria-label="电子书任务">
-            {!jobs.length && <div className="cloud-empty">还没有电子书任务。</div>}
+          <section className="cloud-account-list" aria-label={t("电子书任务")}>
+            {!jobs.length && <div className="cloud-empty">{t("还没有电子书任务。")}</div>}
             {jobs.map((job) => (
               <article className="ebook-job" key={job.id}>
                 <div className="cloud-account-heading">
@@ -258,7 +259,7 @@ export default function EbookCollectDialog({
                     <span className={`cloud-status ${job.status}`}>
                       {statusLabels[job.status]}
                     </span>
-                    <h3>{modeLabels[job.mode]} · {job.stage || "等待开始"}</h3>
+                    <h3>{modeLabels[job.mode]} · {job.stage || t("等待开始")}</h3>
                   </div>
                   <span className="cloud-account-hint">{job.progress}%</span>
                 </div>
@@ -267,8 +268,8 @@ export default function EbookCollectDialog({
                 </div>
                 <div className="cloud-account-meta">
                   <span className="ebook-source">{job.source_url}</span>
-                  <span>目标目录：{job.target_folder}</span>
-                  {job.error && <span>失败原因：{job.error}</span>}
+                  <span>{t("目标目录：{target_folder}", { target_folder: job.target_folder })}</span>
+                  {job.error && <span>{t("失败原因：{error}", { error: job.error })}</span>}
                 </div>
                 {job.status === "failed" && (
                   <div className="cloud-account-actions">
@@ -276,7 +277,7 @@ export default function EbookCollectDialog({
                       type="button"
                       disabled={busy}
                       onClick={() => void handleRetry(job.id)}
-                    >重试</button>
+                    >{t("重试")}</button>
                   </div>
                 )}
               </article>
@@ -284,13 +285,13 @@ export default function EbookCollectDialog({
           </section>
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={onClose}>关闭</button>
+          <button type="button" onClick={onClose}>{t("关闭")}</button>
           <button
             type="button"
             className="primary"
             disabled={busy || !activeAccount}
             onClick={() => void handleSubmit()}
-          >提交并转存</button>
+          >{t("提交并转存")}</button>
         </div>
         {message && <p className="dialog-error cloud-dialog-message" role="status">{message}</p>}
       </section>

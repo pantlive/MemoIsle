@@ -3,6 +3,8 @@ package com.memoisle.app.data
 import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
 
 const val FORGET_TITLE_MAX = 100
 const val FORGET_CONTENT_MAX = 10_000
@@ -100,18 +102,20 @@ data class ForgetItem(
 /** 与 Web 一样按 Unicode 码位计字数，一个汉字和一个 emoji 都算一个字。 */
 fun forgetTextLength(value: String): Int = value.codePointCount(0, value.length)
 
-/** 标题、正文超长时返回中文提示；都可以为空，用来只收藏附件。 */
-fun forgetTextError(title: String, content: String): String? {
-    if (forgetTextLength(title.trim()) > FORGET_TITLE_MAX) return "标题最多 $FORGET_TITLE_MAX 个字"
-    if (forgetTextLength(content.trim()) > FORGET_CONTENT_MAX) return "正文最多 $FORGET_CONTENT_MAX 个字"
+/** 标题、正文超长时返回提示；都可以为空，用来只收藏附件。 */
+fun forgetTextError(title: String, content: String): UiText? {
+    if (forgetTextLength(title.trim()) > FORGET_TITLE_MAX) return UiText.res(R.string.forget_error_title_too_long, FORGET_TITLE_MAX)
+    if (forgetTextLength(content.trim()) > FORGET_CONTENT_MAX) {
+        return UiText.res(R.string.forget_error_content_too_long, FORGET_CONTENT_MAX)
+    }
     return null
 }
 
 /** 上传前挡住空文件和超过 20 MB 的附件。大小未知时先放行，读取时再数。 */
-fun forgetFileError(size: Long?): String? {
+fun forgetFileError(size: Long?): UiText? {
     if (size == null) return null
-    if (size <= 0L) return "附件内容不能为空"
-    if (size > FORGET_MAX_ATTACHMENT_BYTES) return "附件不能超过 20 MB"
+    if (size <= 0L) return UiText.res(R.string.error_attachment_empty)
+    if (size > FORGET_MAX_ATTACHMENT_BYTES) return UiText.res(R.string.forget_error_attachment_too_large)
     return null
 }
 
@@ -126,7 +130,7 @@ fun formatForgetBytes(size: Long): String {
     return String.format(Locale.US, "%.1f MB", size / 1024.0 / 1024.0)
 }
 
-fun forgetDisplayTitle(title: String): String = title.trim().ifBlank { "未命名" }
+fun forgetDisplayTitle(title: String): String = title.trim().ifBlank { ContentDefaults.untitled }
 
 fun isForgetImage(attachment: ForgetAttachment): Boolean = attachment.kind == "image"
 

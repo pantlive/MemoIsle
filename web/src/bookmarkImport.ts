@@ -1,4 +1,5 @@
 import type { BookmarkInput } from "./types";
+import { t } from "./i18n";
 
 const MAX_BOOKMARK_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_BOOKMARKS = 5_000;
@@ -17,7 +18,7 @@ function bookmarkTitle(anchor: Element, url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "").slice(0, 300);
   } catch {
-    return "未命名书签";
+    return t("未命名书签");
   }
 }
 
@@ -83,21 +84,21 @@ export async function parseChromeBookmarksFile(
   file: File,
 ): Promise<BookmarkInput[]> {
   if (file.size > MAX_BOOKMARK_FILE_BYTES) {
-    throw new Error("书签文件不能超过 10 MB。");
+    throw new Error(t("书签文件不能超过 10 MB。"));
   }
   const html = await file.text();
   const document = new DOMParser().parseFromString(html, "text/html");
   const root = document.querySelector("dl");
   if (!root) {
-    throw new Error("未识别到 Chrome/Netscape 书签结构，请重新导出 HTML 文件。");
+    throw new Error(t("未识别到 Chrome/Netscape 书签结构，请重新导出 HTML 文件。"));
   }
   const items: BookmarkInput[] = [];
   collectBookmarks(root, [], items);
   if (!items.length) {
-    throw new Error("书签文件中没有可读取的网页链接。");
+    throw new Error(t("书签文件中没有可读取的网页链接。"));
   }
   if (items.length >= MAX_BOOKMARKS && document.querySelectorAll("a[href]").length > MAX_BOOKMARKS) {
-    throw new Error("单次最多导入 5000 条书签，请拆分文件后重试。");
+    throw new Error(t("单次最多导入 5000 条书签，请拆分文件后重试。"));
   }
   return items;
 }

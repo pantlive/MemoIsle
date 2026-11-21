@@ -177,6 +177,8 @@ import type {
   WordLookupResponse,
 } from "./types";
 import { lazyComponent } from "./lazyComponent";
+import { languageOptions, type MessageKey, msg, t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 // 点开才用的对话框与面板按需加载，不进首屏包。
 const BookmarkImportDialog = lazyComponent(() => import("./BookmarkImportDialog"));
@@ -186,10 +188,16 @@ const EbookCollectDialog = lazyComponent(() => import("./EbookCollectDialog"));
 const LinkHealthDialog = lazyComponent(() => import("./LinkHealthDialog"));
 const BrowserHistoryDialog = lazyComponent(() => import("./BrowserHistoryDialog"));
 const ShortcutHelpDialog = lazyComponent(() => import("./ShortcutHelpDialog"));
-const VaultPanel = lazyComponent(() => import("./VaultPanel"), <p className="vault-loading" role="status">正在打开密码库…</p>);
-const LedgerPanel = lazyComponent(() => import("./LedgerPanel"), <p role="status">正在打开记账…</p>);
-const RelayPanel = lazyComponent(() => import("./RelayPanel"), <p role="status">正在打开传输…</p>);
-const ForgetPanel = lazyComponent(() => import("./ForgetPanel"), <p role="status">正在打开易忘事项…</p>);
+/** 懒加载占位文案在渲染时才翻译，切换语言后也能跟上。 */
+function LazyLoadingStatus({ text, className }: { text: MessageKey; className?: string }) {
+  const { t } = useI18n();
+  return <p className={className} role="status">{t(text)}</p>;
+}
+
+const VaultPanel = lazyComponent(() => import("./VaultPanel"), <LazyLoadingStatus className="vault-loading" text={msg("正在打开密码库…")} />);
+const LedgerPanel = lazyComponent(() => import("./LedgerPanel"), <LazyLoadingStatus text={msg("正在打开记账…")} />);
+const RelayPanel = lazyComponent(() => import("./RelayPanel"), <LazyLoadingStatus text={msg("正在打开传输…")} />);
+const ForgetPanel = lazyComponent(() => import("./ForgetPanel"), <LazyLoadingStatus text={msg("正在打开易忘事项…")} />);
 const CategoryTemplatePanel = lazyComponent(() => import("./CategoryTemplatePanel"));
 const ImageOrganizationPanel = lazyComponent(() => import("./ImageOrganizationPanel"));
 const WeeklyDigest = lazyComponent(() => import("./WeeklyDigest"));
@@ -211,12 +219,12 @@ const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const IMAGE_OCR_POLL_INTERVAL_MS = 2_000;
 const IMAGE_OCR_POLL_MAX_ATTEMPTS = 10;
 const IMAGE_OCR_STATUS_LABELS: Record<ImageOcrStatus, string> = {
-  none: "未识别",
-  pending: "排队中",
-  processing: "识别中",
-  ready: "已识别",
-  failed: "识别失败",
-  disabled: "服务端未启用",
+  get none() { return t("未识别"); },
+  get pending() { return t("排队中"); },
+  get processing() { return t("识别中"); },
+  get ready() { return t("已识别"); },
+  get failed() { return t("识别失败"); },
+  get disabled() { return t("服务端未启用"); },
 };
 
 interface AppProps {
@@ -246,12 +254,21 @@ function resourceRowElements(): HTMLElement[] {
 }
 
 export default function App({ authUser, onLogout, onPasswordChanged }: AppProps) {
+  const { t, preference: languagePreference, setPreference: setLanguagePreference } = useI18n();
   // 两个主题入口共用一份状态，存储失败时同步回退为跟随系统。
   const [themePreference, setThemePreference] = useState(readThemePreference);
   const currentThemeIndex = themeOptions.findIndex((option) => option.value === themePreference);
   const currentTheme = themeOptions[currentThemeIndex];
   const nextTheme = themeOptions[(currentThemeIndex + 1) % themeOptions.length];
-  const themeButtonLabel = `主题：${currentTheme.label}，点击切换为${nextTheme.label}`;
+  const themeButtonLabel = t("主题：{label}，点击切换为{label2}", { label: currentTheme.label, label2: nextTheme.label });
+
+  const currentLanguageIndex = Math.max(0, languageOptions.findIndex((option) => option.value === languagePreference));
+  const currentLanguageOption = languageOptions[currentLanguageIndex];
+  const nextLanguageOption = languageOptions[(currentLanguageIndex + 1) % languageOptions.length];
+  const languageButtonLabel = t("语言：{label}，点击切换为{label2}", {
+    label: currentLanguageOption.label,
+    label2: nextLanguageOption.label,
+  });
 
   function handleThemeChange(pref: ThemePreference): void {
     const saved = saveThemePreference(pref);
@@ -906,11 +923,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setResourcePreviewMemo((current) => (current ? patch(current) : current));
       setUndoMemo(null);
       if (hidden) {
-        const text = `已从快速访问移除「${memo.title}」，仍会继续记录打开次数。`;
+        const text = t("已从快速访问移除「{title}」，仍会继续记录打开次数。", { title: memo.title });
         setMessage(text);
         setQuickAccessUndo({ memo, message: text });
       } else {
-        setMessage(`「${memo.title}」已重新显示在快速访问。`);
+        setMessage(t("「{title}」已重新显示在快速访问。", { title: memo.title }));
         setQuickAccessUndo(null);
       }
     } catch (error) {
@@ -944,7 +961,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       });
       setReviewSettings(updated);
       await loadReviewQueue(reviewFilter);
-      setMessage("复习计划已更新，今日队列已按新上限刷新。");
+      setMessage(t("复习计划已更新，今日队列已按新上限刷新。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -999,7 +1016,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     }
     if (!navigator.clipboard?.readText) {
       if (!silent) {
-        setMessage("当前浏览器不能读取剪贴板，请直接粘贴单词。");
+        setMessage(t("当前浏览器不能读取剪贴板，请直接粘贴单词。"));
       }
       return false;
     }
@@ -1007,7 +1024,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       const draft = parseClipboardWord(await navigator.clipboard.readText());
       if (!draft) {
         if (!silent) {
-          setMessage("剪贴板里没有可收藏的英语单词。");
+          setMessage(t("剪贴板里没有可收藏的英语单词。"));
         }
         return false;
       }
@@ -1029,11 +1046,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           overwrite || !current.trim() ? draft.example ?? current : current,
         );
       }
-      setMessage(`已从剪贴板填入「${draft.lemma}」，确认后保存。`);
+      setMessage(t("已从剪贴板填入「{lemma}」，确认后保存。", { lemma: draft.lemma }));
       return true;
     } catch {
       if (!silent) {
-        setMessage("无法读取剪贴板，请允许访问或直接粘贴单词。");
+        setMessage(t("无法读取剪贴板，请允许访问或直接粘贴单词。"));
       }
       return false;
     }
@@ -1166,7 +1183,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       (!current.phonetic.trim() ||
         current.phonetic.trim() === autoFilledWordRef.current.phonetic)
     ) {
-      filled.push("音标");
+      filled.push(t("音标"));
       autoFilledWordRef.current.phonetic = phonetic;
       setNewPhonetic(phonetic);
     }
@@ -1175,7 +1192,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       (!current.meaning.trim() ||
         current.meaning.trim() === autoFilledWordRef.current.meaning)
     ) {
-      filled.push("中文释义");
+      filled.push(t("中文释义"));
       autoFilledWordRef.current.meaning = meaning;
       setNewBody(meaning);
     }
@@ -1184,7 +1201,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       (!current.example.trim() ||
         current.example.trim() === autoFilledWordRef.current.example)
     ) {
-      filled.push("例句");
+      filled.push(t("例句"));
       autoFilledWordRef.current.example = example;
       setNewExample(example);
     }
@@ -1226,7 +1243,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       );
       if (autoApply) {
         if (filled.length > 0) {
-          setMessage(`已自动填入${filled.join("、")}。`);
+          setMessage(t("已自动填入{value}。", { value: filled.join(t("、")) }));
         }
         return;
       }
@@ -1237,13 +1254,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setMessage(
         preview.senses.length > 0
           ? filled.length > 0
-            ? `已自动填入${filled.join("、")}，也可继续选择其他释义。`
-            : "已查到中文释义，请选择后使用。"
-          : "词典没有返回中文释义，请手动填写。",
+            ? t("已自动填入{value}，也可继续选择其他释义。", { value: filled.join(t("、")) })
+            : t("已查到中文释义，请选择后使用。")
+          : t("词典没有返回中文释义，请手动填写。"),
       );
     } catch (error) {
       if (!autoApply && requestId === wordLookupRequestRef.current) {
-        setMessage(`查词失败：${describeError(error)}`);
+        setMessage(t("查词失败：{value}", { value: describeError(error) }));
       }
     } finally {
       if (requestId === wordLookupRequestRef.current) {
@@ -1264,8 +1281,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     clearWordLookup();
     setMessage(
       filled.length > 0
-        ? `已应用所选释义（${filled.join("、")}）；手工填写的内容已保留。`
-        : "已保留手工填写的内容。",
+        ? t("已应用所选释义（{value}）；手工填写的内容已保留。", { value: filled.join(t("、")) })
+        : t("已保留手工填写的内容。"),
     );
   };
 
@@ -1297,7 +1314,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     }
     changeActiveType(suggestion.type, true);
     setDismissedSuggestionKey(suggestion.key);
-    setMessage(`已切换为${viewCopy[suggestion.type].itemLabel}，请确认后保存。`);
+    setMessage(t("已切换为{itemLabel}，请确认后保存。", { itemLabel: viewCopy[suggestion.type].itemLabel }));
   };
 
   const enterWordCapture = () => {
@@ -1427,14 +1444,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setWebAttachmentHelp(!authenticationError);
       setMessage(
         captureError === "unsupported_page"
-          ? "当前页面不支持收藏，请在普通公网 HTTP(S) 网页使用扩展。"
+          ? t("当前页面不支持收藏，请在普通公网 HTTP(S) 网页使用扩展。")
           : captureError === "not_authenticated"
-            ? "请先在 MemoIsle 中登录，扩展即可一键收藏当前网页。"
+            ? t("请先在 MemoIsle 中登录，扩展即可一键收藏当前网页。")
             : captureError === "capture_failed"
-              ? "网页收藏失败，请稍后重试，也可以粘贴网址或输入 @ 选择网页后保存。"
-            : `扩展暂时无法连接 MemoIsle${
-                attemptedApiBaseUrl ? `（已尝试 ${attemptedApiBaseUrl}）` : ""
-              }，请确认后端已启动，并刷新本页让扩展同步当前地址。`,
+              ? t("网页收藏失败，请稍后重试，也可以粘贴网址或输入 @ 选择网页后保存。")
+            : t("扩展暂时无法连接 MemoIsle{value}，请确认后端已启动，并刷新本页让扩展同步当前地址。", { value: attemptedApiBaseUrl ? t("（已尝试 {attemptedApiBaseUrl}）", { attemptedApiBaseUrl }) : "" }),
       );
       return;
     }
@@ -1448,7 +1463,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         setWebAttachmentHelp(false);
         setNewUrl(capture.page_url);
         setNewTitle(capture.page_title);
-        setMessage("已附加当前网页；输入 @ 可从当前浏览器的其他打开网页中选择。");
+        setMessage(t("已附加当前网页；输入 @ 可从当前浏览器的其他打开网页中选择。"));
         void refreshOpenBrowserTabs();
       })
       .catch((captureExchangeError) => {
@@ -1763,7 +1778,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         if (linkedMemoIdRef.current === memoId) {
           linkedMemoIdRef.current = null;
           setSelectedId(null);
-          setMessage("链接里的条目不存在或已被删除。");
+          setMessage(t("链接里的条目不存在或已被删除。"));
         }
       });
   };
@@ -1859,7 +1874,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
       const formatLabel = format === "json" ? "JSON" : format === "csv" ? "CSV" : "Markdown";
-      setMessage(`个人数据已导出为 ${formatLabel}，录音文件未打包。`);
+      setMessage(t("个人数据已导出为 {formatLabel}，录音文件未打包。", { formatLabel }));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -1872,7 +1887,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       return;
     }
     if (file.name.toLowerCase().endsWith(".md")) {
-      setMessage("Markdown 仅供阅读，完整恢复请使用 JSON 或 CSV 备份。");
+      setMessage(t("Markdown 仅供阅读，完整恢复请使用 JSON 或 CSV 备份。"));
       return;
     }
     setIsImporting(true);
@@ -1881,11 +1896,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       await Promise.all([loadCurrentMemos(false), refreshMemoCounts()]);
       const errorPreview = result.errors
         .slice(0, 2)
-        .map((error) => `第 ${error.row} 行：${error.message}`)
-        .join("；");
-      const suffix = errorPreview ? `；${errorPreview}` : "";
+        .map((error) => t("第 {row} 行：{message}", { row: error.row, message: error.message }))
+        .join(t("；"));
+      const suffix = errorPreview ? t("；{errorPreview}", { errorPreview }) : "";
       setMessage(
-        `备份导入完成：新增 ${result.imported_count}，重复 ${result.duplicate_count}，失败 ${result.failed_count}${suffix}`,
+        t("备份导入完成：新增 {imported_count}，重复 {duplicate_count}，失败 {failed_count}{suffix}", { imported_count: result.imported_count, duplicate_count: result.duplicate_count, failed_count: result.failed_count, suffix }),
       );
     } catch (error) {
       setMessage(describeError(error));
@@ -1904,11 +1919,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       await Promise.all([loadCurrentMemos(false), refreshMemoCounts()]);
       const errorPreview = result.errors
         .slice(0, 2)
-        .map((error) => `第 ${error.row} 行：${error.message}`)
-        .join("；");
-      const suffix = errorPreview ? `；${errorPreview}` : "";
+        .map((error) => t("第 {row} 行：{message}", { row: error.row, message: error.message }))
+        .join(t("；"));
+      const suffix = errorPreview ? t("；{errorPreview}", { errorPreview }) : "";
       setMessage(
-        `单词导入完成：新增 ${result.imported_count}，重复 ${result.duplicate_count}，跳过 ${result.skipped_count}，失败 ${result.failed_count}${suffix}`,
+        t("单词导入完成：新增 {imported_count}，重复 {duplicate_count}，跳过 {skipped_count}，失败 {failed_count}{suffix}", { imported_count: result.imported_count, duplicate_count: result.duplicate_count, skipped_count: result.skipped_count, failed_count: result.failed_count, suffix }),
       );
     } catch (error) {
       setMessage(describeError(error));
@@ -1942,7 +1957,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setWebAttachmentHelp(false);
     setNewUrl(tab.page_url);
     setNewTitle(tab.page_title);
-    setMessage("已附加当前浏览器中的网页，可以补充备注后保存。");
+    setMessage(t("已附加当前浏览器中的网页，可以补充备注后保存。"));
   };
 
   const showBrowserPageHelp = () => {
@@ -1994,8 +2009,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setMessage(
       savedDraft
         ? savedDraft.baseVersion !== memo.version
-          ? "已恢复基于旧版本的本地草稿，保存时会检查编辑冲突。"
-          : "已恢复未提交的本地草稿。"
+          ? t("已恢复基于旧版本的本地草稿，保存时会检查编辑冲突。")
+          : t("已恢复未提交的本地草稿。")
         : "",
     );
   };
@@ -2029,12 +2044,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       return;
     }
     if (activeType === "word" && !newTitle.trim()) {
-      setMessage("请输入要收藏的英语单词或短语。");
+      setMessage(t("请输入要收藏的英语单词或短语。"));
       wordRef.current?.focus();
       return;
     }
     if (activeType === "resource" && !sourceUrl) {
-      setMessage("请输入有效的网址，例如 https://example.com/article。");
+      setMessage(t("请输入有效的网址，例如 https://example.com/article。"));
       urlRef.current?.focus();
       return;
     }
@@ -2095,8 +2110,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       selectMemo(created);
       setMessage(
         deduplicatedResource
-          ? "该网址已经收藏，已定位到资料库中的原有条目。"
-          : `${copy.itemLabel}已保存，并可在 Android 端同步。`,
+          ? t("该网址已经收藏，已定位到资料库中的原有条目。")
+          : t("{itemLabel}已保存，并可在 Android 端同步。", { itemLabel: copy.itemLabel }),
       );
     } catch (error) {
       if (
@@ -2112,7 +2127,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           phonetic: newPhonetic.trim(),
           example: newExample.trim(),
         });
-        setMessage("已收藏相同词形，可以查看、合并例句或仍然保存。");
+        setMessage(t("已收藏相同词形，可以查看、合并例句或仍然保存。"));
       } else if (
         activeType === "resource" &&
         error instanceof ApiError &&
@@ -2122,7 +2137,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       ) {
         setDuplicateResource(error.current);
         setPendingResource(pendingResourceDraft);
-        setMessage("已收藏相同网址，可以查看已有资料或仍然保存。");
+        setMessage(t("已收藏相同网址，可以查看已有资料或仍然保存。"));
       } else {
         setMessage(describeError(error));
       }
@@ -2156,18 +2171,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         setWebAttachmentHelp(true);
         showMessageSoon(
           tabs.length === 0
-            ? "暂未读取到可收藏的网页，请打开普通公网网页后重试；若已打开，请检查扩展是否允许访问本站并刷新页面。"
-            : "最近浏览的网页是 MemoIsle 本站页面，请先切到想收藏的网页再按快捷键。",
+            ? t("暂未读取到可收藏的网页，请打开普通公网网页后重试；若已打开，请检查扩展是否允许访问本站并刷新页面。")
+            : t("最近浏览的网页是 MemoIsle 本站页面，请先切到想收藏的网页再按快捷键。"),
         );
         return;
       }
       const sourceUrl = normalizeWebUrl(target.page_url);
       if (!sourceUrl) {
         switchToResourceView();
-        showMessageSoon("最近浏览的网页地址无效，请在资料视图粘贴网址后保存。");
+        showMessageSoon(t("最近浏览的网页地址无效，请在资料视图粘贴网址后保存。"));
         return;
       }
-      showMessageSoon(`正在收藏「${target.page_title || sourceHost(sourceUrl)}」…`);
+      showMessageSoon(t("正在收藏「{value}」…", { value: target.page_title || sourceHost(sourceUrl) }));
       const clientId = crypto.randomUUID();
       pendingResourceDraft = {
         clientId,
@@ -2200,8 +2215,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       void loadReviewQueue();
       showMessageSoon(
         deduplicatedResource
-          ? "该网页已在资料库中，已定位到原有条目。"
-          : `已收藏「${target.page_title || sourceHost(sourceUrl)}」，可在此查看。`,
+          ? t("该网页已在资料库中，已定位到原有条目。")
+          : t("已收藏「{value}」，可在此查看。", { value: target.page_title || sourceHost(sourceUrl) }),
       );
     } catch (error) {
       if (
@@ -2213,7 +2228,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         setDuplicateResource(error.current);
         setPendingResource(pendingResourceDraft);
         switchToResourceView();
-        showMessageSoon("该网页已经收藏，可以查看已有资料或仍然保存。");
+        showMessageSoon(t("该网页已经收藏，可以查看已有资料或仍然保存。"));
         return;
       }
       showMessageSoon(describeError(error));
@@ -2242,7 +2257,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setUndoMemo(null);
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("已撤销刚才的保存，可在回收站恢复。");
+      setMessage(t("已撤销刚才的保存，可在回收站恢复。"));
     } catch (error) {
       setMessage(describeError(error));
     }
@@ -2254,7 +2269,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     }
     if (
       !window.confirm(
-        `「${memo.title}」将移入回收站，${TRASH_RETENTION_DAYS} 天后永久删除。继续吗？`,
+        t("「{title}」将移入回收站，{TRASH_RETENTION_DAYS} 天后永久删除。继续吗？", { title: memo.title, TRASH_RETENTION_DAYS }),
       )
     ) {
       return;
@@ -2273,7 +2288,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("已移入回收站，可在 30 天内恢复。");
+      setMessage(t("已移入回收站，可在 30 天内恢复。"));
     } catch (error) {
       setMessage(describeError(error));
     }
@@ -2289,7 +2304,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         setCurrentResultCount((count) => Math.max(0, count - 1));
       }
       void refreshMemoCounts();
-      setMessage(`已恢复「${restored.title}」。`);
+      setMessage(t("已恢复「{title}」。", { title: restored.title }));
     } catch (error) {
       setMessage(describeError(error));
     }
@@ -2299,7 +2314,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     if (trashBulkBusyRef.current) return;
     if (
       !window.confirm(
-        `将永久删除「${memo.title}」，此操作不可恢复。确定继续吗？`,
+        t("将永久删除「{title}」，此操作不可恢复。确定继续吗？", { title: memo.title }),
       )
     ) {
       return;
@@ -2317,7 +2332,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       if (resourcePreviewMemo?.id === memo.id) {
         setResourcePreviewMemo(null);
       }
-      setMessage("已永久删除。");
+      setMessage(t("已永久删除。"));
     } catch (error) {
       setMessage(describeError(error));
     }
@@ -2326,7 +2341,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const handleTrashBulkAction = async (action: "restore" | "empty"): Promise<void> => {
     if (trashBulkBusyRef.current) return;
     if (action === "empty" && !window.confirm(
-      "确定永久删除回收站的全部内容及图片、录音附件？此操作无法恢复。",
+      t("确定永久删除回收站的全部内容及图片、录音附件？此操作无法恢复。"),
     )) return;
     trashBulkBusyRef.current = true;
     setTrashBulkAction(action);
@@ -2346,8 +2361,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         refreshHealthSummary(),
       ]);
       setMessage(action === "restore"
-        ? `已还原 ${count} 条内容，恢复到删除前的状态。`
-        : `回收站已清空，永久删除 ${count} 条内容。`);
+        ? t("已还原 {count} 条内容，恢复到删除前的状态。", { count })
+        : t("回收站已清空，永久删除 {count} 条内容。", { count }));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -2363,7 +2378,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     selectMemo(duplicateWord);
     setDuplicateWord(null);
     setPendingWord(null);
-    setMessage("已打开已有单词，可继续补充语境。");
+    setMessage(t("已打开已有单词，可继续补充语境。"));
   };
 
   const handleMergeDuplicateWord = async () => {
@@ -2391,7 +2406,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setPendingWord(null);
       setUndoMemo(null);
       selectMemo(merged);
-      setMessage("已把新语境合并进已有单词。");
+      setMessage(t("已把新语境合并进已有单词。"));
       void loadReviewQueue();
     } catch (error) {
       setMessage(describeError(error));
@@ -2428,7 +2443,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       selectMemo(created);
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("已另外保存这条单词。");
+      setMessage(t("已另外保存这条单词。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -2445,7 +2460,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       ...current.filter((memo) => memo.id !== duplicateResource.id),
     ]);
     setResourcePreviewMemo(duplicateResource);
-    setMessage("已打开已有网页资料；原输入仍然保留，可以返回后选择仍然保存。");
+    setMessage(t("已打开已有网页资料；原输入仍然保留，可以返回后选择仍然保存。"));
   };
 
   const handleForceDuplicateResource = async () => {
@@ -2480,7 +2495,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setWebAttachmentHelp(false);
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("已另外保存这条网页资料，可撤销刚才的保存。");
+      setMessage(t("已另外保存这条网页资料，可撤销刚才的保存。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -2490,14 +2505,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   const handleCopyResourceLink = async (memo: Memo) => {
     if (!memo.source_url || !navigator.clipboard?.writeText) {
-      setMessage("当前浏览器不能写入剪贴板，请手动复制网址。");
+      setMessage(t("当前浏览器不能写入剪贴板，请手动复制网址。"));
       return;
     }
     try {
       await navigator.clipboard.writeText(memo.source_url);
-      setMessage("网页链接已复制。");
+      setMessage(t("网页链接已复制。"));
     } catch {
-      setMessage("复制失败，请手动复制网址。");
+      setMessage(t("复制失败，请手动复制网址。"));
     }
   };
 
@@ -2515,7 +2530,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setResourcePreviewMemo(null);
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("网页资料已归档。");
+      setMessage(t("网页资料已归档。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -2528,14 +2543,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       return;
     }
     if (memo.type === "image" || nextType === "image") {
-      setMessage("图片收藏不支持类型转换，请保留为图片内容。");
+      setMessage(t("图片收藏不支持类型转换，请保留为图片内容。"));
       return;
     }
     const warnings: Record<MemoType, string> = {
-      idea: "转换后会清理单词或网页专属字段，标题、正文和来源链接会保留。继续吗？",
-      word: "转换后正文会作为单词释义，并清理网页专属字段。继续吗？",
-      resource: "转换后需要网址，网页元数据会重新抓取；标题、正文和来源链接会保留。继续吗？",
-      image: "图片收藏需要图片文件，不能从其他类型转换。",
+      idea: t("转换后会清理单词或网页专属字段，标题、正文和来源链接会保留。继续吗？"),
+      word: t("转换后正文会作为单词释义，并清理网页专属字段。继续吗？"),
+      resource: t("转换后需要网址，网页元数据会重新抓取；标题、正文和来源链接会保留。继续吗？"),
+      image: t("图片收藏需要图片文件，不能从其他类型转换。"),
     };
     if (!window.confirm(warnings[nextType])) {
       return;
@@ -2559,7 +2574,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       void refreshMemoCounts();
       void loadReviewQueue();
       void loadCurrentMemos(false);
-      setMessage(`已将内容转换为${viewCopy[nextType].itemLabel}。`);
+      setMessage(t("已将内容转换为{itemLabel}。", { itemLabel: viewCopy[nextType].itemLabel }));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -2626,7 +2641,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         });
         setConflictMemo(serverMemo);
       } else if (error instanceof ApiError && error.status === 409) {
-        setMessage("内容已在其他设备更新，但服务端没有返回当前版本，请刷新后再处理。");
+        setMessage(t("内容已在其他设备更新，但服务端没有返回当前版本，请刷新后再处理。"));
       }
     }
   };
@@ -2638,7 +2653,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     }
     setConflictMemo(null);
     setSaveState("idle");
-    setMessage("已保留本地修改，请确认内容后再次保存。");
+    setMessage(t("已保留本地修改，请确认内容后再次保存。"));
   };
 
   const useServerConflict = () => {
@@ -2670,7 +2685,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     setShowWordAnswer(false);
     setConflictMemo(null);
     setSaveState("idle");
-    setMessage("已采用服务端版本。");
+    setMessage(t("已采用服务端版本。"));
   };
 
   const updateResourceOrganization = async (
@@ -2862,7 +2877,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
       setResourcePreviewMemo(updated);
-      setMessage("网页资料已保存。");
+      setMessage(t("网页资料已保存。"));
       return null;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -2876,7 +2891,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         } catch {
           void loadCurrentMemos(false);
         }
-        return "这条资料刚在别处被修改过，已载入最新内容，请重新编辑。";
+        return t("这条资料刚在别处被修改过，已载入最新内容，请重新编辑。");
       }
       return describeError(error);
     } finally {
@@ -2896,7 +2911,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const toggleMemoCategory = (memo: Memo, code: string) => {
     const current = memoCategoryCodes(memo);
     if (!current.includes(code) && current.length >= MAX_MEMO_CATEGORIES) {
-      setMessage("最多 8 个分类");
+      setMessage(t("最多 8 个分类"));
       return;
     }
     const next = current.includes(code)
@@ -2920,7 +2935,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setMemos((current) =>
         current.map((memo) => (memo.id === reviewed.id ? reviewed : memo)),
       );
-      setMessage("复习结果已记录，下次回顾时间已经更新。");
+      setMessage(t("复习结果已记录，下次回顾时间已经更新。"));
       setShowWordAnswer(false);
       void loadReviewQueue();
     } catch (error) {
@@ -2941,7 +2956,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     try {
       await skipReview(memo.id, memo.version);
       await loadReviewQueue();
-      setMessage("已跳过，明天之前不会再出现。");
+      setMessage(t("已跳过，明天之前不会再出现。"));
     } catch (error) {
       setMessage(describeError(error));
       if (error instanceof ApiError && error.status === 409) {
@@ -2960,7 +2975,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     try {
       await reviewWord(memo.id, memo.version, feedback);
       await loadReviewQueue();
-      setMessage("复习结果已记录，下次回顾时间已经更新。");
+      setMessage(t("复习结果已记录，下次回顾时间已经更新。"));
     } catch (error) {
       setMessage(describeError(error));
       if (error instanceof ApiError && error.status === 409) {
@@ -3035,7 +3050,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         status: "active",
       });
       await loadReviewQueue();
-      setMessage("灵感已整理，并移出今日回顾。");
+      setMessage(t("灵感已整理，并移出今日回顾。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -3054,7 +3069,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         status: "archived",
       });
       await loadReviewQueue();
-      setMessage("灵感已归档。");
+      setMessage(t("灵感已归档。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -3068,7 +3083,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     ).trim();
     const nextBody = (memo.id === selectedId ? editorBody : memo.body).trim();
     if (memo.type === "idea" && !nextBody) {
-      setMessage("请先补充内容，再标记为整理完成。");
+      setMessage(t("请先补充内容，再标记为整理完成。"));
       return;
     }
     try {
@@ -3085,7 +3100,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("已整理完成，并移出收件箱。");
+      setMessage(t("已整理完成，并移出收件箱。"));
     } catch (error) {
       setMessage(describeError(error));
     }
@@ -3104,7 +3119,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }
       void refreshMemoCounts();
       void loadReviewQueue();
-      setMessage("已归档，并移出收件箱。");
+      setMessage(t("已归档，并移出收件箱。"));
     } catch (error) {
       setMessage(describeError(error));
     }
@@ -3145,7 +3160,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
   const startBrowserTranscription = (resetAutomaticText = true) => {
     const recognition = createBrowserSpeechRecognition();
     if (!recognition) {
-      setVoiceTranscriptionMessage("当前浏览器不支持自动转写，录音完成后可手动填写文字。");
+      setVoiceTranscriptionMessage(t("当前浏览器不支持自动转写，录音完成后可手动填写文字。"));
       return;
     }
     voiceTranscriptionActiveRef.current = true;
@@ -3184,7 +3199,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         return current;
       });
       if (transcript) {
-        setVoiceTranscriptionMessage("正在实时转写，录音结束后仍可编辑结果。");
+        setVoiceTranscriptionMessage(t("正在实时转写，录音结束后仍可编辑结果。"));
       }
     };
     recognition.onerror = (event) => {
@@ -3192,9 +3207,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       if (fatalErrors.has(event.error)) {
         voiceTranscriptionActiveRef.current = false;
         voiceTranscriptionStartedRef.current = false;
-        setVoiceTranscriptionMessage("浏览器语音识别不可用，原始录音仍会保留，可手动填写文字。");
+        setVoiceTranscriptionMessage(t("浏览器语音识别不可用，原始录音仍会保留，可手动填写文字。"));
       } else if (event.error !== "no-speech") {
-        setVoiceTranscriptionMessage("浏览器转写暂时失败，录音仍会继续。");
+        setVoiceTranscriptionMessage(t("浏览器转写暂时失败，录音仍会继续。"));
       }
     };
     recognition.onend = () => {
@@ -3220,20 +3235,20 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }, 100);
     };
     speechRecognitionRef.current = recognition;
-    setVoiceTranscriptionMessage("正在启动浏览器语音识别…");
+    setVoiceTranscriptionMessage(t("正在启动浏览器语音识别…"));
     try {
       recognition.start();
     } catch {
       voiceTranscriptionActiveRef.current = false;
       voiceTranscriptionStartedRef.current = false;
       speechRecognitionRef.current = null;
-      setVoiceTranscriptionMessage("浏览器语音识别启动失败，录音仍会继续。");
+      setVoiceTranscriptionMessage(t("浏览器语音识别启动失败，录音仍会继续。"));
     }
   };
 
   const startVoiceCapture = async () => {
     if (!navigator.mediaDevices?.getUserMedia || !("MediaRecorder" in window)) {
-      setMessage("当前浏览器不支持录音，请使用文字输入或 Android 客户端。");
+      setMessage(t("当前浏览器不支持录音，请使用文字输入或 Android 客户端。"));
       return;
     }
     const captureGeneration = voiceCaptureGenerationRef.current + 1;
@@ -3269,9 +3284,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           const reason =
             error instanceof MeetingAudioUnavailableError
               ? error.message
-              : "没有授权共享系统声音，对方的声音将无法录入。";
+              : t("没有授权共享系统声音，对方的声音将无法录入。");
           setMeetingRemoteMissing(true);
-          setMessage(`${reason}录音会继续，只包含你的麦克风。`);
+          setMessage(t("{reason}录音会继续，只包含你的麦克风。", { reason }));
         }
         if (meetingCapture) {
           if (captureGeneration !== voiceCaptureGenerationRef.current) {
@@ -3288,7 +3303,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           meetingCapture.onSystemAudioEnded = () => {
             setMeetingRemoteMissing(true);
             meetingRemoteLevel.set(0);
-            setMessage("系统声音共享已停止，对方的声音不再录入；重新开始可再次授权。");
+            setMessage(t("系统声音共享已停止，对方的声音不再录入；重新开始可再次授权。"));
           };
         }
       }
@@ -3344,15 +3359,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         if (blob.size > MAX_AUDIO_BYTES) {
           // 服务端上限 20 MB，超了会在上传时被拒；这里提前说明清楚。
           setVoiceTranscriptionMessage(
-            `录音约 ${Math.round(blob.size / 1024 / 1024)} MB，超过 20 MB 上传上限，请缩短后重录。`,
+            t("录音约 {value} MB，超过 20 MB 上传上限，请缩短后重录。", { value: Math.round(blob.size / 1024 / 1024) }),
           );
         }
         const recognizedText = voiceAutomaticTextRef.current.trim();
         if (recognizedText) {
           setVoiceText((current) => current.trim() || recognizedText);
-          setVoiceTranscriptionMessage("转写完成，可直接编辑结果。");
+          setVoiceTranscriptionMessage(t("转写完成，可直接编辑结果。"));
         } else if (voiceTranscriptionStartedRef.current) {
-          setVoiceTranscriptionMessage("未识别到可用文字，可手动填写。");
+          setVoiceTranscriptionMessage(t("未识别到可用文字，可手动填写。"));
         }
       };
       recorder.onerror = () => {
@@ -3371,7 +3386,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         voicePausedAtRef.current = null;
         voicePausedTotalMsRef.current = 0;
         setVoiceState("idle");
-        setMessage("录音失败，请检查麦克风权限后重试。");
+        setMessage(t("录音失败，请检查麦克风权限后重试。"));
       };
       recorderRef.current = recorder;
       voiceStartedAtRef.current = Date.now();
@@ -3394,8 +3409,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setVoiceState("idle");
       setMessage(
         error instanceof Error
-          ? `无法使用麦克风：${error.message}`
-          : "无法使用麦克风。",
+          ? t("无法使用麦克风：{message}", { message: error.message })
+          : t("无法使用麦克风。"),
       );
     }
   };
@@ -3431,7 +3446,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       setVoiceState("paused");
       updateVoiceElapsed();
     } catch {
-      setMessage("当前浏览器暂不支持暂停录音，请直接结束录音。");
+      setMessage(t("当前浏览器暂不支持暂停录音，请直接结束录音。"));
     }
   };
 
@@ -3450,7 +3465,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       startBrowserTranscription(false);
       updateVoiceElapsed();
     } catch {
-      setMessage("录音继续失败，请结束当前录音后重试。");
+      setMessage(t("录音继续失败，请结束当前录音后重试。"));
     }
   };
 
@@ -3494,8 +3509,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       // 会议模式把转写放进 transcript 字段，详情页才能按「我 / 对方」展示。
       const draft = voiceDraftMemo ?? await createMemo({
         type: "idea",
-        body: spokenText || (meetingMode ? "会议记录" : "语音记录"),
+        body: spokenText || (meetingMode ? t("会议记录") : t("语音记录")),
         transcript: meetingMode && spokenText ? spokenText : null,
+        // 标签是数据标记（isMeetingRecording 据此判断），固定用中文，不随界面语言变化。
         tags: meetingMode ? ["语音", "会议"] : ["语音"],
       });
       setVoiceDraftMemo(draft);
@@ -3515,8 +3531,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       resetVoiceCapture();
       setMessage(
         meetingMode
-          ? "会议录音已保存，可在详情中播放、下载并查看转写。"
-          : "语音灵感已保存，可在详情中播放并下载。",
+          ? t("会议录音已保存，可在详情中播放、下载并查看转写。")
+          : t("语音灵感已保存，可在详情中播放并下载。"),
       );
     } catch (error) {
       setVoiceState("ready");
@@ -3533,11 +3549,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
     triggerBlobDownload(
       objectUrl,
-      `${meetingMode ? "会议录音" : "语音灵感"}-${stamp}.${audioFileExtension(voiceBlob.type)}`,
+      `${meetingMode ? t("会议录音") : t("语音灵感")}-${stamp}.${audioFileExtension(voiceBlob.type)}`,
     );
     // 下载动作是同步触发的，延迟释放避免浏览器还没读取完 Blob。
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-    setMessage("录音已开始下载。");
+    setMessage(t("录音已开始下载。"));
   };
 
   // 已保存的录音先读取带 Bearer 头的 Blob，再按标题和真实容器生成文件名。
@@ -3555,7 +3571,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }
       triggerBlobDownload(url, audioDownloadFileName(memo));
       setMessage(
-        isMeetingRecording(memo) ? "会议录音已开始下载。" : "录音已开始下载。",
+        isMeetingRecording(memo) ? t("会议录音已开始下载。") : t("录音已开始下载。"),
       );
     } catch (error) {
       setMessage(describeError(error));
@@ -3595,7 +3611,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         errorCount += 1;
         updateTask(task.id, {
           status: "error",
-          error: "仅支持 PNG、JPEG、WebP 或 GIF 图片",
+          error: t("仅支持 PNG、JPEG、WebP 或 GIF 图片"),
         });
         continue;
       }
@@ -3628,7 +3644,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         doneCount += 1;
         if (duplicateOf) {
           duplicateCount += 1;
-          updateTask(task.id, { status: "done", note: "之前已收藏过相同图片，已沿用识别结果" });
+          updateTask(task.id, { status: "done", note: t("之前已收藏过相同图片，已沿用识别结果") });
         } else {
           updateTask(task.id, { status: "done" });
         }
@@ -3646,15 +3662,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     void refreshMemoCounts();
     void loadCurrentMemos(false);
     const compressedNote =
-      compressedCount > 0 ? `，其中 ${compressedCount} 张已自动压缩` : "";
+      compressedCount > 0 ? t("，其中 {compressedCount} 张已自动压缩", { compressedCount }) : "";
     const duplicateNote =
       duplicateCount > 0
-        ? `；${duplicateCount} 张与已有收藏相同，可在「图片整理」里查看重复图片`
+        ? t("；{duplicateCount} 张与已有收藏相同，可在「图片整理」里查看重复图片", { duplicateCount })
         : "";
     setMessage(
       errorCount === 0
-        ? `已收藏 ${doneCount} 张图片${compressedNote}${duplicateNote}。`
-        : `已收藏 ${doneCount} 张图片${compressedNote}，${errorCount} 张失败${duplicateNote}。`,
+        ? t("已收藏 {doneCount} 张图片{compressedNote}{duplicateNote}。", { doneCount, compressedNote, duplicateNote })
+        : t("已收藏 {doneCount} 张图片{compressedNote}，{errorCount} 张失败{duplicateNote}。", { doneCount, compressedNote, errorCount, duplicateNote }),
     );
   };
 
@@ -3663,12 +3679,12 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     const images = files.filter(isImageFile);
     if (images.length === 0) {
       if (files.length > 0) {
-        setMessage("请选择图片文件（PNG、JPEG、WebP 或 GIF）。");
+        setMessage(t("请选择图片文件（PNG、JPEG、WebP 或 GIF）。"));
       }
       return;
     }
     if (images.length < files.length) {
-      setMessage("已忽略不是图片的文件。");
+      setMessage(t("已忽略不是图片的文件。"));
     }
     imageUploadChainRef.current = imageUploadChainRef.current
       .then(() => uploadImageFiles(images))
@@ -3692,7 +3708,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         newTab.opener = null;
         newTab.location.replace(url);
       } else {
-        setMessage("浏览器拦截了新标签页，请允许弹出窗口后重试。");
+        setMessage(t("浏览器拦截了新标签页，请允许弹出窗口后重试。"));
       }
     } catch (error) {
       newTab?.close();
@@ -3715,14 +3731,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       }
       const anchor = document.createElement("a");
       anchor.href = url;
-      const safeTitle = (memo.title || "图片收藏")
+      const safeTitle = (memo.title || t("图片收藏"))
         .replace(/[\\/:*?"<>|]/g, "_")
         .slice(0, 80);
       anchor.download = `${safeTitle}.${imageFileExtension(memo.image_mime_type)}`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      setMessage("原图已开始下载。");
+      setMessage(t("原图已开始下载。"));
     } catch (error) {
       setMessage(describeError(error));
     } finally {
@@ -3736,7 +3752,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
     }
     const declaredMime = imageMimeFromFile(file);
     if (!declaredMime) {
-      setMessage("请选择图片文件（PNG、JPEG、WebP 或 GIF）。");
+      setMessage(t("请选择图片文件（PNG、JPEG、WebP 或 GIF）。"));
       return;
     }
     setReplaceImageBusy(true);
@@ -3757,10 +3773,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         current.map((memo) => (memo.id === updated.id ? updated : memo)),
       );
       const replacedText = prepared.compressed
-        ? `图片已替换，原图和缩略图都已更新。${describeImageCompression(prepared)}`
-        : "图片已替换，原图和缩略图都已更新。";
+        ? t("图片已替换，原图和缩略图都已更新。{value}", { value: describeImageCompression(prepared) })
+        : t("图片已替换，原图和缩略图都已更新。");
       if (duplicateOf) {
-        const text = `${replacedText}这张图片与另一条收藏相同。`;
+        const text = t("{replacedText}这张图片与另一条收藏相同。", { replacedText });
         setMessage(text);
         setImageDuplicateNotice({ memoId: duplicateOf, message: text });
       } else {
@@ -3772,7 +3788,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         setMemos((current) =>
           current.map((memo) => (memo.id === serverMemo.id ? serverMemo : memo)),
         );
-        setMessage("图片已在其他设备更新，已刷新为服务端版本，请重新选择替换文件。");
+        setMessage(t("图片已在其他设备更新，已刷新为服务端版本，请重新选择替换文件。"));
       } else {
         setMessage(describeError(error));
       }
@@ -3794,7 +3810,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       );
     } catch (error) {
       if (error instanceof ApiError && error.status === 503) {
-        setOcrError("服务端未启用图片文字识别，请联系管理员开启后再试。");
+        setOcrError(t("服务端未启用图片文字识别，请联系管理员开启后再试。"));
       } else {
         setOcrError(describeError(error));
       }
@@ -3870,13 +3886,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
 
   return (
     <div className="app-shell">
-      <aside className="side-navigation" aria-label="主导航">
+      <aside className="side-navigation" aria-label={t("主导航")}>
         <div className="brand-block">
           <BrandLogo className="brand-mark" />
           <strong>MemoIsle</strong>
         </div>
         <button className="new-button" onClick={focusCapture}>
-          <Icon name="plus" size={18} /> 新建
+          <Icon name="plus" size={18} />{t(" 新建")}
         </button>
         <nav>
           {navigation.map((item) => {
@@ -3936,7 +3952,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     setBrowserHistoryOpen(true);
                   }
                 }}
-                title={enabled ? item.label : "将在后续里程碑开放"}
+                title={enabled ? item.label : t("将在后续里程碑开放")}
               >
                 <span className="nav-icon" aria-hidden="true">
                   <Icon name={item.icon} size={18} />
@@ -3962,7 +3978,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   <span className="nav-count">{healthIssueCount}</span>
                 )}
                 {item.action === "vault" && vaultReminderCount > 0 && (
-                  <span className="nav-count" title={`上次解锁时有 ${vaultReminderCount} 条密码提醒`}>
+                  <span className="nav-count" title={t("上次解锁时有 {vaultReminderCount} 条密码提醒", { vaultReminderCount })}>
                     {vaultReminderCount}
                   </span>
                 )}
@@ -3983,7 +3999,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               void onLogout();
             }}
             type="button"
-          >退出</button>
+          >{t("退出")}</button>
         </div>
       </aside>
 
@@ -3993,22 +4009,22 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             <Icon name="search" size={18} />
             <input
               ref={searchRef}
-              aria-label="搜索全部内容"
+              aria-label={t("搜索全部内容")}
               value={searchQuery}
               onChange={(event) => handleSearchChange(event.target.value)}
               // 网页资料页的 / 聚焦本页搜索框，顶栏不再标注快捷键。
-              placeholder={activeType === "resource" ? "搜索全部内容" : "搜索全部内容（/）"}
+              placeholder={activeType === "resource" ? t("搜索全部内容") : t("搜索全部内容（/）")}
               maxLength={200}
             />
             {searchQuery && (
               <button
                 type="button"
-                aria-label="清除搜索"
+                aria-label={t("清除搜索")}
                 onClick={() => setSearchQuery("")}
               ><Icon name="close" size={16} /></button>
             )}
           </div>
-          <span className="sync-status"><span className="sync-dot" /> 已同步</span>
+          <span className="sync-status"><span className="sync-dot" />{t(" 已同步")}</span>
           <button
             type="button"
             className="top-bar-button theme-toggle"
@@ -4018,17 +4034,24 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           ><Icon name={currentTheme.icon} size={18} /></button>
           <button
             type="button"
+            className="top-bar-button theme-toggle language-toggle"
+            onClick={() => setLanguagePreference(nextLanguageOption.value)}
+            aria-label={languageButtonLabel}
+            title={languageButtonLabel}
+          ><Icon name="language" size={18} /></button>
+          <button
+            type="button"
             className="model-settings-open"
             onClick={() => setModelSettingsOpen(true)}
-            aria-label="打开设置"
-          ><Icon name="settings" size={18} /><span className="top-bar-label">设置</span></button>
+            aria-label={t("打开设置")}
+          ><Icon name="settings" size={18} /><span className="top-bar-label">{t("设置")}</span></button>
           <div className="data-export-controls">
             <input
               ref={wordImportInputRef}
               className="sr-only"
               type="file"
               accept=".json,.csv,application/json,text/csv"
-              aria-label="导入单词文件"
+              aria-label={t("导入单词文件")}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = "";
@@ -4042,7 +4065,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               className="sr-only"
               type="file"
               accept=".json,.csv,application/json,text/csv"
-              aria-label="导入备份文件"
+              aria-label={t("导入备份文件")}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = "";
@@ -4052,7 +4075,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               }}
             />
             <DataMenu
-              busyLabel={isImporting ? "导入中…" : isExporting ? "导出中…" : ""}
+              busyLabel={isImporting ? t("导入中…") : isExporting ? t("导出中…") : ""}
               onImportLibrary={() => libraryImportInputRef.current?.click()}
               onImportWords={() => wordImportInputRef.current?.click()}
               onExport={(format) => void handleExport(format)}
@@ -4062,17 +4085,17 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             className={`trash-shortcut${!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "inbox" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("inbox")}
-            aria-label="收件箱"
+            aria-label={t("收件箱")}
           >
-            <Icon name="inbox" size={18} /><span className="top-bar-label">收件箱</span>
+            <Icon name="inbox" size={18} /><span className="top-bar-label">{t("收件箱")}</span>
           </button>
           <button
             className={`trash-shortcut${!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "trash" ? " active" : ""}`}
             type="button"
             onClick={() => switchType("trash")}
-            aria-label="回收站"
+            aria-label={t("回收站")}
           >
-            <Icon name="trash" size={18} /><span className="top-bar-label">回收站</span>
+            <Icon name="trash" size={18} /><span className="top-bar-label">{t("回收站")}</span>
           </button>
           <button
             className={`trash-shortcut${vaultOpen ? " active" : ""}`}
@@ -4084,36 +4107,36 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               setForgetOpen(false);
               setVaultOpen(true);
             }}
-            aria-label={vaultReminderCount > 0 ? `密码库，${vaultReminderCount} 条提醒` : "密码库"}
+            aria-label={vaultReminderCount > 0 ? t("密码库，{vaultReminderCount} 条提醒", { vaultReminderCount }) : t("密码库")}
           >
-            <Icon name="vault" size={18} /><span className="top-bar-label">密码库</span>
+            <Icon name="vault" size={18} /><span className="top-bar-label">{t("密码库")}</span>
             {vaultReminderCount > 0 && <span className="vault-shortcut-badge" aria-hidden="true">{vaultReminderCount}</span>}
           </button>
           <button className={`trash-shortcut${ledgerOpen ? " active" : ""}`} type="button"
-            aria-label="记账" onClick={() => {
+            aria-label={t("记账")} onClick={() => {
               setSelectedId(null); setVaultOpen(false); setRelayOpen(false); setForgetOpen(false); setLedgerOpen(true);
             }}>
-            <Icon name="ledger" size={18} /><span className="top-bar-label">记账</span>
+            <Icon name="ledger" size={18} /><span className="top-bar-label">{t("记账")}</span>
           </button>
           <button className={`trash-shortcut${forgetOpen ? " active" : ""}`} type="button"
-            aria-label="易忘事项" onClick={() => {
+            aria-label={t("易忘事项")} onClick={() => {
               setSelectedId(null); setVaultOpen(false); setLedgerOpen(false); setRelayOpen(false); setForgetOpen(true);
             }}>
-            <Icon name="forget" size={18} /><span className="top-bar-label">易忘事项</span>
+            <Icon name="forget" size={18} /><span className="top-bar-label">{t("易忘事项")}</span>
           </button>
           <button className={`trash-shortcut${relayOpen ? " active" : ""}`} type="button"
-            aria-label="传输" onClick={() => {
+            aria-label={t("传输")} onClick={() => {
               setSelectedId(null); setVaultOpen(false); setLedgerOpen(false); setForgetOpen(false); setRelayOpen(true);
             }}>
-            <Icon name="swap" size={18} /><span className="top-bar-label">传输</span>
+            <Icon name="swap" size={18} /><span className="top-bar-label">{t("传输")}</span>
           </button>
           <button
             className={`trash-shortcut${browserHistoryOpen ? " active" : ""}`}
             type="button"
             onClick={() => setBrowserHistoryOpen(true)}
-            aria-label="浏览历史"
+            aria-label={t("浏览历史")}
           >
-            <Icon name="history" size={18} /><span className="top-bar-label">浏览历史</span>
+            <Icon name="history" size={18} /><span className="top-bar-label">{t("浏览历史")}</span>
           </button>
         </header>
 
@@ -4122,8 +4145,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           <div className="page-heading">
             {activeType === "all" ? (
               <div>
-                <h1>{greetingForHour(new Date().getHours())}，{authUser.display_name}</h1>
-                <p className="page-subtitle">{headingDateFormatter.format(new Date())} · {copy.eyebrow}</p>
+                <h1>{t("{value}，{display_name}", { value: greetingForHour(new Date().getHours()), display_name: authUser.display_name })}</h1>
+                <p className="page-subtitle">{headingDateFormatter().format(new Date())} · {copy.eyebrow}</p>
               </div>
             ) : (
               <div>
@@ -4133,24 +4156,24 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             )}
             <span className="page-count">
               {activeType === "review" && reviewQueue
-                ? `今日计划 ${reviewScheduledCount} 条 · 待处理 ${reviewDueCount} 条`
+                ? t("今日计划 {reviewScheduledCount} 条 · 待处理 {reviewDueCount} 条", { reviewScheduledCount, reviewDueCount })
                 : activeType === "inbox"
-                  ? `${currentResultCount} 条待整理`
+                  ? t("{currentResultCount} 条待整理", { currentResultCount })
                 : activeType === "trash"
-                  ? `${currentResultCount} 条待恢复`
+                  ? t("{currentResultCount} 条待恢复", { currentResultCount })
                 : activeType === "resource" && memoCounts !== null
-                  ? `${memoCounts.resource_count} 条资料`
+                  ? t("{resource_count} 条资料", { resource_count: memoCounts.resource_count })
                 : activeType === "image" && memoCounts !== null
-                  ? `${memoCounts.image_count} 张图片`
-                  : `${currentResultCount} 条内容`}
+                  ? t("{image_count} 张图片", { image_count: memoCounts.image_count })
+                  : t("{currentResultCount} 条内容", { currentResultCount })}
             </span>
           </div>
 
           {activeType === "trash" && (
-            <section className="trash-bulk-toolbar" aria-label="回收站批量操作">
+            <section className="trash-bulk-toolbar" aria-label={t("回收站批量操作")}>
               <div>
-                <strong>回收站操作</strong>
-                <p>共 {trashTotalCount} 条，一键操作覆盖回收站全部内容。</p>
+                <strong>{t("回收站操作")}</strong>
+                <p>{t("共 {trashTotalCount} 条，一键操作覆盖回收站全部内容。", { trashTotalCount })}</p>
               </div>
               <div className="trash-bulk-actions">
                 <button
@@ -4158,13 +4181,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   className="primary"
                   disabled={loadState === "loading" || trashBulkAction !== null || trashTotalCount === 0}
                   onClick={() => void handleTrashBulkAction("restore")}
-                >{trashBulkAction === "restore" ? "正在还原…" : "一键还原"}</button>
+                >{trashBulkAction === "restore" ? t("正在还原…") : t("一键还原")}</button>
                 <button
                   type="button"
                   className="danger"
                   disabled={loadState === "loading" || trashBulkAction !== null || trashTotalCount === 0}
                   onClick={() => void handleTrashBulkAction("empty")}
-                >{trashBulkAction === "empty" ? "正在清空…" : "一键清空"}</button>
+                >{trashBulkAction === "empty" ? t("正在清空…") : t("一键清空")}</button>
               </div>
             </section>
           )}
@@ -4183,19 +4206,19 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               <div className="today-review-copy">
                 <span className="today-review-icon" aria-hidden="true"><Icon name="review" size={20} /></span>
                 <div>
-                  <p className="today-review-label">今日回顾</p>
-                  <h2>{reviewScheduledCount === 0 ? "今天的回顾都完成了" : `今天计划 ${reviewScheduledCount} 条`}</h2>
+                  <p className="today-review-label">{t("今日回顾")}</p>
+                  <h2>{reviewScheduledCount === 0 ? t("今天的回顾都完成了") : t("今天计划 {reviewScheduledCount} 条", { reviewScheduledCount })}</h2>
                 </div>
               </div>
               <div className="today-review-stats">
-                <span><strong>{reviewQueue.word_count}</strong>个单词</span>
-                <span><strong>{reviewQueue.resource_count}</strong>篇待读</span>
+                <span><strong>{reviewQueue.word_count}</strong>{t("个单词")}</span>
+                <span><strong>{reviewQueue.resource_count}</strong>{t("篇待读")}</span>
                 <button
                   type="button"
                   className="today-review-inbox-link"
                   onClick={() => switchType("inbox")}
                 >
-                  <strong>{reviewQueue.idea_count}</strong>条待整理
+                  <strong>{reviewQueue.idea_count}</strong>{t("条待整理")}
                 </button>
               </div>
               <button
@@ -4204,7 +4227,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 onClick={() => switchType("review")}
                 disabled={reviewScheduledCount === 0}
               >
-                {reviewScheduledCount === 0 ? "今天已完成" : "开始回顾"}
+                {reviewScheduledCount === 0 ? t("今天已完成") : t("开始回顾")}
               </button>
             </section>
           )}
@@ -4236,14 +4259,14 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           )}
 
           {activeType === "image" && (
-            <section className="image-capture-card" aria-label="收藏图片">
+            <section className="image-capture-card" aria-label={t("收藏图片")}>
               <input
                 ref={imageInputRef}
                 className="sr-only"
                 type="file"
                 accept="image/*"
                 multiple
-                aria-label="选择图片文件"
+                aria-label={t("选择图片文件")}
                 onChange={(event) => {
                   const files = Array.from(event.target.files ?? []);
                   event.target.value = "";
@@ -4284,9 +4307,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 }}
               >
                 <span className="image-dropzone-icon" aria-hidden="true"><Icon name="image" size={20} /></span>
-                <strong>点击选择、拖入或按 Ctrl/⌘+V 粘贴图片</strong>
+                <strong>{t("点击选择、拖入或按 Ctrl/⌘+V 粘贴图片")}</strong>
                 <span>
-                  支持 PNG、JPEG、WebP、GIF，单张不超过 20 MB，可一次选择多张。
+                  {t("支持 PNG、JPEG、WebP、GIF，单张不超过 20 MB，可一次选择多张。")}
                 </span>
               </div>
               {imageUploadTasks.length > 0 && (
@@ -4295,10 +4318,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     <li className={`image-upload-item ${task.status}`} key={task.id}>
                       <span className="image-upload-name">{task.name}</span>
                       <span className="image-upload-state">
-                        {task.status === "pending" && "等待上传"}
-                        {task.status === "uploading" && "正在上传…"}
-                        {task.status === "done" && "已收藏"}
-                        {task.status === "error" && (task.error ?? "上传失败")}
+                        {task.status === "pending" && t("等待上传")}
+                        {task.status === "uploading" && t("正在上传…")}
+                        {task.status === "done" && t("已收藏")}
+                        {task.status === "error" && (task.error ?? t("上传失败"))}
                       </span>
                       {task.note && (
                         <span className="image-upload-note">{task.note}</span>
@@ -4324,8 +4347,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               }
             >
               {activeType === "idea"
-                ? "快速记录"
-                : activeType === "resource" ? "保存网页资料" : "收藏英语单词"}
+                ? t("快速记录")
+                : activeType === "resource" ? t("保存网页资料") : t("收藏英语单词")}
             </label>
             {captureTypeSuggestion &&
               captureTypeSuggestion.type !== activeType &&
@@ -4336,15 +4359,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     type="button"
                     onClick={() => applyCaptureTypeSuggestion(captureTypeSuggestion)}
                   >
-                    切换为{viewCopy[captureTypeSuggestion.type].itemLabel}
+                    {t("切换为{itemLabel}", { itemLabel: viewCopy[captureTypeSuggestion.type].itemLabel })}
                   </button>
                   <button
                     type="button"
                     className="capture-type-suggestion-dismiss"
-                    aria-label="暂不切换内容类型"
+                    aria-label={t("暂不切换内容类型")}
                     onClick={() => setDismissedSuggestionKey(captureTypeSuggestion.key)}
                   >
-                    暂不
+                    {t("暂不")}
                   </button>
                 </div>
               )}
@@ -4355,7 +4378,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   ref={urlRef}
                   value={newUrl}
                   onChange={(event) => setNewUrl(event.target.value)}
-                  placeholder="粘贴网址，例如 https://example.com/article"
+                  placeholder={t("粘贴网址，例如 https://example.com/article")}
                   inputMode="url"
                   autoCapitalize="none"
                   maxLength={2_048}
@@ -4364,7 +4387,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   className="capture-extra"
                   value={newTitle}
                   onChange={(event) => setNewTitle(event.target.value)}
-                  placeholder="标题（可选）"
+                  placeholder={t("标题（可选）")}
                   maxLength={200}
                 />
               </div>
@@ -4383,32 +4406,32 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   <span className="web-attachment-icon"><ResourceLinkGlyph /></span>
                 )}
                 <span>
-                  <em>@网页</em>
+                  <em>{t("@网页")}</em>
                   <strong>{webAttachment.page_title}</strong>
                   <small>{sourceHost(webAttachment.page_url)} · {webAttachment.page_url}</small>
                 </span>
-                <button type="button" aria-label="移除网页附件" onClick={removeWebAttachment}><Icon name="close" size={16} /></button>
+                <button type="button" aria-label={t("移除网页附件")} onClick={removeWebAttachment}><Icon name="close" size={16} /></button>
               </div>
             )}
             {activeType === "resource" && webAttachmentHelp && !webAttachment && (
               <div className="web-attachment-help capture-extra">
                 <div className="web-attachment-help-copy">
-                  <strong>@网页暂未读取到可收藏的网页</strong>
-                  <span>这不代表扩展未安装。请先打开普通公网 HTTP(S) 网页，再输入 @ 重试；浏览器设置页、新标签页和本地页面不会出现在列表中。</span>
-                  <small>已安装扩展：请确认扩展已启用、允许访问本站，并刷新 MemoIsle 页面。更新扩展文件后需在扩展管理中点击重新加载。</small>
+                  <strong>{t("@网页暂未读取到可收藏的网页")}</strong>
+                  <span>{t("这不代表扩展未安装。请先打开普通公网 HTTP(S) 网页，再输入 @ 重试；浏览器设置页、新标签页和本地页面不会出现在列表中。")}</span>
+                  <small>{t("已安装扩展：请确认扩展已启用、允许访问本站，并刷新 MemoIsle 页面。更新扩展文件后需在扩展管理中点击重新加载。")}</small>
                 </div>
                 <div className="web-attachment-help-actions">
                   <a
                     href={browserExtensionDownloadUrl()}
                     download={browserExtensionArchiveFilename()}
-                  >下载扩展</a>
+                  >{t("下载扩展")}</a>
                   <button
                     type="button"
                     onClick={() => {
                       setWebAttachmentHelp(false);
                       urlRef.current?.focus();
                     }}
-                  >粘贴网址</button>
+                  >{t("粘贴网址")}</button>
                 </div>
               </div>
             )}
@@ -4437,9 +4460,9 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     if (draft.meaning) {
                       setNewBody(draft.meaning);
                     }
-                    setMessage(`已从剪贴板填入「${draft.lemma}」，确认后保存。`);
+                    setMessage(t("已从剪贴板填入「{lemma}」，确认后保存。", { lemma: draft.lemma }));
                   }}
-                  placeholder="单词或短语，输入后自动填入中文释义"
+                  placeholder={t("单词或短语，输入后自动填入中文释义")}
                   autoCapitalize="none"
                   maxLength={200}
                 />
@@ -4447,7 +4470,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   <input
                     value={newPhonetic}
                     onChange={(event) => setNewPhonetic(event.target.value)}
-                    placeholder="音标（输入后点右侧播放）"
+                    placeholder={t("音标（输入后点右侧播放）")}
                     maxLength={120}
                   />
                   <WordPronunciation
@@ -4463,8 +4486,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 <div className="word-lookup-toolbar">
                   <span className="word-lookup-hint">
                     {wordLookupBusy
-                      ? "正在填入中文释义、音标和例句…"
-                      : "输入单词后自动填入中文释义、音标和例句"}
+                      ? t("正在填入中文释义、音标和例句…")
+                      : t("输入单词后自动填入中文释义、音标和例句")}
                   </span>
                   <button
                     type="button"
@@ -4472,7 +4495,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     disabled={!newTitle.trim() || wordLookupBusy || creating}
                     onClick={() => void handleLookupWord()}
                   >
-                    {wordLookupBusy ? "正在查词…" : "重新查词"}
+                    {wordLookupBusy ? t("正在查词…") : t("重新查词")}
                   </button>
                   {wordLookup && (
                     <button
@@ -4480,7 +4503,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       className="word-lookup-clear"
                       onClick={clearWordLookup}
                     >
-                      清除预览
+                      {t("清除预览")}
                     </button>
                   )}
                 </div>
@@ -4510,10 +4533,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 onChange={(event) => handleCaptureBodyChange(event.target.value)}
                 placeholder={
                   activeType === "idea"
-                    ? "写下此刻的想法，稍后再整理……"
+                    ? t("写下此刻的想法，稍后再整理……")
                     : activeType === "resource"
-                      ? "添加备注，输入 @ 后可继续打字筛选当前浏览器打开的网页"
-                      : "中文释义（输入单词后自动填入，也可手改）"
+                      ? t("添加备注，输入 @ 后可继续打字筛选当前浏览器打开的网页")
+                      : t("中文释义（输入单词后自动填入，也可手改）")
                 }
                 rows={activeType === "idea" ? 3 : 2}
                 maxLength={50_000}
@@ -4523,17 +4546,17 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   <div className="capture-command-heading">
                     <strong>
                       {webMentionQuery
-                        ? `@网页 · 匹配“${webMentionQuery}”`
-                        : "@网页 · 当前浏览器"}
+                        ? t("@网页 · 匹配“{webMentionQuery}”", { webMentionQuery })
+                        : t("@网页 · 当前浏览器")}
                     </strong>
                     <small>
                       {webMentionQuery
-                        ? "按标题、网址或站点名筛选，点选后即可附加"
-                        : "选择当前浏览器打开的网页，不限标签页 · 按 Ctrl/⌘+Shift+Alt+B 直接收藏最近浏览的网页"}
+                        ? t("按标题、网址或站点名筛选，点选后即可附加")
+                        : t("选择当前浏览器打开的网页，不限标签页 · 按 Ctrl/⌘+Shift+Alt+B 直接收藏最近浏览的网页")}
                     </small>
                   </div>
                   {openBrowserTabsLoading && (
-                    <div className="capture-command-empty">正在读取当前浏览器网页……</div>
+                    <div className="capture-command-empty">{t("正在读取当前浏览器网页……")}</div>
                   )}
                   {!openBrowserTabsLoading &&
                     matchedOpenBrowserTabs.map((tab) => (
@@ -4558,7 +4581,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                               sourceHost(tab.page_url),
                               webMentionQuery,
                             )}{" "}
-                            · 最近同步 {timeFormatter.format(new Date(tab.last_seen_at))}
+                            · {t("最近同步 {time}", { time: timeFormatter().format(new Date(tab.last_seen_at)) })}
                           </small>
                         </span>
                       </button>
@@ -4568,23 +4591,23 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     openBrowserTabs.length > 0 &&
                     matchedOpenBrowserTabs.length === 0 && (
                     <div className="capture-command-empty">
-                      <span>没有标题或网址包含“{webMentionQuery}”的打开网页</span>
+                      <span>{t("没有标题或网址包含“{webMentionQuery}”的打开网页", { webMentionQuery })}</span>
                     </div>
                   )}
                   {!openBrowserTabsLoading &&
                     openBrowserTabs.length === 0 &&
                     openBrowserTabsError && (
                     <div className="capture-command-empty">
-                      <span>无法读取当前浏览器网页：{openBrowserTabsError}</span>
-                      <button type="button" onClick={showBrowserPageHelp}>查看连接方式</button>
+                      <span>{t("无法读取当前浏览器网页：{openBrowserTabsError}", { openBrowserTabsError })}</span>
+                      <button type="button" onClick={showBrowserPageHelp}>{t("查看连接方式")}</button>
                     </div>
                   )}
                   {!openBrowserTabsLoading &&
                     openBrowserTabs.length === 0 &&
                     !openBrowserTabsError && (
                     <div className="capture-command-empty">
-                      <span>未发现当前浏览器打开的网页</span>
-                      <button type="button" onClick={showBrowserPageHelp}>查看连接方式</button>
+                      <span>{t("未发现当前浏览器打开的网页")}</span>
+                      <button type="button" onClick={showBrowserPageHelp}>{t("查看连接方式")}</button>
                     </div>
                   )}
                 </div>
@@ -4595,7 +4618,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 className="word-example capture-extra"
                 value={newExample}
                 onChange={(event) => setNewExample(event.target.value)}
-                placeholder="例句（输入单词后自动填入，也可手改）"
+                placeholder={t("例句（输入单词后自动填入，也可手改）")}
                 rows={2}
                 maxLength={5_000}
               />
@@ -4606,28 +4629,28 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 className="clipboard-fill capture-extra"
                 onClick={() => void fillWordFromClipboard({ overwrite: true, silent: false })}
               >
-                从剪贴板填入
+                {t("从剪贴板填入")}
               </button>
             )}
             <div className="capture-footer">
-              <div className="capture-types" role="group" aria-label="内容类型">
+              <div className="capture-types" role="group" aria-label={t("内容类型")}>
                 <button
                   type="button"
                   className={activeType === "idea" ? "type-pill active" : "type-pill"}
                   onClick={() => switchType("idea")}
-                ><Icon name="idea" size={16} /> 灵感</button>
+                ><Icon name="idea" size={16} />{t(" 灵感")}</button>
                 <button
                   type="button"
                   className={activeType === "word" ? "type-pill active" : "type-pill"}
                   onClick={enterWordCapture}
-                ><Icon name="word" size={16} /> 单词</button>
+                ><Icon name="word" size={16} />{t(" 单词")}</button>
                 <button
                   type="button"
                   className={activeType === "resource" ? "type-pill active" : "type-pill"}
                   onClick={() => switchType("resource")}
                 >
                   <Icon name="link" size={16} />
-                  资料
+                  {t("资料")}
                 </button>
                 <button
                   type="button"
@@ -4635,7 +4658,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   onClick={() => setVoicePanelOpen(true)}
                 >
                   <Icon name="audio" size={16} />
-                  语音
+                  {t("语音")}
                 </button>
               </div>
               <button
@@ -4647,26 +4670,26 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     : activeType === "resource" ? !newUrl.trim() : !newTitle.trim())
                 }
               >
-                {creating ? "保存中…" : `保存${copy.itemLabel}`}
+                {creating ? t("保存中…") : t("保存{itemLabel}", { itemLabel: copy.itemLabel })}
               </button>
             </div>
           </form>
           )}
 
           {activeType === "resource" && (
-            <div className="resource-library-tools" role="toolbar" aria-label="整理工具">
+            <div className="resource-library-tools" role="toolbar" aria-label={t("整理工具")}>
               <span className="resource-tool-actions">
                 <button type="button" onClick={() => setHealthCenterOpen(true)}>
-                  <Icon name="health" size={16} /> 网页巡检{healthIssueCount > 0 ? ` ${healthIssueCount}` : ""}
+                  <Icon name="health" size={16} />{t(" 网页巡检")}{healthIssueCount > 0 ? ` ${healthIssueCount}` : ""}
                 </button>
                 <button type="button" onClick={() => setBookmarkImportOpen(true)}>
-                  <Icon name="upload" size={16} /> 导入浏览器书签
+                  <Icon name="upload" size={16} />{t(" 导入浏览器书签")}
                 </button>
                 <button type="button" onClick={() => setCloudAccountOpen(true)}>
-                  <Icon name="cloud" size={16} /> 云盘绑定
+                  <Icon name="cloud" size={16} />{t(" 云盘绑定")}
                 </button>
                 <button type="button" onClick={() => setEbookCollectOpen(true)}>
-                  <Icon name="book" size={16} /> 收藏电子书
+                  <Icon name="book" size={16} />{t(" 收藏电子书")}
                 </button>
                 <button
                   type="button"
@@ -4674,7 +4697,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   aria-controls="category-settings-panel"
                   onClick={() => setCategorySettingsOpen((open) => !open)}
                 >
-                  <Icon name="settings" size={16} /> 分类模板
+                  <Icon name="settings" size={16} />{t(" 分类模板")}
                 </button>
                 <button
                   type="button"
@@ -4682,7 +4705,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   aria-controls="classification-tools"
                   onClick={() => setClassificationToolsOpen((open) => !open)}
                 >
-                  <Icon name="idea" size={16} /> 智能分类{classificationReviewCount > 0 ? ` · 待确认 ${classificationReviewCount}` : ""}
+                  <Icon name="idea" size={16} />{t(" 智能分类")}{classificationReviewCount > 0 ? t(" · 待确认 {classificationReviewCount}", { classificationReviewCount }) : ""}
                 </button>
               </span>
             </div>
@@ -4693,7 +4716,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               id="category-settings-panel"
               ref={categorySettingsRef}
               className="category-settings-panel"
-              aria-label="自定义分类模板和规则"
+              aria-label={t("自定义分类模板和规则")}
             >
               <CategoryTemplatePanel
                 categories={resourceCategories}
@@ -4729,31 +4752,31 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             <div className="status-message" role="status">
               <span>{message}</span>
               {undoMemo && !duplicateWord && !duplicateResource && (
-                <button type="button" onClick={() => void handleUndoSave()}>撤销</button>
+                <button type="button" onClick={() => void handleUndoSave()}>{t("撤销")}</button>
               )}
               {quickAccessUndo?.message === message && (
                 <button
                   type="button"
                   onClick={() => void changeQuickAccessHidden(quickAccessUndo.memo, false)}
-                >撤销</button>
+                >{t("撤销")}</button>
               )}
               {imageDuplicateNotice?.message === message && (
                 <button
                   type="button"
                   onClick={() => openLinkedMemo(imageDuplicateNotice.memoId)}
-                >查看已有</button>
+                >{t("查看已有")}</button>
               )}
               {duplicateWord && (
                 <span className="status-actions">
-                  <button type="button" onClick={handleViewDuplicateWord}>查看</button>
-                  <button type="button" onClick={() => void handleMergeDuplicateWord()}>合并例句</button>
-                  <button type="button" onClick={() => void handleForceDuplicateWord()}>仍然保存</button>
+                  <button type="button" onClick={handleViewDuplicateWord}>{t("查看")}</button>
+                  <button type="button" onClick={() => void handleMergeDuplicateWord()}>{t("合并例句")}</button>
+                  <button type="button" onClick={() => void handleForceDuplicateWord()}>{t("仍然保存")}</button>
                 </span>
               )}
               {duplicateResource && (
                 <span className="status-actions">
-                  <button type="button" onClick={handleViewDuplicateResource}>查看已有</button>
-                  <button type="button" onClick={() => void handleForceDuplicateResource()}>仍然保存</button>
+                  <button type="button" onClick={handleViewDuplicateResource}>{t("查看已有")}</button>
+                  <button type="button" onClick={() => void handleForceDuplicateResource()}>{t("仍然保存")}</button>
                 </span>
               )}
             </div>
@@ -4781,22 +4804,22 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 }
               >
                 {viewQuery.trim()
-                  ? `“${viewQuery.trim()}”的搜索结果`
+                  ? t("“{trim}”的搜索结果", { trim: viewQuery.trim() })
                   : activeType === "resource"
-                    ? "收藏列表"
+                    ? t("收藏列表")
                     : activeType === "all"
-                      ? "全部内容"
+                      ? t("全部内容")
                       : copy.title}
               </h2>
               <div className="section-actions">
-                {activeType === "image" && <select aria-label="筛选图片分类" value={imageCategoryFilter}
+                {activeType === "image" && <select aria-label={t("筛选图片分类")} value={imageCategoryFilter}
                   disabled={batchBusy} onChange={(event) => { setImageCategoryFilter(event.target.value); setResourcePage(1); }}>
-                  <option value="">全部分类</option>
+                  <option value="">{t("全部分类")}</option>
                   {resourceCategories.filter((item) => item.is_active).map((item) =>
                     <option key={item.code} value={item.code}>{item.path || item.name}</option>)}
                 </select>}
                 <label>
-                  <span className="sr-only">排序方式</span>
+                  <span className="sr-only">{t("排序方式")}</span>
                   <select
                     value={effectiveSort(searchActive ? searchSort : memoSort, activeType === "resource")}
                     onChange={(event) => {
@@ -4806,29 +4829,29 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       setResourcePage(1);
                     }}
                   >
-                    {searchActive && <option value="relevance">最相关</option>}
-                    <option value="updated_desc">最近更新</option>
-                    <option value="updated_asc">最早更新</option>
-                    <option value="created_desc">最近收藏</option>
-                    <option value="created_asc">最早收藏</option>
-                    <option value="title_asc">标题 A–Z</option>
-                    <option value="title_desc">标题 Z–A</option>
-                    {activeType === "resource" && <option value="opened_desc">最常打开</option>}
+                    {searchActive && <option value="relevance">{t("最相关")}</option>}
+                    <option value="updated_desc">{t("最近更新")}</option>
+                    <option value="updated_asc">{t("最早更新")}</option>
+                    <option value="created_desc">{t("最近收藏")}</option>
+                    <option value="created_asc">{t("最早收藏")}</option>
+                    <option value="title_asc">{t("标题 A–Z")}</option>
+                    <option value="title_desc">{t("标题 Z–A")}</option>
+                    {activeType === "resource" && <option value="opened_desc">{t("最常打开")}</option>}
                   </select>
                 </label>
                 {activeType === "resource" && (
-                  <span className="view-switch" aria-label="资料显示方式">
+                  <span className="view-switch" aria-label={t("资料显示方式")}>
                     <button
                       className={resourceViewMode === "list" ? "active" : ""}
                       onClick={() => setResourceViewMode("list")}
-                      aria-label="列表视图"
-                      title="列表视图"
+                      aria-label={t("列表视图")}
+                      title={t("列表视图")}
                     ><Icon name="list" size={16} /></button>
                     <button
                       className={resourceViewMode === "cards" ? "active" : ""}
                       onClick={() => setResourceViewMode("cards")}
-                      aria-label="卡片视图"
-                      title="卡片视图"
+                      aria-label={t("卡片视图")}
+                      title={t("卡片视图")}
                     ><Icon name="collection" size={16} /></button>
                   </span>
                 )}
@@ -4837,41 +4860,41 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     type="button"
                     className="shortcut-help-button"
                     onClick={() => setShortcutHelpOpen(true)}
-                    title="查看键盘快捷键（?）"
-                  ><Icon name="keyboard" size={16} /> 快捷键</button>
+                    title={t("查看键盘快捷键（?）")}
+                  ><Icon name="keyboard" size={16} />{t(" 快捷键")}</button>
                 )}
-                <button onClick={() => void loadCurrentMemos()}><Icon name="refresh" size={16} /> 刷新</button>
+                <button onClick={() => void loadCurrentMemos()}><Icon name="refresh" size={16} />{t(" 刷新")}</button>
               </div>
             </div>
             {activeType === "resource" && (
-              <div className="resource-filter-panel" aria-label="资料组合筛选">
+              <div className="resource-filter-panel" aria-label={t("资料组合筛选")}>
                 <div className="resource-search">
                   <Icon name="search" size={18} />
                   <input
                     ref={resourceSearchRef}
-                    aria-label="搜索网页收藏"
+                    aria-label={t("搜索网页收藏")}
                     value={resourceQuery}
                     onChange={(event) => setResourceQuery(event.target.value)}
-                    placeholder="搜索网页收藏：标题、网址、描述、标签（/）"
+                    placeholder={t("搜索网页收藏：标题、网址、描述、标签（/）")}
                     maxLength={200}
                   />
                   {resourceQuery && (
                     <button
                       type="button"
-                      aria-label="清除网页收藏搜索"
+                      aria-label={t("清除网页收藏搜索")}
                       onClick={() => setResourceQuery("")}
                     ><Icon name="close" size={16} /></button>
                   )}
                 </div>
                 <div className="category-filter">
-                  <span>分类</span>
+                  <span>{t("分类")}</span>
                   <button
                     className={!resourceCategoryFilter ? "active" : ""}
                     onClick={() => {
                       setResourceCategoryFilter("");
                       setResourcePage(1);
                     }}
-                  >全部</button>
+                  >{t("全部")}</button>
                   {resourceCategories
                     .filter((category) => category.is_active)
                     .map((category) => (
@@ -4899,25 +4922,25 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                         setResourcePage(1);
                       }}
                     />
-                    只看星标
+                    {t("只看星标")}
                   </label>
                 </div>
                 <div className="resource-filter-result-count" role="status">
                   {debouncedResourceQuery
-                    ? <>“{debouncedResourceQuery}”找到 <strong>{currentResultCount}</strong> 条资料</>
-                    : <>筛选结果 <strong>{currentResultCount}</strong> 条资料</>}
+                    ? <>{t("“{debouncedResourceQuery}”找到 ", { debouncedResourceQuery })}<strong>{currentResultCount}</strong>{t(" 条资料")}</>
+                    : <>{t("筛选结果 ")}<strong>{currentResultCount}</strong>{t(" 条资料")}</>}
                 </div>
               </div>
             )}
             {loadState === "loading" && (
               <div className="state-panel">
-                {viewQuery.trim() ? "正在搜索资料库……" : `正在从共享资料库读取${copy.itemLabel}……`}
+                {viewQuery.trim() ? t("正在搜索资料库……") : t("正在从共享资料库读取{itemLabel}……", { itemLabel: copy.itemLabel })}
               </div>
             )}
             {loadState === "error" && (
               <div className="state-panel error-state">
-                <p>暂时无法连接资料库。</p>
-                <button onClick={() => void loadCurrentMemos()}>重试</button>
+                <p>{t("暂时无法连接资料库。")}</p>
+                <button onClick={() => void loadCurrentMemos()}>{t("重试")}</button>
               </div>
             )}
             {loadState === "ready" && memos.length === 0 && (
@@ -4925,10 +4948,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 <span className={`empty-icon ${activeType}`}>
                   <Icon name={copy.icon} size={20} />
                 </span>
-                <h3>{viewQuery.trim() ? "没有找到匹配内容" : copy.emptyTitle}</h3>
+                <h3>{viewQuery.trim() ? t("没有找到匹配内容") : copy.emptyTitle}</h3>
                 <p>
                   {viewQuery.trim()
-                    ? "换个关键词，或清除搜索后浏览全部收藏。"
+                    ? t("换个关键词，或清除搜索后浏览全部收藏。")
                     : copy.emptyBody}
                 </p>
               </div>
@@ -4977,19 +5000,19 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               </div>
             )}
             {loadState === "ready" && (
-              <nav className="resource-pagination" aria-label={activeType === "resource" ? "网页资料分页" : activeType === "trash" ? "回收站分页" : "内容列表分页"}>
-                <label>每页条数<select aria-label="每页条数" value={pageSize} disabled={batchBusy} onChange={(event) => {
+              <nav className="resource-pagination" aria-label={activeType === "resource" ? t("网页资料分页") : activeType === "trash" ? t("回收站分页") : t("内容列表分页")}>
+                <label>{t("每页条数")}<select aria-label={t("每页条数")} value={pageSize} disabled={batchBusy} onChange={(event) => {
                   setPageSize(Number(event.target.value)); setResourcePage(1);
-                }}>{[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size} 条</option>)}</select></label>
+                }}>{[10, 25, 50, 100].map((size) => <option key={size} value={size}>{t("{size} 条", { size })}</option>)}</select></label>
                 <button
                   type="button"
                   disabled={resourcePage === 1 || batchBusy}
                   onClick={() => setResourcePage((page) => Math.max(1, page - 1))}
                 >
-                  上一页
+                  {t("上一页")}
                 </button>
                 <span>
-                  第 {resourcePage} / {resourcePageCount} 页 · 共 {currentResultCount} 条
+                  {t("第 {resourcePage} / {resourcePageCount} 页 · 共 {currentResultCount} 条", { resourcePage, resourcePageCount, currentResultCount })}
                 </span>
                 <button
                   type="button"
@@ -4999,7 +5022,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   }
                   onClick={() => setResourcePage((page) => page + 1)}
                 >
-                  下一页
+                  {t("下一页")}
                 </button>
               </nav>
             )}
@@ -5010,15 +5033,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       </div>
 
       {selectedMemo && selectedMemo.type === "image" && (
-        <aside className="editor-panel image-detail-panel" aria-label="图片详情">
+        <aside className="editor-panel image-detail-panel" aria-label={t("图片详情")}>
           <div className="editor-header">
             <div>
-              <span className="type-label"><Icon name="image" size={16} /> 图片</span>
-              <h2>图片详情</h2>
+              <span className="type-label"><Icon name="image" size={16} />{t(" 图片")}</span>
+              <h2>{t("图片详情")}</h2>
             </div>
             <button
               className="icon-button"
-              aria-label="关闭图片详情"
+              aria-label={t("关闭图片详情")}
               onClick={() => setSelectedId(null)}
             ><Icon name="close" size={16} /></button>
           </div>
@@ -5039,33 +5062,33 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               ) : (
                 <div className="image-preview-loading">
                   {imagePreviewBusy
-                    ? "正在读取图片……"
+                    ? t("正在读取图片……")
                     : imagePreviewFailed
-                      ? "图片读取失败，可尝试查看原图或替换图片。"
-                      : "暂时无法显示图片"}
+                      ? t("图片读取失败，可尝试查看原图或替换图片。")
+                      : t("暂时无法显示图片")}
                 </div>
               )
             ) : (
               <div className="image-preview-empty">
-                <span>这张图片还没有上传文件。</span>
+                <span>{t("这张图片还没有上传文件。")}</span>
                 <button
                   type="button"
                   onClick={() => imageReplaceInputRef.current?.click()}
                   disabled={replaceImageBusy}
                 >
-                  {replaceImageBusy ? "上传中…" : "上传图片"}
+                  {replaceImageBusy ? t("上传中…") : t("上传图片")}
                 </button>
               </div>
             )}
           </div>
           <ResourceClassificationInsight memo={selectedMemo} />
           <div className="image-detail-toolbar">
-            <label>图片分类<select aria-label="图片分类" value={selectedMemo.resource_category || ""}
+            <label>{t("图片分类")}<select aria-label={t("图片分类")} value={selectedMemo.resource_category || ""}
               disabled={updatingResourceId === selectedMemo.id || replaceImageBusy}
               onChange={(event) => void updateResourceOrganization(selectedMemo, { resource_categories: event.target.value ? [event.target.value] : [] })}>
-              <option value="">未分类</option>{resourceCategories.filter((item) => item.is_active).map((item) => <option key={item.code} value={item.code}>{item.path || item.name}</option>)}
+              <option value="">{t("未分类")}</option>{resourceCategories.filter((item) => item.is_active).map((item) => <option key={item.code} value={item.code}>{item.path || item.name}</option>)}
               {selectedMemo.resource_category && !resourceCategories.some((item) => item.code === selectedMemo.resource_category && item.is_active) &&
-                <option value={selectedMemo.resource_category} disabled>{selectedMemo.resource_category_label || selectedMemo.resource_category}（已停用）</option>}
+                <option value={selectedMemo.resource_category} disabled>{selectedMemo.resource_category_label || selectedMemo.resource_category}{t("（已停用）")}</option>}
             </select></label>
             <span className="image-detail-meta">{imageInfoLabel(selectedMemo)}</span>
             {selectedMemo.image_mime_type && (
@@ -5075,25 +5098,25 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   onClick={() => void handleViewOriginal(selectedMemo)}
                   disabled={imagePreviewBusy}
                 >
-                  查看原图
+                  {t("查看原图")}
                 </button>
                 <button
                   type="button"
                   onClick={() => void handleDownloadImage(selectedMemo)}
                   disabled={imagePreviewBusy}
                 >
-                  下载
+                  {t("下载")}
                 </button>
               </span>
             )}
           </div>
           <div className="image-ocr-section">
             <div className="image-ocr-header">
-              <span className="image-ocr-title">图片文字识别</span>
+              <span className="image-ocr-title">{t("图片文字识别")}</span>
               <span
                 className={`image-ocr-status ${selectedMemo.image_ocr_status}`}
               >
-                {IMAGE_OCR_STATUS_LABELS[selectedMemo.image_ocr_status] ?? "未识别"}
+                {IMAGE_OCR_STATUS_LABELS[selectedMemo.image_ocr_status] ?? t("未识别")}
               </span>
             </div>
             {selectedMemo.image_ocr_status === "ready" && (
@@ -5101,11 +5124,11 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 {[
                   imageOcrSourceLabel(selectedMemo.image_ocr_source),
                   selectedMemo.image_ocr_updated_at
-                    ? `更新于 ${timeFormatter.format(new Date(selectedMemo.image_ocr_updated_at))}`
+                    ? t("更新于 {value}", { value: timeFormatter().format(new Date(selectedMemo.image_ocr_updated_at)) })
                     : "",
                 ]
                   .filter((part) => part.length > 0)
-                  .join(" · ") || "识别完成"}
+                  .join(" · ") || t("识别完成")}
               </p>
             )}
             {(selectedMemo.image_ocr_status === "failed" ||
@@ -5121,7 +5144,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   {selectedMemo.image_ocr_text}
                 </pre>
               ) : (
-                <p className="image-ocr-empty">没有识别到文字</p>
+                <p className="image-ocr-empty">{t("没有识别到文字")}</p>
               ))}
             {(selectedMemo.image_auto_tags ?? []).length > 0 && (
               <div className="image-ocr-tags">
@@ -5130,7 +5153,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     type="button"
                     key={tag}
                     className="image-ocr-tag"
-                    title={`搜索标签「${tag}」`}
+                    title={t("搜索标签「{tag}」", { tag })}
                     onClick={() => handleImageOcrTagClick(tag)}
                   >
                     #{tag}
@@ -5150,10 +5173,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 }
               >
                 {ocrBusy
-                  ? "识别中…"
+                  ? t("识别中…")
                   : selectedMemo.image_ocr_status === "none"
-                    ? "识别文字"
-                    : "重新识别"}
+                    ? t("识别文字")
+                    : t("重新识别")}
               </button>
               {ocrError && (
                 <span className="image-ocr-error" role="alert">
@@ -5163,32 +5186,32 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             </div>
           </div>
           <form onSubmit={handleUpdate}>
-            <label>标题
+            <label>{t("标题")}
               <input
                 value={editorTitle}
                 onChange={(event) => setEditorTitle(event.target.value)}
                 maxLength={200}
-                placeholder="给这张图片起个名字"
+                placeholder={t("给这张图片起个名字")}
               />
             </label>
-            <label>备注
+            <label>{t("备注")}
               <textarea
                 value={editorBody}
                 onChange={(event) => setEditorBody(event.target.value)}
                 rows={6}
                 maxLength={50_000}
-                placeholder="记下这张图片的来历或想法（可留空）"
+                placeholder={t("记下这张图片的来历或想法（可留空）")}
               />
             </label>
             <div className="editor-meta">
-              <span>服务端版本 {selectedMemo.version}</span>
-              <span>更新于 {timeFormatter.format(new Date(selectedMemo.updated_at))}</span>
+              <span>{t("服务端版本 {version}", { version: selectedMemo.version })}</span>
+              <span>{t("更新于 {value}", { value: timeFormatter().format(new Date(selectedMemo.updated_at)) })}</span>
             </div>
             <div className="editor-actions">
               <span className={`save-state ${saveState}`}>
-                {saveState === "saving" && "正在保存…"}
-                {saveState === "saved" && "已保存"}
-                {saveState === "error" && "保存失败"}
+                {saveState === "saving" && t("正在保存…")}
+                {saveState === "saved" && t("已保存")}
+                {saveState === "error" && t("保存失败")}
               </span>
               <button
                 type="button"
@@ -5196,17 +5219,17 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 disabled={saveState === "saving"}
                 onClick={() => void handleMoveToTrash(selectedMemo)}
               >
-                移入回收站
+                {t("移入回收站")}
               </button>
               <button
                 type="button"
                 disabled={replaceImageBusy || saveState === "saving"}
                 onClick={() => imageReplaceInputRef.current?.click()}
               >
-                {replaceImageBusy ? "替换中…" : "替换图片"}
+                {replaceImageBusy ? t("替换中…") : t("替换图片")}
               </button>
               <button type="submit" disabled={saveState === "saving" || !editorTitle.trim()}>
-                保存修改
+                {t("保存修改")}
               </button>
             </div>
             <input
@@ -5214,7 +5237,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               className="sr-only"
               type="file"
               accept="image/*"
-              aria-label="替换图片文件"
+              aria-label={t("替换图片文件")}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = "";
@@ -5228,29 +5251,29 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       )}
 
       {selectedMemo && selectedMemo.type !== "resource" && selectedMemo.type !== "image" && (
-        <aside className="editor-panel" aria-label={`编辑${selectedCopy.itemLabel}`}>
+        <aside className="editor-panel" aria-label={t("编辑{itemLabel}", { itemLabel: selectedCopy.itemLabel })}>
           <div className="editor-header">
             <div>
               <span className="type-label">
                 <Icon name={selectedCopy.icon} size={16} /> {selectedCopy.itemLabel}
               </span>
               <h2>
-                {selectedMemo.type === "word" ? "学习单词" : "继续整理"}
+                {selectedMemo.type === "word" ? t("学习单词") : t("继续整理")}
               </h2>
             </div>
-            <button className="icon-button" aria-label="关闭编辑" onClick={() => setSelectedId(null)}><Icon name="close" size={16} /></button>
+            <button className="icon-button" aria-label={t("关闭编辑")} onClick={() => setSelectedId(null)}><Icon name="close" size={16} /></button>
           </div>
           {selectedMemo.audio_mime_type && (
             <div className="audio-player-card">
               <div className="audio-player-heading">
                 <div>
                   <strong>
-                    {isMeetingRecording(selectedMemo) ? "会议录音" : "原始录音"}
+                    {isMeetingRecording(selectedMemo) ? t("会议录音") : t("原始录音")}
                   </strong>
                   <span>
                     {selectedMemo.audio_duration_ms
-                      ? `${Math.round(selectedMemo.audio_duration_ms / 1_000)} 秒`
-                      : "语音记录"}
+                      ? t("{value} 秒", { value: Math.round(selectedMemo.audio_duration_ms / 1_000) })
+                      : t("语音记录")}
                   </span>
                 </div>
                 <button
@@ -5260,7 +5283,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   disabled={audioDownloadBusy}
                 >
                   <Icon name="download" size={14} />
-                  {audioDownloadBusy ? "下载中…" : "下载录音"}
+                  {audioDownloadBusy ? t("下载中…") : t("下载录音")}
                 </button>
               </div>
               <audio controls preload="metadata" src={audioUrl || undefined} />
@@ -5268,13 +5291,13 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           )}
           {selectedMemo.transcript && (
             <details className="meeting-transcript-card">
-              <summary>会议转写（我 / 对方）</summary>
+              <summary>{t("会议转写（我 / 对方）")}</summary>
               <pre>{selectedMemo.transcript}</pre>
             </details>
           )}
           <form onSubmit={handleUpdate}>
             <label>
-              内容类型
+              {t("内容类型")}
               <select
                 value={selectedMemo.type}
                 disabled={typeChangingId === selectedMemo.id || saveState === "saving"}
@@ -5285,34 +5308,33 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   )
                 }
               >
-                <option value="idea">灵感</option>
-                <option value="word">英语单词</option>
+                <option value="idea">{t("灵感")}</option>
+                <option value="word">{t("英语单词")}</option>
                 <option value="resource" disabled={!selectedMemo.source_url}>
-                  网页资料{selectedMemo.source_url ? "" : "（需要网址）"}
+                  {t("网页资料")}{selectedMemo.source_url ? "" : t("（需要网址）")}
                 </option>
               </select>
             </label>
-            <label>{selectedMemo.type === "word" ? "单词或短语" : "标题"}
+            <label>{selectedMemo.type === "word" ? t("单词或短语") : t("标题")}
               <input value={editorTitle} onChange={(event) => setEditorTitle(event.target.value)} maxLength={200} />
             </label>
             {selectedMemo.type === "word" && (
               <>
                 <p className="review-schedule">
-                  上次复习 {selectedMemo.last_review_at
-                    ? timeFormatter.format(new Date(selectedMemo.last_review_at))
-                    : "尚未复习"}
-                  {" · "}
-                  下次 {selectedMemo.next_review_at
-                    ? timeFormatter.format(new Date(selectedMemo.next_review_at))
-                    : "待安排"}
+                  {t("上次复习 ")}{selectedMemo.last_review_at
+                    ? timeFormatter().format(new Date(selectedMemo.last_review_at))
+                    : t("尚未复习")}
+                  {" · "}{t("下次 ")}{selectedMemo.next_review_at
+                    ? timeFormatter().format(new Date(selectedMemo.next_review_at))
+                    : t("待安排")}
                 </p>
-                <label>音标（点右侧播放）
+                <label>{t("音标（点右侧播放）")}
                   <div className="word-phonetic-play-row">
                     <input
                       value={editorPhonetic}
                       onChange={(event) => setEditorPhonetic(event.target.value)}
                       maxLength={120}
-                      placeholder="音标（可选）"
+                      placeholder={t("音标（可选）")}
                     />
                     <WordPronunciation
                       lemma={editorTitle || selectedMemo.title}
@@ -5326,15 +5348,15 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
             {selectedMemo.type === "word" && !showWordAnswer ? (
               <div className="word-answer-hidden">
                 <span>Aa</span>
-                <p>先回想释义和例句，再显示答案。</p>
+                <p>{t("先回想释义和例句，再显示答案。")}</p>
                 <button type="button" onClick={() => setShowWordAnswer(true)}>
-                  显示释义与例句
+                  {t("显示释义与例句")}
                 </button>
               </div>
             ) : (
               <>
             <label>
-              {selectedMemo.type === "word" ? "释义" : "内容"}
+              {selectedMemo.type === "word" ? t("释义") : t("内容")}
               <textarea
                 value={editorBody}
                 onChange={(event) => setEditorBody(event.target.value)}
@@ -5343,10 +5365,10 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
               />
             </label>
                 {selectedMemo.type === "idea" && (
-                  <SpeechPronunciation text={editorBody} label="播放内容" />
+                  <SpeechPronunciation text={editorBody} label={t("播放内容")} />
                 )}
                 {selectedMemo.type === "word" && (
-                  <label>例句或上下文
+                  <label>{t("例句或上下文")}
                     <textarea
                       value={editorExample}
                       onChange={(event) => setEditorExample(event.target.value)}
@@ -5356,32 +5378,32 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                   </label>
                 )}
                 {selectedMemo.type === "word" && (
-                  <SpeechPronunciation text={editorExample} label="播放例句" />
+                  <SpeechPronunciation text={editorExample} label={t("播放例句")} />
                 )}
                 {selectedMemo.type === "word" && (
                   <div className="review-panel">
                     <div>
-                      <strong>这次记得怎么样？</strong>
-                      <span>熟悉度 {selectedMemo.familiarity}/5</span>
+                      <strong>{t("这次记得怎么样？")}</strong>
+                      <span>{t("熟悉度 {familiarity}/5", { familiarity: selectedMemo.familiarity })}</span>
                     </div>
                     <div className="review-actions">
-                      <button type="button" disabled={reviewing} onClick={() => void handleReview("forgot")}>忘记</button>
-                      <button type="button" disabled={reviewing} onClick={() => void handleReview("fuzzy")}>模糊</button>
-                      <button type="button" disabled={reviewing} onClick={() => void handleReview("remembered")}>记得</button>
+                      <button type="button" disabled={reviewing} onClick={() => void handleReview("forgot")}>{t("忘记")}</button>
+                      <button type="button" disabled={reviewing} onClick={() => void handleReview("fuzzy")}>{t("模糊")}</button>
+                      <button type="button" disabled={reviewing} onClick={() => void handleReview("remembered")}>{t("记得")}</button>
                     </div>
                   </div>
                 )}
               </>
             )}
             <div className="editor-meta">
-              <span>服务端版本 {selectedMemo.version}</span>
-              <span>更新于 {timeFormatter.format(new Date(selectedMemo.updated_at))}</span>
+              <span>{t("服务端版本 {version}", { version: selectedMemo.version })}</span>
+              <span>{t("更新于 {value}", { value: timeFormatter().format(new Date(selectedMemo.updated_at)) })}</span>
             </div>
             <div className="editor-actions">
               <span className={`save-state ${saveState}`}>
-                {saveState === "saving" && "正在保存…"}
-                {saveState === "saved" && "已保存"}
-                {saveState === "error" && "保存失败"}
+                {saveState === "saving" && t("正在保存…")}
+                {saveState === "saved" && t("已保存")}
+                {saveState === "error" && t("保存失败")}
               </span>
               <button
                 type="button"
@@ -5389,7 +5411,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 disabled={saveState === "saving"}
                 onClick={() => void handleMoveToTrash(selectedMemo)}
               >
-                移入回收站
+                {t("移入回收站")}
               </button>
               {selectedMemo.status === "inbox" && (
                 <>
@@ -5398,7 +5420,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     disabled={saveState === "saving"}
                     onClick={() => void handleArchiveInboxItem(selectedMemo)}
                   >
-                    归档
+                    {t("归档")}
                   </button>
                   <button
                     type="button"
@@ -5408,7 +5430,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     }
                     onClick={() => void handleOrganizeInboxItem(selectedMemo)}
                   >
-                    整理完成
+                    {t("整理完成")}
                   </button>
                 </>
               )}
@@ -5420,7 +5442,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                     ? !editorBody.trim()
                     : false)
                 }
-              >保存修改</button>
+              >{t("保存修改")}</button>
             </div>
           </form>
         </aside>
@@ -5464,29 +5486,28 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           >
             <div className="dialog-header">
               <div>
-                <span className="type-label"><Icon name="health" size={16} /> 编辑冲突</span>
-                <h2 id="conflict-title">发现其他设备的修改</h2>
+                <span className="type-label"><Icon name="health" size={16} />{t(" 编辑冲突")}</span>
+                <h2 id="conflict-title">{t("发现其他设备的修改")}</h2>
               </div>
               <button
                 autoFocus
                 className="icon-button"
-                aria-label="稍后处理编辑冲突"
+                aria-label={t("稍后处理编辑冲突")}
                 onClick={() => setConflictMemo(null)}
               ><Icon name="close" size={16} /></button>
             </div>
             <div className="dialog-body">
               <p>
-                “{conflictMemo.title}”已经在其他设备更新。当前编辑框中的修改仍然保留，
-                请选择要继续使用的版本。
+                {t("“{title}”已经在其他设备更新。当前编辑框中的修改仍然保留， 请选择要继续使用的版本。", { title: conflictMemo.title })}
               </p>
             </div>
             <div className="dialog-actions conflict-actions">
-              <button type="button" className="conflict-later" onClick={() => setConflictMemo(null)}>稍后处理</button>
+              <button type="button" className="conflict-later" onClick={() => setConflictMemo(null)}>{t("稍后处理")}</button>
               <button type="button" onClick={useServerConflict}>
-                采用服务端版本
+                {t("采用服务端版本")}
               </button>
               <button type="button" className="primary" onClick={keepLocalConflict}>
-                保留我的修改
+                {t("保留我的修改")}
               </button>
             </div>
           </section>
@@ -5509,16 +5530,16 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           >
             <div className="dialog-header">
               <div>
-                <span className="type-label"><Icon name="audio" size={16} /> {meetingMode ? "会议录音" : "语音灵感"}</span>
+                <span className="type-label"><Icon name="audio" size={16} /> {meetingMode ? t("会议录音") : t("语音灵感")}</span>
                 <h2 id="voice-title">
-                  {meetingMode ? "记录这场会议" : "记录此刻的想法"}
+                  {meetingMode ? t("记录这场会议") : t("记录此刻的想法")}
                 </h2>
               </div>
               <button
                 autoFocus
                 type="button"
                 className="icon-button"
-                aria-label="关闭语音记录"
+                aria-label={t("关闭语音记录")}
                 ref={voiceCloseRef}
                 disabled={voiceState === "saving"}
                 onClick={requestVoiceClose}
@@ -5534,37 +5555,37 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                 }`}
               >
                 <span><Icon name="audio" size={24} /></span>
-                <strong>{voiceSeconds} 秒</strong>
+                <strong>{t("{voiceSeconds} 秒", { voiceSeconds })}</strong>
                 <small>
                   {voiceState === "recording"
-                    ? "正在录音"
+                    ? t("正在录音")
                     : voiceState === "paused"
-                      ? "已暂停"
-                    : voiceState === "ready" ? "录音已就绪" : "等待开始"}
+                      ? t("已暂停")
+                    : voiceState === "ready" ? t("录音已就绪") : t("等待开始")}
                 </small>
               </div>
 
               <VoiceLevelMeter
                 store={voiceLevel}
-                label={meetingMode ? "我的声音" : "输入音量"}
-                ariaSubject="我的麦克风音量"
+                label={meetingMode ? t("我的声音") : t("输入音量")}
+                ariaSubject={t("我的麦克风音量")}
               />
 
               {meetingMode && (
                 <VoiceLevelMeter
                   store={meetingRemoteLevel}
-                  label="对方声音"
-                  ariaSubject="对方声音音量"
+                  label={t("对方声音")}
+                  ariaSubject={t("对方声音音量")}
                   missing={meetingRemoteMissing}
                 />
               )}
 
               <label className="voice-note-label">
-                转写/配套文字（可选）
+                {t("转写/配套文字（可选）")}
                 <textarea
                   value={voiceText}
                   onChange={(event) => setVoiceText(event.target.value)}
-                  placeholder="录音时会尝试自动转写，也可以手动补充……"
+                  placeholder={t("录音时会尝试自动转写，也可以手动补充……")}
                   rows={4}
                   maxLength={50_000}
                   disabled={voiceState === "saving"}
@@ -5586,60 +5607,59 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
                       setMeetingMode(next);
                       if (next && !supportsMeetingAudio()) {
                         setMessage(
-                          "当前浏览器不支持抓取系统音频，会议录音只能录到你的麦克风。建议改用 Chrome 或 Edge。",
+                          t("当前浏览器不支持抓取系统音频，会议录音只能录到你的麦克风。建议改用 Chrome 或 Edge。"),
                         );
                       }
                     }}
                   />
                   <span>
-                    <strong>会议录音（含对方声音）</strong>
+                    <strong>{t("会议录音（含对方声音）")}</strong>
                     <small>
                       {supportsMeetingAudio()
-                        ? "开始时会请你共享屏幕并勾选「分享系统音频」，把会议客户端的声音一起录进来。Windows 上的 Chrome / Edge 支持最好。"
-                        : "当前浏览器不支持抓取系统音频，只能录到你的麦克风。"}
+                        ? t("开始时会请你共享屏幕并勾选「分享系统音频」，把会议客户端的声音一起录进来。Windows 上的 Chrome / Edge 支持最好。")
+                        : t("当前浏览器不支持抓取系统音频，只能录到你的麦克风。")}
                     </small>
                   </span>
                 </label>
               )}
 
               <p className="voice-privacy">
-                Android 使用设备端 SenseVoice；Web 端使用浏览器语音识别（可能由浏览器服务处理）。
-                原始录音始终只保存到你的私人资料库。
+                {t("Android 使用设备端 SenseVoice；Web 端使用浏览器语音识别（可能由浏览器服务处理）。 原始录音始终只保存到你的私人资料库。")}
               </p>
             </div>
             <div className="dialog-actions voice-actions">
               {voiceState !== "saving" && (
-                <button type="button" onClick={requestVoiceClose}>取消</button>
+                <button type="button" onClick={requestVoiceClose}>{t("取消")}</button>
               )}
               {voiceState === "idle" && (
                 <button className="primary" onClick={() => void startVoiceCapture()}>
-                  {meetingMode ? "开始会议录音" : "开始录音"}
+                  {meetingMode ? t("开始会议录音") : t("开始录音")}
                 </button>
               )}
-              {voiceState === "requesting" && <button disabled>正在请求麦克风权限…</button>}
+              {voiceState === "requesting" && <button disabled>{t("正在请求麦克风权限…")}</button>}
               {(voiceState === "recording" || voiceState === "paused") && (
                 <>
                   <button
                     type="button"
                     onClick={voiceState === "recording" ? pauseVoiceCapture : resumeVoiceCapture}
                   >
-                    {voiceState === "recording" ? "暂停" : "继续"}
+                    {voiceState === "recording" ? t("暂停") : t("继续")}
                   </button>
                   <button type="button" className="primary" onClick={stopVoiceCapture}>
-                    结束录音
+                    {t("结束录音")}
                   </button>
                 </>
               )}
               {voiceState === "ready" && (
                 <>
-                  <button type="button" onClick={resetVoiceCapture}>重新录制</button>
-                  <button type="button" onClick={downloadVoiceCapture}>下载录音</button>
+                  <button type="button" onClick={resetVoiceCapture}>{t("重新录制")}</button>
+                  <button type="button" onClick={downloadVoiceCapture}>{t("下载录音")}</button>
                   <button type="button" className="primary" onClick={() => void saveVoiceCapture()}>
-                    {meetingMode ? "保存会议记录" : "保存语音灵感"}
+                    {meetingMode ? t("保存会议记录") : t("保存语音灵感")}
                   </button>
                 </>
               )}
-              {voiceState === "saving" && <button disabled>正在保存录音…</button>}
+              {voiceState === "saving" && <button disabled>{t("正在保存录音…")}</button>}
             </div>
           </section>
         </div>
@@ -5661,18 +5681,18 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
           >
             <div className="dialog-header">
               <div>
-                <span className="type-label"><Icon name="health" size={16} /> 放弃记录</span>
-                <h2 id="voice-discard-title">放弃这段记录？</h2>
+                <span className="type-label"><Icon name="health" size={16} />{t(" 放弃记录")}</span>
+                <h2 id="voice-discard-title">{t("放弃这段记录？")}</h2>
               </div>
-              <button type="button" autoFocus className="icon-button" aria-label="关闭放弃记录确认" onClick={() => setVoiceDiscardConfirmOpen(false)}><Icon name="close" size={16} /></button>
+              <button type="button" autoFocus className="icon-button" aria-label={t("关闭放弃记录确认")} onClick={() => setVoiceDiscardConfirmOpen(false)}><Icon name="close" size={16} /></button>
             </div>
-            <div className="dialog-body"><p>录音和当前文字不会保存，确定要放弃吗？</p></div>
+            <div className="dialog-body"><p>{t("录音和当前文字不会保存，确定要放弃吗？")}</p></div>
             <div className="dialog-actions voice-discard-actions">
               <button type="button" onClick={() => setVoiceDiscardConfirmOpen(false)}>
-                继续编辑
+                {t("继续编辑")}
               </button>
               <button type="button" className="danger" onClick={discardVoiceCapture}>
-                放弃记录
+                {t("放弃记录")}
               </button>
             </div>
           </section>
@@ -5720,7 +5740,7 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
       {cloudAccountOpen && (
         <CloudAccountDialog
           onClose={() => setCloudAccountOpen(false)}
-          onChanged={() => setMessage("云盘绑定已更新")}
+          onChanged={() => setMessage(t("云盘绑定已更新"))}
         />
       )}
 
@@ -5728,6 +5748,8 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         <ModelSettingsDialog
           themePreference={themePreference}
           onThemeChange={handleThemeChange}
+          languagePreference={languagePreference}
+          onLanguageChange={setLanguagePreference}
           onClose={() => setModelSettingsOpen(false)}
           accountEmail={authUser.email}
           onPasswordChanged={() => {
@@ -5748,16 +5770,16 @@ export default function App({ authUser, onLogout, onPasswordChanged }: AppProps)
         />
       )}
 
-      <nav className="mobile-navigation" aria-label="移动端主导航">
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>首页</span></button>
+      <nav className="mobile-navigation" aria-label={t("移动端主导航")}>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "all" ? "active" : ""} onClick={() => switchType("all")}><Icon name="home" size={20} /><span>{t("首页")}</span></button>
         <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "resource" ? "active" : ""} onClick={() => switchType("resource")}>
           <Icon name="link" size={20} />
-          <span>资料</span>
+          <span>{t("资料 @@nav")}</span>
         </button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>图片</span></button>
-        <button className="mobile-create" onClick={focusCapture}><Icon name="plus" size={20} /><span>新建</span></button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>灵感</span></button>
-        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>单词</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "image" ? "active" : ""} onClick={() => switchType("image")}><Icon name="image" size={20} /><span>{t("图片 @@nav")}</span></button>
+        <button className="mobile-create" onClick={focusCapture}><Icon name="plus" size={20} /><span>{t("新建")}</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "idea" ? "active" : ""} onClick={() => switchType("idea")}><Icon name="idea" size={20} /><span>{t("灵感")}</span></button>
+        <button className={!vaultOpen && !ledgerOpen && !relayOpen && !forgetOpen && activeType === "word" ? "active" : ""} onClick={enterWordCapture}><Icon name="word" size={20} /><span>{t("单词 @@nav")}</span></button>
       </nav>
     </div>
   );

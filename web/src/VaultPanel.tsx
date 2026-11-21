@@ -65,15 +65,18 @@ import {
 } from "./vaultSession";
 import Icon from "./Icon";
 import { formatTotpSecret, vaultGate } from "./vaultAccess";
+import { currentLocale, t } from "./i18n";
+import { useI18n } from "./I18nProvider";
 
 const CLIPBOARD_CLEAR_MS = 30_000;
-const RESET_PHRASE = "清空密码库";
+/** 清空密码库前要求输入的确认短语，随界面语言变化。 */
+const resetConfirmPhrase = (): string => t("清空密码库");
 // 用汉字做类型图标，任何字体都能正常显示。
 const kindIcons: Record<VaultKind, string> = {
-  login: "账",
-  secret: "钥",
-  recovery: "码",
-  server: "云",
+  get login() { return t("账"); },
+  get secret() { return t("钥"); },
+  get recovery() { return t("码"); },
+  get server() { return t("云"); },
   subscription: "AI",
 };
 
@@ -100,7 +103,7 @@ interface EditorState {
 function describe(error: unknown): string {
   if (error instanceof WrongMasterPasswordError) return error.message;
   if (error instanceof Error && error.message) return error.message;
-  return "操作失败，请稍后重试。";
+  return t("操作失败，请稍后重试。");
 }
 
 function entrySubtitle(data: VaultItemData, entries: VaultEntry[]): string {
@@ -108,24 +111,24 @@ function entrySubtitle(data: VaultItemData, entries: VaultEntry[]): string {
     const currency = data.currency === "USD" ? "$" : data.currency === "CNY" ? "¥" : data.currency;
     return [
       `${subscriptionProviderLabels[data.provider]}${data.plan ? ` ${data.plan}` : ""}`,
-      data.balance ? `余额 ${currency}${data.balance}` : "",
-      data.expiresOn ? `${data.expiresOn} 到期` : "",
+      data.balance ? t("余额 {currency}{balance}", { currency, balance: data.balance }) : "",
+      data.expiresOn ? t("{expiresOn} 到期", { expiresOn: data.expiresOn }) : "",
     ].filter(Boolean).join(" · ");
   }
-  if (data.kind === "login") return data.username || data.url || "未填写用户名";
-  if (data.kind === "secret") return data.secret ? `${data.secret.length} 个字符` : "未填写密钥";
+  if (data.kind === "login") return data.username || data.url || t("未填写用户名");
+  if (data.kind === "secret") return data.secret ? t("{length} 个字符", { length: data.secret.length }) : t("未填写密钥");
   if (data.kind === "server") {
     // 服务器优先显示「用户@主机:端口」，扫一眼就知道是哪台机器。
-    if (!data.host) return "未填写主机";
+    if (!data.host) return t("未填写主机");
     const target = `${data.username ? `${data.username}@` : ""}${data.host}`;
     const port = data.port && data.port !== "22" ? `:${data.port}` : "";
     const resolved = resolveServerPrivateKey(data, entries);
-    const keyLabel = !data.privateKeyRef ? "私钥" : resolved.missing
-      ? "私钥（引用的密钥已删除）" : `私钥（引用「${resolved.refTitle}」）`;
-    return `${target}${port} · ${data.authMethod === "key" ? keyLabel : "密码"}`;
+    const keyLabel = !data.privateKeyRef ? t("私钥") : resolved.missing
+      ? t("私钥（引用的密钥已删除）") : t("私钥（引用「{refTitle}」）", { refTitle: resolved.refTitle });
+    return `${target}${port} · ${data.authMethod === "key" ? keyLabel : t("密码")}`;
   }
   const remaining = data.codes.filter((item) => !item.used).length;
-  return `${data.account ? `${data.account} · ` : ""}剩余 ${remaining} / ${data.codes.length} 个可用`;
+  return t("{value}剩余 {remaining} / {length} 个可用", { value: data.account ? `${data.account} · ` : "", remaining, length: data.codes.length });
 }
 
 function entryHasSecret(data: VaultItemData, entries: VaultEntry[]): boolean {
@@ -165,12 +168,13 @@ function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFo
   onConfirm: (value: string) => void;
   autoFocus?: boolean;
 }) {
+  const { t } = useI18n();
   const tooShort = password.length > 0 && password.length < MIN_MASTER_PASSWORD_LENGTH;
   const mismatch = confirm.length > 0 && confirm !== password;
   return (
     <>
       <label className="vault-field">
-        <span className="vault-field-label"><span>新主密码</span></span>
+        <span className="vault-field-label"><span>{t("新主密码")}</span></span>
         <input
           type="password"
           value={password}
@@ -181,11 +185,11 @@ function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFo
           required
         />
         <small className={tooShort ? "vault-hint warn" : "vault-hint"}>
-          至少 {MIN_MASTER_PASSWORD_LENGTH} 个字符；用几个不相关的词组成的长句更好记也更安全。
+          {t("至少 {MIN_MASTER_PASSWORD_LENGTH} 个字符；用几个不相关的词组成的长句更好记也更安全。", { MIN_MASTER_PASSWORD_LENGTH })}
         </small>
       </label>
       <label className="vault-field">
-        <span className="vault-field-label"><span>再输入一次</span></span>
+        <span className="vault-field-label"><span>{t("再输入一次")}</span></span>
         <input
           type="password"
           value={confirm}
@@ -193,7 +197,7 @@ function MasterPasswordFields({ password, confirm, onPassword, onConfirm, autoFo
           autoComplete="new-password"
           required
         />
-        {mismatch && <small className="vault-hint warn">两次输入不一致。</small>}
+        {mismatch && <small className="vault-hint warn">{t("两次输入不一致。")}</small>}
       </label>
     </>
   );
@@ -203,7 +207,7 @@ async function decryptVaultItemsOrThrow(key: CryptoKey, records: VaultItemRecord
   try {
     await Promise.all(records.map((record) => decryptVaultItem(key, record)));
   } catch {
-    throw new Error("当前解锁状态和服务器上的密码库对不上（主密码可能刚在别处改过），请锁定后重新解锁再导出。");
+    throw new Error(t("当前解锁状态和服务器上的密码库对不上（主密码可能刚在别处改过），请锁定后重新解锁再导出。"));
   }
 }
 
@@ -212,6 +216,7 @@ function masterPasswordReady(password: string, confirm: string): boolean {
 }
 
 export default function VaultPanel() {
+  const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>("loading");
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [entries, setEntries] = useState<VaultEntry[]>([]);
@@ -345,7 +350,7 @@ export default function VaultPanel() {
     setEditor(null);
     setChangeOpen(false);
     setPhase((current) => (current === "unlocked" ? "locked" : current));
-    setNotice("密码库已锁定。");
+    setNotice(t("密码库已锁定。"));
   }), []);
 
   useEffect(() => {
@@ -368,10 +373,10 @@ export default function VaultPanel() {
     try {
       await navigator.clipboard.writeText(value);
     } catch {
-      setNotice("浏览器不允许写入剪贴板，请手动复制。");
+      setNotice(t("浏览器不允许写入剪贴板，请手动复制。"));
       return;
     }
-    setNotice(`已复制${label}，${CLIPBOARD_CLEAR_MS / 1000} 秒后清空剪贴板。`);
+    setNotice(t("已复制{label}，{value} 秒后清空剪贴板。", { label, value: CLIPBOARD_CLEAR_MS / 1000 }));
     if (clipboardTimer.current !== null) window.clearTimeout(clipboardTimer.current);
     clipboardTimer.current = window.setTimeout(() => {
       clipboardTimer.current = null;
@@ -405,12 +410,12 @@ export default function VaultPanel() {
       setGrantHours(access.hours);
       if (!access.granted) {
         setPhase("step_up");
-        setNotice("密码库已创建。打开条目前需要验证邮箱验证码或动态码。");
+        setNotice(t("密码库已创建。打开条目前需要验证邮箱验证码或动态码。"));
         return;
       }
       setPhase("unlocked");
       await loadSecurity();
-      setNotice("密码库已创建。主密码不会上传，请务必记住它。");
+      setNotice(t("密码库已创建。主密码不会上传，请务必记住它。"));
     } catch (error) {
       if (!applyGate(error)) setFormError(describe(error));
     } finally {
@@ -437,7 +442,7 @@ export default function VaultPanel() {
       await loadEntries(key);
       setPhase("unlocked");
       await loadSecurity();
-      setNotice(`已解锁，${VAULT_AUTO_LOCK_MS / 60_000} 分钟无操作会自动锁定。`);
+      setNotice(t("已解锁，{value} 分钟无操作会自动锁定。", { value: VAULT_AUTO_LOCK_MS / 60_000 }));
     } catch (error) {
       if (error instanceof WrongMasterPasswordError) {
         void reportVaultUnlockFailure().catch(() => undefined);
@@ -468,7 +473,7 @@ export default function VaultPanel() {
     try {
       await verifyVaultAccess(stepMethod, stepCode.trim());
       setStepCode("");
-      setNotice("验证通过。");
+      setNotice(t("验证通过。"));
       await refreshStatus();
     } catch (error) {
       if (!applyGate(error)) setFormError(describe(error));
@@ -485,7 +490,7 @@ export default function VaultPanel() {
       const saved = await updateVaultSecurity(entries);
       setSecurity(saved);
       setAllowlistText(saved.user_allowlist.join("\n"));
-      setNotice("已保存追加的 IP 白名单。环境变量里的地址不能在这里删除。");
+      setNotice(t("已保存追加的 IP 白名单。环境变量里的地址不能在这里删除。"));
     } catch (error) {
       if (!applyGate(error)) setFormError(describe(error));
     } finally {
@@ -501,7 +506,7 @@ export default function VaultPanel() {
       setTotpQrDataUrl("");
       setTotpDraft(await setupVaultTotp());
       setTotpCode("");
-      setNotice("已生成新的身份验证器密钥。确认之前，原来的动态码继续有效。");
+      setNotice(t("已生成新的身份验证器密钥。确认之前，原来的动态码继续有效。"));
     } catch (error) {
       if (!applyGate(error)) setFormError(describe(error));
     } finally {
@@ -531,7 +536,7 @@ export default function VaultPanel() {
       setTotpQrDataUrl(dataUrl);
       setTotpQrVisible(true);
     } catch {
-      setFormError("二维码生成失败，请手动输入密钥。");
+      setFormError(t("二维码生成失败，请手动输入密钥。"));
     }
   };
 
@@ -545,7 +550,7 @@ export default function VaultPanel() {
       clearTotpDraft();
       setTotpAvailable(true);
       if (security) setSecurity({ ...security, totp_enabled: true });
-      setNotice("身份验证器已绑定。之后可以用动态码代替邮箱验证码。");
+      setNotice(t("身份验证器已绑定。之后可以用动态码代替邮箱验证码。"));
     } catch (error) {
       if (!applyGate(error)) setFormError(describe(error));
     } finally {
@@ -554,7 +559,7 @@ export default function VaultPanel() {
   };
 
   const handleReset = async () => {
-    if (resetPhrase !== RESET_PHRASE) return;
+    if (resetPhrase !== resetConfirmPhrase()) return;
     setBusy(true);
     try {
       await resetVault();
@@ -562,7 +567,7 @@ export default function VaultPanel() {
       saveVaultReminderCount(0);
       setResetOpen(false);
       setResetPhrase("");
-      setNotice("密码库已清空，可以重新设置主密码。");
+      setNotice(t("密码库已清空，可以重新设置主密码。"));
       await refreshStatus();
     } catch (error) {
       setFormError(describe(error));
@@ -584,7 +589,7 @@ export default function VaultPanel() {
       setStatus(updated);
       startVaultSession(key);
       setChangeOpen(false);
-      setNotice("主密码已更改，其他设备下次解锁时使用新主密码。");
+      setNotice(t("主密码已更改，其他设备下次解锁时使用新主密码。"));
     } catch (error) {
       if (error instanceof WrongMasterPasswordError) {
         void reportVaultUnlockFailure().catch(() => undefined);
@@ -592,7 +597,7 @@ export default function VaultPanel() {
       if (applyGate(error)) return;
       setFormError(
         error instanceof ApiError && error.status === 409
-          ? "主密码刚在其他地方改过，请刷新后重试。"
+          ? t("主密码刚在其他地方改过，请刷新后重试。")
           : describe(error),
       );
     } finally {
@@ -619,14 +624,14 @@ export default function VaultPanel() {
       const saved = await decryptVaultItem(key, record);
       setEntries((current) => [saved, ...current.filter((entry) => entry.id !== saved.id)]);
       setEditor(null);
-      setNotice(`已加密保存「${saved.data.title}」。`);
+      setNotice(t("已加密保存「{title}」。", { title: saved.data.title }));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409 && error.current) {
         // 别处改过：载入最新内容，让用户在新版本上重新修改。
         const latest = await decryptVaultItem(key, error.current as unknown as VaultItemRecord);
         setEntries((current) => current.map((entry) => (entry.id === latest.id ? latest : entry)));
         setEditor({ entry: latest, data: latest.data });
-        setDialogError("这一条刚在别处修改过，已载入最新内容，请重新修改后保存。");
+        setDialogError(t("这一条刚在别处修改过，已载入最新内容，请重新修改后保存。"));
       } else {
         setDialogError(describe(error));
       }
@@ -640,19 +645,19 @@ export default function VaultPanel() {
     if (!entry) return;
     const references = entry.data.kind === "secret" ? serversReferencingKey(entry.id, entries) : [];
     const referenceWarning = references.length > 0
-      ? `\n有 ${references.length} 台云服务器引用了这把密钥（${references.slice(0, 3).map((item) => item.data.title).join("、")}${references.length > 3 ? "…" : ""}），删除后它们将无法取到私钥。`
+      ? t("\n有 {length} 台云服务器引用了这把密钥（{value}{value2}），删除后它们将无法取到私钥。", { length: references.length, value: references.slice(0, 3).map((item) => item.data.title).join(t("、")), value2: references.length > 3 ? "…" : "" })
       : "";
-    if (!window.confirm(`永久删除「${entry.data.title}」？删除后无法恢复。${referenceWarning}`)) return;
+    if (!window.confirm(t("永久删除「{title}」？删除后无法恢复。{referenceWarning}", { title: entry.data.title, referenceWarning }))) return;
     setBusy(true);
     try {
       await deleteVaultItem(entry.id, entry.version);
       setEntries((current) => current.filter((item) => item.id !== entry.id));
       setEditor(null);
-      setNotice(`已删除「${entry.data.title}」。`);
+      setNotice(t("已删除「{title}」。", { title: entry.data.title }));
     } catch (error) {
       setDialogError(
         error instanceof ApiError && error.status === 409
-          ? "这一条刚在别处修改过，请关闭后刷新再删除。"
+          ? t("这一条刚在别处修改过，请关闭后刷新再删除。")
           : describe(error),
       );
     } finally {
@@ -678,7 +683,7 @@ export default function VaultPanel() {
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      setNotice(`已导出加密备份（${records.length} 条）。恢复时需要输入现在的主密码，请妥善保管。`);
+      setNotice(t("已导出加密备份（{length} 条）。恢复时需要输入现在的主密码，请妥善保管。", { length: records.length }));
     } catch (error) {
       setNotice(describe(error));
     } finally {
@@ -694,7 +699,7 @@ export default function VaultPanel() {
       setImportProgress("");
       setImportState({ backup, fileName: file.name });
     } catch (error) {
-      setNotice(`无法读取「${file.name}」：${describe(error)}`);
+      setNotice(t("无法读取「{name}」：{value}", { name: file.name, value: describe(error) }));
     }
   };
 
@@ -705,13 +710,13 @@ export default function VaultPanel() {
     setBusy(true);
     setImportError("");
     try {
-      setImportProgress("正在解密备份…");
+      setImportProgress(t("正在解密备份…"));
       const { items, failed } = await openVaultBackup(importPassword, importState.backup);
       setImportPassword("");
       const { items: fresh, skipped } = planVaultImport(items, entries, () => crypto.randomUUID());
       const saved: VaultEntry[] = [];
       for (const [index, item] of fresh.entries()) {
-        setImportProgress(`正在加密写入 ${index + 1} / ${fresh.length}…`);
+        setImportProgress(t("正在加密写入 {value} / {length}…", { value: index + 1, length: fresh.length }));
         // 用新 ID 和当前库密钥重新加密，备份来自旧密码库或其他账号也不会冲突。
         const { id, data } = item;
         const record = await createVaultItem(id, await encryptVaultItem(key, id, data));
@@ -720,14 +725,14 @@ export default function VaultPanel() {
       setEntries((current) => [...saved, ...current]);
       setImportState(null);
       setNotice([
-        `已导入 ${saved.length} 条`,
-        skipped > 0 ? `跳过 ${skipped} 条重复` : "",
-        failed > 0 ? `${failed} 条无法解密` : "",
-      ].filter(Boolean).join("，") + "。");
+        t("已导入 {length} 条", { length: saved.length }),
+        skipped > 0 ? t("跳过 {skipped} 条重复", { skipped }) : "",
+        failed > 0 ? t("{failed} 条无法解密", { failed }) : "",
+      ].filter(Boolean).join(t("，")) + t("。"));
     } catch (error) {
       setImportError(
         error instanceof WrongMasterPasswordError
-          ? "主密码不正确。请输入导出这份备份时使用的主密码。"
+          ? t("主密码不正确。请输入导出这份备份时使用的主密码。")
           : describe(error),
       );
       // 中途失败时已写入的条目保留，重新读取一遍列表。
@@ -785,23 +790,23 @@ export default function VaultPanel() {
     <section className="vault-panel" aria-labelledby="vault-title">
       <div className="page-heading">
         <div>
-          <h1 id="vault-title">密码库</h1>
-          <p className="page-subtitle">端到端加密 · 服务器只保存密文</p>
+          <h1 id="vault-title">{t("密码库")}</h1>
+          <p className="page-subtitle">{t("端到端加密 · 服务器只保存密文")}</p>
         </div>
         {phase === "unlocked" && (
           <span className="vault-heading-actions">
             <button type="button" disabled={busy} onClick={() => void handleExportBackup()}>
-              导出备份
+              {t("导出备份")}
             </button>
             <button type="button" disabled={busy} onClick={() => backupInputRef.current?.click()}>
-              导入备份
+              {t("导入备份")}
             </button>
             <input
               ref={backupInputRef}
               type="file"
               accept=".json,application/json"
               hidden
-              aria-label="选择密码库备份文件"
+              aria-label={t("选择密码库备份文件")}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = "";
@@ -809,9 +814,9 @@ export default function VaultPanel() {
               }}
             />
             <button type="button" onClick={() => { clearSecrets(); setFormError(""); setChangeOpen(true); }}>
-              更改主密码
+              {t("更改主密码")}
             </button>
-            <button type="button" onClick={() => lockVaultSession()}>锁定</button>
+            <button type="button" onClick={() => lockVaultSession()}>{t("锁定")}</button>
           </span>
         )}
       </div>
@@ -819,51 +824,49 @@ export default function VaultPanel() {
       {notice && (
         <div className="status-message" role="status">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice("")} aria-label="关闭提示"><Icon name="close" size={16} /></button>
+          <button type="button" onClick={() => setNotice("")} aria-label={t("关闭提示")}><Icon name="close" size={16} /></button>
         </div>
       )}
 
-      {phase === "loading" && <div className="state-panel">正在读取密码库……</div>}
+      {phase === "loading" && <div className="state-panel">{t("正在读取密码库……")}</div>}
 
       {phase === "insecure" && (
         <div className="state-panel error-state">
           <p>
-            当前地址不是 HTTPS，浏览器不提供加密功能，密码库无法使用。
-            请通过 https:// 或本机的 localhost 打开 MemoIsle。
+            {t("当前地址不是 HTTPS，浏览器不提供加密功能，密码库无法使用。 请通过 https:// 或本机的 localhost 打开 MemoIsle。")}
           </p>
         </div>
       )}
 
       {phase === "error" && (
         <div className="state-panel error-state">
-          <p>{formError || "暂时无法读取密码库。"}</p>
-          <button type="button" onClick={() => void refreshStatus()}>重试</button>
+          <p>{formError || t("暂时无法读取密码库。")}</p>
+          <button type="button" onClick={() => void refreshStatus()}>{t("重试")}</button>
         </div>
       )}
 
       {phase === "ip_blocked" && (
         <div className="state-panel error-state">
-          <p>{formError || "当前网络不在密码库白名单中。"}</p>
-          <button type="button" onClick={() => void refreshStatus()}>重试</button>
+          <p>{formError || t("当前网络不在密码库白名单中。")}</p>
+          <button type="button" onClick={() => void refreshStatus()}>{t("重试")}</button>
         </div>
       )}
 
       {phase === "step_up" && (
         <form className="vault-card vault-gate" onSubmit={(event) => void handleVerifyAccess(event)}>
-          <h2>验证后才能打开密码库</h2>
+          <h2>{t("验证后才能打开密码库")}</h2>
           <p>
-            这个浏览器需要每 {grantHours} 小时验证一次。验证码发到账号邮箱，也可以使用已绑定的身份验证器。
-            换浏览器、退出登录或授权过期需要重新验证。
+            {t("这个浏览器需要每 {grantHours} 小时验证一次。验证码发到账号邮箱，也可以使用已绑定的身份验证器。 换浏览器、退出登录或授权过期需要重新验证。", { grantHours })}
           </p>
           {totpAvailable && (
-            <div className="vault-field-tools" role="group" aria-label="验证方式">
+            <div className="vault-field-tools" role="group" aria-label={t("验证方式")}>
               <button
                 type="button"
                 className={stepMethod === "email" ? "active" : ""}
                 aria-pressed={stepMethod === "email"}
                 onClick={() => setStepMethod("email")}
               >
-                邮箱验证码
+                {t("邮箱验证码")}
               </button>
               <button
                 type="button"
@@ -871,18 +874,18 @@ export default function VaultPanel() {
                 aria-pressed={stepMethod === "totp"}
                 onClick={() => setStepMethod("totp")}
               >
-                身份验证器
+                {t("身份验证器")}
               </button>
             </div>
           )}
           {stepMethod === "email" && (
             <button type="button" disabled={busy} onClick={() => void handleRequestCode()}>
-              {busy ? "发送中…" : "发送验证码"}
+              {busy ? t("发送中…") : t("发送验证码")}
             </button>
           )}
           <label className="vault-field">
             <span className="vault-field-label">
-              <span>{stepMethod === "totp" ? "动态码" : "验证码"}</span>
+              <span>{stepMethod === "totp" ? t("动态码") : t("验证码")}</span>
             </span>
             <input
               value={stepCode}
@@ -895,17 +898,16 @@ export default function VaultPanel() {
           </label>
           {formError && <p className="vault-error" role="alert">{formError}</p>}
           <button type="submit" className="primary" disabled={busy || stepCode.trim().length < 6}>
-            {busy ? "验证中…" : "验证"}
+            {busy ? t("验证中…") : t("验证")}
           </button>
         </form>
       )}
 
       {phase === "setup" && (
         <form className="vault-card vault-gate" onSubmit={(event) => void handleSetup(event)}>
-          <h2>设置主密码</h2>
+          <h2>{t("设置主密码")}</h2>
           <p>
-            主密码只在这台浏览器里用来加密，不会上传。MemoIsle 服务器只保存加密后的内容，
-            即使数据库泄露也读不出来。
+            {t("主密码只在这台浏览器里用来加密，不会上传。MemoIsle 服务器只保存加密后的内容， 即使数据库泄露也读不出来。")}
           </p>
           <MasterPasswordFields
             password={password}
@@ -920,7 +922,7 @@ export default function VaultPanel() {
               checked={acknowledged}
               onChange={(event) => setAcknowledged(event.target.checked)}
             />
-            我知道忘记主密码后，任何人都无法找回密码库里的内容。
+            {t("我知道忘记主密码后，任何人都无法找回密码库里的内容。")}
           </label>
           {formError && <p className="vault-error" role="alert">{formError}</p>}
           <button
@@ -928,7 +930,7 @@ export default function VaultPanel() {
             className="primary"
             disabled={busy || !acknowledged || !masterPasswordReady(password, confirm)}
           >
-            {busy ? "正在生成密钥…" : "创建密码库"}
+            {busy ? t("正在生成密钥…") : t("创建密码库")}
           </button>
         </form>
       )}
@@ -936,13 +938,12 @@ export default function VaultPanel() {
       {phase === "locked" && (
         <div className="vault-card vault-gate">
           <form onSubmit={(event) => void handleUnlock(event)}>
-            <h2>密码库已锁定</h2>
+            <h2>{t("密码库已锁定")}</h2>
             <p>
-              输入主密码解锁{status?.item_count ? `，共 ${status.item_count} 条` : ""}。
-              解锁在本机浏览器里完成，主密码不会发送到服务器。
+              {t("输入主密码解锁")}{status?.item_count ? t("，共 {item_count} 条", { item_count: status.item_count }) : ""}{t("。 解锁在本机浏览器里完成，主密码不会发送到服务器。")}
             </p>
             <label className="vault-field">
-              <span className="vault-field-label"><span>主密码</span></span>
+              <span className="vault-field-label"><span>{t("主密码")}</span></span>
               <input
                 type="password"
                 value={password}
@@ -954,7 +955,7 @@ export default function VaultPanel() {
             </label>
             {formError && <p className="vault-error" role="alert">{formError}</p>}
             <button type="submit" className="primary" disabled={busy || !password}>
-              {busy ? "解锁中…" : "解锁"}
+              {busy ? t("解锁中…") : t("解锁")}
             </button>
           </form>
           <details
@@ -962,22 +963,22 @@ export default function VaultPanel() {
             open={resetOpen}
             onToggle={(event) => setResetOpen((event.target as HTMLDetailsElement).open)}
           >
-            <summary>忘记主密码？</summary>
+            <summary>{t("忘记主密码？")}</summary>
             <p>
-              主密码无法找回，也无法重置后保留内容。唯一的办法是清空整个密码库，
-              {status?.item_count ? `其中的 ${status.item_count} 条会` : "所有内容会"}永久删除，然后重新设置主密码。
+              {t("主密码无法找回，也无法重置后保留内容。唯一的办法是清空整个密码库，")}
+              {status?.item_count ? t("其中的 {item_count} 条会", { item_count: status.item_count }) : t("所有内容会")}{t("永久删除，然后重新设置主密码。")}
             </p>
             <label className="vault-field">
-              <span className="vault-field-label"><span>输入「{RESET_PHRASE}」确认</span></span>
+              <span className="vault-field-label"><span>{t("输入「{RESET_PHRASE}」确认", { RESET_PHRASE: resetConfirmPhrase() })}</span></span>
               <input value={resetPhrase} onChange={(event) => setResetPhrase(event.target.value)} />
             </label>
             <button
               type="button"
               className="danger-button"
-              disabled={busy || resetPhrase !== RESET_PHRASE}
+              disabled={busy || resetPhrase !== resetConfirmPhrase()}
               onClick={() => void handleReset()}
             >
-              永久清空密码库
+              {t("永久清空密码库")}
             </button>
           </details>
         </div>
@@ -989,37 +990,36 @@ export default function VaultPanel() {
             <div className="resource-search vault-search">
               <Icon name="search" size={18} />
               <input
-                aria-label="搜索密码库"
+                aria-label={t("搜索密码库")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="按名称、账号、服务商、套餐、网址或备注搜索"
+                placeholder={t("按名称、账号、服务商、套餐、网址或备注搜索")}
                 autoComplete="off"
               />
             </div>
-            <div className="vault-new-actions" aria-label="新建">
+            <div className="vault-new-actions" aria-label={t("新建")}>
               {(["login", "secret", "server", "recovery", "subscription"] as VaultKind[]).map((kind) => (
                 <button key={kind} type="button" onClick={() => openNew(kind)}>
-                  ＋ {vaultKindLabels[kind]}
+                  {t("＋ {value}", { value: vaultKindLabels[kind] })}
                 </button>
               ))}
             </div>
           </div>
           <details className="vault-card vault-security">
-            <summary>安全设置</summary>
+            <summary>{t("安全设置")}</summary>
             <p>
-              网页端每 {security?.web_grant_hours ?? grantHours} 小时重新验证，配置白名单后才限制 IP，留空不限制。
-              手机端每 {security?.mobile_grant_hours ?? 24} 小时验证一次，不限制 IP。
+              {t("网页端每 {webHours} 小时重新验证，配置白名单后才限制 IP，留空不限制。手机端每 {mobileHours} 小时验证一次，不限制 IP。", { webHours: security?.web_grant_hours ?? grantHours, mobileHours: security?.mobile_grant_hours ?? 24 })}
             </p>
-            <h3>身份验证器</h3>
-            <p>{security?.totp_enabled ? "已绑定。可以用动态码代替邮箱验证码。" : "还没有绑定。绑定后可以用动态码打开密码库。"}</p>
+            <h3>{t("身份验证器")}</h3>
+            <p>{security?.totp_enabled ? t("已绑定。可以用动态码代替邮箱验证码。") : t("还没有绑定。绑定后可以用动态码打开密码库。")}</p>
             <button type="button" disabled={busy} onClick={() => void handleSetupTotp()}>
-              {security?.totp_enabled ? "重新生成密钥" : "生成密钥"}
+              {security?.totp_enabled ? t("重新生成密钥") : t("生成密钥")}
             </button>
             {totpDraft && (
               <form onSubmit={(event) => void handleConfirmTotp(event)}>
-                <p>用身份验证器扫描二维码，或手动输入密钥，再输入当前动态码确认。确认之前，原来的动态码继续有效。</p>
+                <p>{t("用身份验证器扫描二维码，或手动输入密钥，再输入当前动态码确认。确认之前，原来的动态码继续有效。")}</p>
                 <button type="button" aria-expanded={totpQrVisible} onClick={() => void toggleTotpQr()}>
-                  {totpQrVisible ? "隐藏二维码" : "显示二维码"}
+                  {totpQrVisible ? t("隐藏二维码") : t("显示二维码")}
                 </button>
                 {totpQrVisible && totpQrDataUrl && (
                   <img
@@ -1027,19 +1027,19 @@ export default function VaultPanel() {
                     src={totpQrDataUrl}
                     width={220}
                     height={220}
-                    alt="身份验证器绑定二维码，用身份验证器 App 扫描"
+                    alt={t("身份验证器绑定二维码，用身份验证器 App 扫描")}
                   />
                 )}
                 <div className="vault-totp-secret">
                   <p className="vault-secret-text">{formatTotpSecret(totpDraft.secret)}</p>
-                  <button type="button" onClick={() => void copyValue(totpDraft.secret, "密钥")}>复制密钥</button>
+                  <button type="button" onClick={() => void copyValue(totpDraft.secret, t("密钥"))}>{t("复制密钥")}</button>
                 </div>
                 <details>
-                  <summary>无法扫码？查看链接</summary>
+                  <summary>{t("无法扫码？查看链接")}</summary>
                   <p className="vault-secret-text">{totpDraft.otpauth_uri}</p>
                 </details>
                 <label className="vault-field">
-                  <span className="vault-field-label"><span>动态码</span></span>
+                  <span className="vault-field-label"><span>{t("动态码")}</span></span>
                   <input
                     value={totpCode}
                     onChange={(event) => setTotpCode(event.target.value)}
@@ -1049,24 +1049,24 @@ export default function VaultPanel() {
                   />
                 </label>
                 <button type="submit" className="primary" disabled={busy || totpCode.trim().length < 6}>
-                  确认绑定
+                  {t("确认绑定")}
                 </button>
                 <button type="button" disabled={busy} onClick={clearTotpDraft}>
-                  取消
+                  {t("取消")}
                 </button>
               </form>
             )}
-            <h3>网页 IP 白名单</h3>
-            <p>环境变量里的地址只读，设置页只能再追加。留空表示不限制。</p>
+            <h3>{t("网页 IP 白名单")}</h3>
+            <p>{t("环境变量里的地址只读，设置页只能再追加。留空表示不限制。")}</p>
             <ul className="vault-readonly-list">
               {(security?.env_allowlist.length ?? 0) === 0
-                ? <li>环境变量里还没有地址</li>
+                ? <li>{t("环境变量里还没有地址")}</li>
                 : (security?.env_allowlist ?? []).map((entry) => (
-                  <li key={entry}>{entry}（环境变量，不可删除）</li>
+                  <li key={entry}>{t("{entry}（环境变量，不可删除）", { entry })}</li>
                 ))}
             </ul>
             <label className="vault-field">
-              <span className="vault-field-label"><span>追加的地址，每行一条 CIDR</span></span>
+              <span className="vault-field-label"><span>{t("追加的地址，每行一条 CIDR")}</span></span>
               <textarea
                 value={allowlistText}
                 onChange={(event) => setAllowlistText(event.target.value)}
@@ -1076,11 +1076,11 @@ export default function VaultPanel() {
               />
             </label>
             <button type="button" disabled={busy} onClick={() => void handleSaveAllowlist()}>
-              保存追加的白名单
+              {t("保存追加的白名单")}
             </button>
             {formError && phase === "unlocked" && <p className="vault-error" role="alert">{formError}</p>}
           </details>
-          <div className="category-filter vault-kind-filter" role="group" aria-label="按类型筛选">
+          <div className="category-filter vault-kind-filter" role="group" aria-label={t("按类型筛选")}>
             {(["all", "login", "secret", "server", "recovery", "subscription", "reminders"] as KindFilter[])
               // 「需处理」没有提醒时不显示，正在看这一栏时保留，避免按钮突然消失。
               .filter((kind) => kind !== "reminders" || counts.reminders > 0 || kindFilter === "reminders")
@@ -1092,15 +1092,15 @@ export default function VaultPanel() {
                   aria-pressed={kindFilter === kind}
                   onClick={() => setKindFilter(kind)}
                 >
-                  {kind === "all" ? "全部" : kind === "reminders" ? "需处理" : vaultKindLabels[kind]} {counts[kind]}
+                  {kind === "all" ? t("全部") : kind === "reminders" ? t("需处理") : vaultKindLabels[kind]} {counts[kind]}
                 </button>
               ))}
           </div>
           {reminders.length > 0 && kindFilter !== "reminders" && !query.trim() && (
             <section className="vault-reminders" aria-labelledby="vault-reminders-title">
               <div className="vault-reminders-header">
-                <h2 id="vault-reminders-title">密码提醒</h2>
-                <small>{remindersByEntry.size} 条需要处理</small>
+                <h2 id="vault-reminders-title">{t("密码提醒")}</h2>
+                <small>{t("{size} 条需要处理", { size: remindersByEntry.size })}</small>
               </div>
               <ul>
                 {reminders.slice(0, REMINDER_PREVIEW_LIMIT).map((reminder) => {
@@ -1124,25 +1124,25 @@ export default function VaultPanel() {
               </ul>
               {reminders.length > REMINDER_PREVIEW_LIMIT && (
                 <button type="button" className="vault-reminders-more" onClick={() => setKindFilter("reminders")}>
-                  查看全部 {reminders.length} 项提醒
+                  {t("查看全部 {length} 项提醒", { length: reminders.length })}
                 </button>
               )}
             </section>
           )}
           {brokenCount > 0 && (
             <p className="vault-error" role="alert">
-              有 {brokenCount} 条无法解密，可能已损坏或被篡改，已跳过显示。
+              {t("有 {brokenCount} 条无法解密，可能已损坏或被篡改，已跳过显示。", { brokenCount })}
             </p>
           )}
           {entries.length === 0 && (
             <div className="state-panel empty-state">
-              <h3>密码库还是空的</h3>
-              <p>可以保存网站账号密码、AI 订阅、API Key 或 SSH 私钥，以及两步验证的恢复码。已有加密备份可以点右上角「导入备份」恢复。</p>
+              <h3>{t("密码库还是空的")}</h3>
+              <p>{t("可以保存网站账号密码、AI 订阅、API Key 或 SSH 私钥，以及两步验证的恢复码。已有加密备份可以点右上角「导入备份」恢复。")}</p>
             </div>
           )}
           {entries.length > 0 && visibleEntries.length === 0 && (
             <div className="state-panel">
-              {kindFilter === "reminders" && !query.trim() ? "提醒都处理完了。" : "没有匹配的条目。"}
+              {kindFilter === "reminders" && !query.trim() ? t("提醒都处理完了。") : t("没有匹配的条目。")}
             </div>
           )}
           <ul className="vault-list">
@@ -1180,42 +1180,42 @@ export default function VaultPanel() {
                   <span className="vault-row-actions">
                     {data.kind === "subscription" && (
                       <>
-                        <button type="button" disabled={!data.account} onClick={() => void copyValue(data.account, "账号")}>复制账号</button>
+                        <button type="button" disabled={!data.account} onClick={() => void copyValue(data.account, t("账号"))}>{t("复制账号")}</button>
                       </>
                     )}
                     {data.kind === "login" && (
                       <>
-                        <button type="button" disabled={!data.username} onClick={() => void copyValue(data.username, "用户名")}>复制用户名</button>
-                        <button type="button" disabled={!data.password} onClick={() => void copyValue(data.password, "密码")}>复制密码</button>
+                        <button type="button" disabled={!data.username} onClick={() => void copyValue(data.username, t("用户名"))}>{t("复制用户名")}</button>
+                        <button type="button" disabled={!data.password} onClick={() => void copyValue(data.password, t("密码"))}>{t("复制密码")}</button>
                       </>
                     )}
                     {data.kind === "secret" && (
-                      <button type="button" disabled={!data.secret} onClick={() => void copyValue(data.secret, "密钥")}>复制密钥</button>
+                      <button type="button" disabled={!data.secret} onClick={() => void copyValue(data.secret, t("密钥"))}>{t("复制密钥")}</button>
                     )}
                     {data.kind === "server" && (
                       <>
-                        <button type="button" disabled={!data.host} onClick={() => void copyValue(data.host, "主机")}>复制主机</button>
+                        <button type="button" disabled={!data.host} onClick={() => void copyValue(data.host, t("主机"))}>{t("复制主机")}</button>
                         <button
                           type="button"
                           disabled={!serverCredential}
                           onClick={() => void copyValue(
                             serverCredential,
-                            data.authMethod === "key" ? "私钥" : "密码",
+                            data.authMethod === "key" ? t("私钥") : t("密码"),
                           )}
                         >
-                          {data.authMethod === "key" ? "复制私钥" : "复制密码"}
+                          {data.authMethod === "key" ? t("复制私钥") : t("复制密码")}
                         </button>
                         <button
                           type="button"
                           disabled={!data.host}
-                          title="复制可直接粘贴到终端的 ssh 命令"
+                          title={t("复制可直接粘贴到终端的 ssh 命令")}
                           onClick={() => void copyValue(
                             `ssh${data.port && data.port !== "22" ? ` -p ${data.port}` : ""} ${
                               data.username ? `${data.username}@` : ""}${data.host}`,
-                            "ssh 命令",
+                            t("ssh 命令"),
                           )}
                         >
-                          复制 ssh
+                          {t("复制 ssh")}
                         </button>
                       </>
                     )}
@@ -1223,10 +1223,10 @@ export default function VaultPanel() {
                       <button
                         type="button"
                         disabled={!nextCode}
-                        title="复制第一个还没用过的恢复码；用完后记得在详情里标记已用"
-                        onClick={() => nextCode && void copyValue(nextCode.code, "恢复码")}
+                        title={t("复制第一个还没用过的恢复码；用完后记得在详情里标记已用")}
+                        onClick={() => nextCode && void copyValue(nextCode.code, t("恢复码"))}
                       >
-                        {nextCode ? "复制未用的恢复码" : "恢复码已用完"}
+                        {nextCode ? t("复制未用的恢复码") : t("恢复码已用完")}
                       </button>
                     )}
                   </span>
@@ -1264,17 +1264,15 @@ export default function VaultPanel() {
             onSubmit={(event) => void handleImportBackup(event)}
           >
             <div className="dialog-header">
-              <h2 id="vault-import-title">导入加密备份</h2>
-              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setImportState(null)}><Icon name="close" size={16} /></button>
+              <h2 id="vault-import-title">{t("导入加密备份")}</h2>
+              <button type="button" className="icon-button" aria-label={t("关闭")} disabled={busy} onClick={() => setImportState(null)}><Icon name="close" size={16} /></button>
             </div>
             <div className="dialog-body vault-form">
               <p className="vault-import-summary">
-                「{importState.fileName}」：{importState.backup.items.length} 条，
-                导出于 {new Date(importState.backup.exported_at).toLocaleString("zh-CN")}。
-                导入的条目会用当前密码库的密钥重新加密，和已有内容完全相同的条目会跳过。
+                {t("「{fileName}」：{length} 条， 导出于 {value}。 导入的条目会用当前密码库的密钥重新加密，和已有内容完全相同的条目会跳过。", { fileName: importState.fileName, length: importState.backup.items.length, value: new Date(importState.backup.exported_at).toLocaleString(currentLocale()) })}
               </p>
               <label className="vault-field">
-                <span className="vault-field-label"><span>导出这份备份时的主密码</span></span>
+                <span className="vault-field-label"><span>{t("导出这份备份时的主密码")}</span></span>
                 <input
                   type="password"
                   value={importPassword}
@@ -1287,9 +1285,9 @@ export default function VaultPanel() {
               {importProgress && <p className="vault-hint" role="status">{importProgress}</p>}
             </div>
             <div className="dialog-actions">
-              <button type="button" onClick={() => setImportState(null)} disabled={busy}>取消</button>
+              <button type="button" onClick={() => setImportState(null)} disabled={busy}>{t("取消")}</button>
               <button type="submit" className="primary" disabled={busy || !importPassword}>
-                {busy ? "导入中…" : "导入"}
+                {busy ? t("导入中…") : t("导入")}
               </button>
             </div>
             {importError && <p className="dialog-error" role="alert">{importError}</p>}
@@ -1307,12 +1305,12 @@ export default function VaultPanel() {
             onSubmit={(event) => void handleChangePassword(event)}
           >
             <div className="dialog-header">
-              <h2 id="vault-change-title">更改主密码</h2>
-              <button type="button" className="icon-button" aria-label="关闭" disabled={busy} onClick={() => setChangeOpen(false)}><Icon name="close" size={16} /></button>
+              <h2 id="vault-change-title">{t("更改主密码")}</h2>
+              <button type="button" className="icon-button" aria-label={t("关闭")} disabled={busy} onClick={() => setChangeOpen(false)}><Icon name="close" size={16} /></button>
             </div>
             <div className="dialog-body vault-form">
               <label className="vault-field">
-                <span className="vault-field-label"><span>当前主密码</span></span>
+                <span className="vault-field-label"><span>{t("当前主密码")}</span></span>
                 <input
                   type="password"
                   value={currentPassword}
@@ -1330,13 +1328,13 @@ export default function VaultPanel() {
               />
             </div>
             <div className="dialog-actions">
-              <button type="button" onClick={() => setChangeOpen(false)} disabled={busy}>取消</button>
+              <button type="button" onClick={() => setChangeOpen(false)} disabled={busy}>{t("取消")}</button>
               <button
                 type="submit"
                 className="primary"
                 disabled={busy || !currentPassword || !masterPasswordReady(password, confirm)}
               >
-                {busy ? "重新加密中…" : "更改主密码"}
+                {busy ? t("重新加密中…") : t("更改主密码")}
               </button>
             </div>
             {formError && <p className="dialog-error" role="alert">{formError}</p>}

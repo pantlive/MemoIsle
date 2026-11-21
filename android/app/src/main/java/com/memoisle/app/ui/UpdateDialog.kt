@@ -15,9 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.memoisle.app.R
 import com.memoisle.app.UpdatePhase
 import com.memoisle.app.UpdateUiState
 import com.memoisle.app.data.formatRelayBytes
@@ -42,11 +44,11 @@ fun UpdateDialog(
         onDismissRequest = { if (!downloading) onLater() },
         properties = DialogProperties(dismissOnClickOutside = !downloading),
         containerColor = SurfaceWhite,
-        title = { Text("发现新版本 ${release.versionName}", fontWeight = FontWeight.SemiBold) },
+        title = { Text(stringResource(R.string.update_dialog_title, release.versionName), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "当前版本 $currentVersionName · 安装包 ${formatRelayBytes(release.size)}",
+                    stringResource(R.string.update_dialog_current, currentVersionName, formatRelayBytes(release.size)),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted,
                 )
@@ -73,18 +75,18 @@ fun UpdateDialog(
                             )
                         }
                         Text(
-                            if (progress == null) "下载中…" else "下载中 ${(progress * 100).toInt()}%",
+                            if (progress == null) stringResource(R.string.update_downloading) else stringResource(R.string.update_downloading_progress, (progress * 100).toInt()),
                             style = MaterialTheme.typography.bodySmall,
                             color = TextMuted,
                         )
                     }
                     UpdatePhase.DOWNLOADED -> Text(
-                        "已下载并校验通过。点「安装」后在系统界面确认；首次安装需允许 MemoIsle 安装未知应用。",
+                        stringResource(R.string.update_downloaded_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted,
                     )
                     UpdatePhase.FAILED -> Text(
-                        state.message ?: "更新失败，请稍后重试",
+                        state.message?.asString() ?: stringResource(R.string.update_failed),
                         style = MaterialTheme.typography.bodySmall,
                         color = DangerRed,
                     )
@@ -94,19 +96,19 @@ fun UpdateDialog(
         },
         confirmButton = {
             when (state.phase) {
-                UpdatePhase.DOWNLOADED -> Button(onClick = onInstall) { Text("安装") }
-                UpdatePhase.FAILED -> Button(onClick = onUpdate) { Text("重试") }
+                UpdatePhase.DOWNLOADED -> Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
+                UpdatePhase.FAILED -> Button(onClick = onUpdate) { Text(stringResource(R.string.update_retry)) }
                 else -> Button(onClick = onUpdate, enabled = !downloading) {
-                    Text(if (downloading) "下载中…" else "更新")
+                    Text(if (downloading) stringResource(R.string.update_downloading) else stringResource(R.string.update_update))
                 }
             }
         },
         dismissButton = {
             Row {
                 if (state.phase == UpdatePhase.AVAILABLE) {
-                    TextButton(onClick = onIgnore) { Text("忽略此版本", color = TextMuted) }
+                    TextButton(onClick = onIgnore) { Text(stringResource(R.string.update_ignore_version), color = TextMuted) }
                 }
-                TextButton(onClick = onLater) { Text(if (downloading) "取消" else "稍后") }
+                TextButton(onClick = onLater) { Text(if (downloading) stringResource(R.string.common_cancel) else stringResource(R.string.update_later)) }
             }
         },
     )

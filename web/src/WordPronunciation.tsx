@@ -7,6 +7,7 @@ import {
   speechLocaleAvailable,
   type SpeechLocale,
 } from "./wordSpeech";
+import { useI18n } from "./I18nProvider";
 
 interface WordPronunciationProps {
   lemma: string;
@@ -25,6 +26,7 @@ export default function WordPronunciation({
   usAudioUrl,
   ukAudioUrl,
 }: WordPronunciationProps) {
+  const { t } = useI18n();
   const [usAvailable, setUsAvailable] = useState(false);
   const [ukAvailable, setUkAvailable] = useState(false);
   const [playing, setPlaying] = useState<SpeechLocale | null>(null);
@@ -158,33 +160,33 @@ export default function WordPronunciation({
   };
 
   return (
-    <div className="word-pronunciation" aria-label="单词发音">
+    <div className="word-pronunciation" aria-label={t("单词发音")}>
       {phonetic?.trim() ? (
         <button
           type="button"
           className="word-phonetic-play"
           disabled={!canPlay}
           onClick={() => void speak("en-US", usAvailable, resolvedUsAudio)}
-          title="点击音标播放美式读音"
+          title={t("点击音标播放美式读音")}
         >
-          {playing === "en-US" ? "播放中…" : phonetic.trim()}
+          {playing === "en-US" ? t("播放中…") : phonetic.trim()}
         </button>
       ) : null}
       <button
         type="button"
         disabled={!canPlay}
         onClick={() => void speak("en-US", usAvailable, resolvedUsAudio)}
-        title="美式读音"
+        title={t("美式读音")}
       >
-        {playing === "en-US" && !phonetic?.trim() ? "播放中…" : <><Icon name="play" size={14} />美</>}
+        {playing === "en-US" && !phonetic?.trim() ? t("播放中…") : <><Icon name="play" size={14} />{t("美")}</>}
       </button>
       <button
         type="button"
         disabled={!canPlay}
         onClick={() => void speak("en-GB", ukAvailable, resolvedUkAudio)}
-        title="英式读音"
+        title={t("英式读音")}
       >
-        {playing === "en-GB" ? "播放中…" : <><Icon name="play" size={14} />英</>}
+        {playing === "en-GB" ? t("播放中…") : <><Icon name="play" size={14} />{t("英")}</>}
       </button>
     </div>
   );

@@ -6,6 +6,7 @@ import type {
   ResourceCategoryOption,
   ResourceCategorySuggestion,
 } from "./types";
+import { useI18n } from "./I18nProvider";
 
 interface CategoryGeneratorProps {
   categories: ResourceCategoryOption[];
@@ -32,6 +33,7 @@ export default function CategoryGenerator({
   categories,
   onAdded,
 }: CategoryGeneratorProps): ReactNode {
+  const { t } = useI18n();
   const [instructions, setInstructions] = useState("");
   const [suggestions, setSuggestions] = useState<ResourceCategorySuggestion[]>(readStoredSuggestions);
   const [resultMode, setResultMode] = useState<ResourceCategoryGenerateMode | null>(
@@ -39,7 +41,7 @@ export default function CategoryGenerator({
   );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(
-    readStoredSuggestions().length > 0 ? "上次聚类的标签还在，可继续加入模板或重新确认顶级分类。" : "",
+    readStoredSuggestions().length > 0 ? t("上次聚类的标签还在，可继续加入模板或重新确认顶级分类。") : "",
   );
   const topLevel = useMemo(
     () => categories.filter((item) => item.is_active && !item.parent_code),
@@ -65,18 +67,18 @@ export default function CategoryGenerator({
       if (mode === "top_level") {
         setMessage(
           result.categories.length
-            ? `已补出 ${result.categories.length} 个顶级分类建议。加入模板后，再确认够用并细分。`
-            : "这次没有补出新的顶级分类，可以补充整理要求后重试。",
+            ? t("已补出 {length} 个顶级分类建议。加入模板后，再确认够用并细分。", { length: result.categories.length })
+            : t("这次没有补出新的顶级分类，可以补充整理要求后重试。"),
         );
       } else {
         setMessage(
           result.categories.length
-            ? `已按现有顶级分类细分出 ${result.categories.length} 个细类。加入模板后再重新分类。`
-            : "这次没有生成细类，可以补充整理要求后重试。",
+            ? t("已按现有顶级分类细分出 {length} 个细类。加入模板后再重新分类。", { length: result.categories.length })
+            : t("这次没有生成细类，可以补充整理要求后重试。"),
         );
       }
     } catch (error) {
-      setMessage(error instanceof ApiError ? error.message : "分类建议生成失败，请稍后重试。");
+      setMessage(error instanceof ApiError ? error.message : t("分类建议生成失败，请稍后重试。"));
     } finally {
       setBusy(false);
     }
@@ -98,10 +100,10 @@ export default function CategoryGenerator({
         parent_code: suggestion.parent_code || undefined,
       });
       setSuggestions((current) => current.filter((_item, position) => position !== index));
-      setMessage(`已添加「${created.name}」。加入模板后重新分类，网页上会用这个标签。`);
+      setMessage(t("已添加「{name}」。加入模板后重新分类，网页上会用这个标签。", { name: created.name }));
       await onAdded();
     } catch (error) {
-      setMessage(error instanceof ApiError ? error.message : "添加分类失败，请稍后重试。");
+      setMessage(error instanceof ApiError ? error.message : t("添加分类失败，请稍后重试。"));
     } finally {
       setBusy(false);
     }
@@ -113,14 +115,14 @@ export default function CategoryGenerator({
 
   return (
     <div className="category-generator">
-      <h3>智能生成分类</h3>
+      <h3>{t("智能生成分类")}</h3>
       <p className="category-generator-message">
-        先确认当前顶级分类是否够用。够用后再按这些大类细分；不够就先补顶级分类，加入模板后再细分。
+        {t("先确认当前顶级分类是否够用。够用后再按这些大类细分；不够就先补顶级分类，加入模板后再细分。")}
       </p>
       <form className="category-create-form" onSubmit={handleSubmit}>
-        <h4 className="cluster-confirm-heading">当前顶级分类</h4>
+        <h4 className="cluster-confirm-heading">{t("当前顶级分类")}</h4>
         {topLevel.length > 0 ? (
-          <ul className="cluster-top-level-list" aria-label="当前顶级分类">
+          <ul className="cluster-top-level-list" aria-label={t("当前顶级分类")}>
             {topLevel.map((category) => (
               <li key={category.code}>
                 <strong className="cluster-tag-chip">#{category.path || category.name}</strong>
@@ -128,13 +130,13 @@ export default function CategoryGenerator({
             ))}
           </ul>
         ) : (
-          <p className="category-generator-message">还没有启用的顶级分类。</p>
+          <p className="category-generator-message">{t("还没有启用的顶级分类。")}</p>
         )}
         <textarea
           value={instructions}
           onChange={(event) => setInstructions(event.target.value)}
-          placeholder="可选。例如：细分类偏 AI 编程工具和论文。"
-          aria-label="分类整理要求"
+          placeholder={t("可选。例如：细分类偏 AI 编程工具和论文。")}
+          aria-label={t("分类整理要求")}
           maxLength={2000}
           rows={3}
           disabled={busy}
@@ -146,14 +148,14 @@ export default function CategoryGenerator({
             disabled={busy || topLevel.length === 0}
             onClick={() => void handleGenerate("subcategories")}
           >
-            {busy ? "正在处理……" : "够用，开始细分"}
+            {busy ? t("正在处理……") : t("够用，开始细分")}
           </button>
           <button
             type="button"
             disabled={busy}
             onClick={() => void handleGenerate("top_level")}
           >
-            {busy ? "正在处理……" : "不够，先补顶级分类"}
+            {busy ? t("正在处理……") : t("不够，先补顶级分类")}
           </button>
         </div>
       </form>
@@ -161,44 +163,44 @@ export default function CategoryGenerator({
       {suggestions.length > 0 && (
         <ul
           className="cluster-tag-list"
-          aria-label={resultMode === "top_level" ? "顶级分类建议" : "细类建议"}
+          aria-label={resultMode === "top_level" ? t("顶级分类建议") : t("细类建议")}
         >
           {suggestions.map((suggestion, index) => (
             <li key={`${suggestion.existing_code || suggestion.name}-${index}`} className="cluster-tag-card">
-              <strong className="cluster-tag-chip">#{suggestion.name || "未命名"}</strong>
+              <strong className="cluster-tag-chip">#{suggestion.name || t("未命名")}</strong>
               {suggestion.existing_code ? null : (
                 <input
                   className="cluster-tag-name"
                   value={suggestion.name}
                   onChange={(event) => updateSuggestion(index, { name: event.target.value })}
-                  aria-label={`建议 ${index + 1} 的分类名称`}
+                  aria-label={t("建议 {value} 的分类名称", { value: index + 1 })}
                   maxLength={50}
                   disabled={busy}
                 />
               )}
               {suggestion.description && <p>{suggestion.description}</p>}
               {(suggestion.examples ?? []).length > 0 && (
-                <p className="cluster-tag-examples">例如：{(suggestion.examples ?? []).join("、")}</p>
+                <p className="cluster-tag-examples">{t("例如：")}{(suggestion.examples ?? []).join(t("、"))}</p>
               )}
               {suggestion.existing_code ? (
-                <small>已有模板</small>
+                <small>{t("已有模板")}</small>
               ) : (
                 <div className="cluster-tag-actions">
                   {resultMode === "top_level" ? null : (
                     <select
                       value={suggestion.parent_code || ""}
                       onChange={(event) => updateSuggestion(index, { parent_code: event.target.value || null })}
-                      aria-label={`建议 ${index + 1} 的父分类`}
+                      aria-label={t("建议 {value} 的父分类", { value: index + 1 })}
                       disabled={busy}
                     >
-                      <option value="">顶级分类</option>
+                      <option value="">{t("顶级分类")}</option>
                       {categories.filter((item) => item.is_active && (item.depth || 1) < 3).map((item) => (
                         <option key={item.code} value={item.code}>{item.path || item.name}</option>
                       ))}
                     </select>
                   )}
                   <button type="button" disabled={busy || !suggestion.name.trim()} onClick={() => void handleAdd(index)}>
-                    加入模板
+                    {t("加入模板")}
                   </button>
                 </div>
               )}

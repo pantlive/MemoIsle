@@ -1,5 +1,6 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.TestStrings.zh
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -114,8 +115,8 @@ class MemoTest {
         assertEquals(true, resource.matchesQuery("自动求导"))
         assertEquals(true, resource.matchesQuery("学习站"))
         assertEquals(true, resource.matchesQuery("learning"))
-        assertEquals("学习资料", resourceCategoryLabel(resource.resourceCategory))
-        assertEquals("网页已失效", linkHealthLabel(resource.linkHealthStatus))
+        assertEquals("学习资料", zh(resourceCategoryLabel(resource.resourceCategory)))
+        assertEquals("网页已失效", zh(linkHealthLabel(resource.linkHealthStatus)))
     }
 
     @Test
@@ -294,7 +295,14 @@ class MemoTest {
         assertEquals("产品周会-2026-10-20.m4a", audioDownloadFileName(meeting))
 
         val untitledMeeting = meeting.copy(title = "")
-        assertEquals("会议录音-2026-10-20.m4a", audioDownloadFileName(untitledMeeting))
+        // 未命名时用创建时界面语言的默认名（MainActivity 按资源更新；JVM 测试里是英文默认值）。
+        assertEquals("${ContentDefaults.meetingRecording}-2026-10-20.m4a", audioDownloadFileName(untitledMeeting))
+        ContentDefaults.meetingRecording = "会议录音"
+        try {
+            assertEquals("会议录音-2026-10-20.m4a", audioDownloadFileName(untitledMeeting))
+        } finally {
+            ContentDefaults.meetingRecording = "Meeting recording"
+        }
 
         val unsafeTitle = meeting.copy(title = "周会/录音:第一段?")
         assertEquals("周会_录音_第一段_-2026-10-20.m4a", audioDownloadFileName(unsafeTitle))
@@ -302,7 +310,8 @@ class MemoTest {
 
     @Test
     fun imageMetadataLabelsAreHumanReadable() {
-        assertEquals("320 × 180 像素", imageDimensionsLabel(320, 180))
+        assertEquals("320 × 180 像素", zh(imageDimensionsLabel(320, 180)))
+        assertEquals("320 × 180 px", com.memoisle.app.TestStrings.en(imageDimensionsLabel(320, 180)))
         assertEquals(null, imageDimensionsLabel(null, 180))
         assertEquals(null, imageDimensionsLabel(0, 180))
         assertEquals("512 B", formatFileSize(512))
@@ -374,18 +383,18 @@ class MemoTest {
     fun imageOcrLabelsFollowBackendContract() {
         val memo = newLocalImage("截图", "", "image/png", 1024)
 
-        assertEquals("未识别", memo.imageOcrStatusLabel())
-        assertEquals("排队中", memo.copy(imageOcrStatus = "pending").imageOcrStatusLabel())
-        assertEquals("识别中", memo.copy(imageOcrStatus = "processing").imageOcrStatusLabel())
-        assertEquals("已识别", memo.copy(imageOcrStatus = "ready").imageOcrStatusLabel())
-        assertEquals("识别失败", memo.copy(imageOcrStatus = "failed").imageOcrStatusLabel())
-        assertEquals("未启用", memo.copy(imageOcrStatus = "disabled").imageOcrStatusLabel())
-        assertEquals("未识别", memo.copy(imageOcrStatus = "unknown").imageOcrStatusLabel())
+        assertEquals("未识别", zh(memo.imageOcrStatusLabel()))
+        assertEquals("排队中", zh(memo.copy(imageOcrStatus = "pending").imageOcrStatusLabel()))
+        assertEquals("识别中", zh(memo.copy(imageOcrStatus = "processing").imageOcrStatusLabel()))
+        assertEquals("已识别", zh(memo.copy(imageOcrStatus = "ready").imageOcrStatusLabel()))
+        assertEquals("识别失败", zh(memo.copy(imageOcrStatus = "failed").imageOcrStatusLabel()))
+        assertEquals("未启用", zh(memo.copy(imageOcrStatus = "disabled").imageOcrStatusLabel()))
+        assertEquals("未识别", zh(memo.copy(imageOcrStatus = "unknown").imageOcrStatusLabel()))
 
-        assertEquals(null, memo.imageOcrSourceLabel())
-        assertEquals("本地识别", memo.copy(imageOcrSource = "local").imageOcrSourceLabel())
-        assertEquals("AI 识别", memo.copy(imageOcrSource = "llm").imageOcrSourceLabel())
-        assertEquals(null, memo.copy(imageOcrSource = "other").imageOcrSourceLabel())
+        assertEquals(null, zh(memo.imageOcrSourceLabel()))
+        assertEquals("本地识别", zh(memo.copy(imageOcrSource = "local").imageOcrSourceLabel()))
+        assertEquals("AI 识别", zh(memo.copy(imageOcrSource = "llm").imageOcrSourceLabel()))
+        assertEquals(null, zh(memo.copy(imageOcrSource = "other").imageOcrSourceLabel()))
     }
 
     @Test
@@ -398,8 +407,8 @@ class MemoTest {
         assertEquals(null, memo.imageOcrSource)
         assertEquals(emptyList<String>(), memo.imageAutoTags)
         assertEquals(null, memo.imageOcrUpdatedAt)
-        assertEquals("未识别", memo.imageOcrStatusLabel())
-        assertEquals(null, memo.imageOcrSourceLabel())
+        assertEquals("未识别", zh(memo.imageOcrStatusLabel()))
+        assertEquals(null, zh(memo.imageOcrSourceLabel()))
         assertEquals(false, memo.matchesQuery("识别"))
         assertEquals(true, memo.matchesQuery("相册"))
     }
@@ -505,8 +514,8 @@ class MemoTest {
         assertEquals("JPEG", ImageCompressionPolicy.formatLabel("image/jpg"))
         assertEquals("WebP", ImageCompressionPolicy.formatLabel("image/webp"))
         assertEquals("GIF", ImageCompressionPolicy.formatLabel("image/gif"))
-        assertEquals("图片", ImageCompressionPolicy.formatLabel("image/heic"))
-        assertEquals("图片", ImageCompressionPolicy.formatLabel(null))
+        assertEquals(null, ImageCompressionPolicy.formatLabel("image/heic"))
+        assertEquals(null, ImageCompressionPolicy.formatLabel(null))
     }
 
     @Test
@@ -526,7 +535,12 @@ class MemoTest {
         assertEquals(
             "图片已自动压缩后收藏：25.0 MB → 2.0 MB；" +
                 "尺寸 14400 × 9000 → 12000 × 7500；格式 PNG → JPEG",
-            text,
+            zh(text),
+        )
+        assertEquals(
+            "Image compressed automatically and saved: 25.0 MB → 2.0 MB; " +
+                "size 14400 × 9000 → 12000 × 7500; format PNG → JPEG",
+            com.memoisle.app.TestStrings.en(text),
         )
     }
 
@@ -543,7 +557,7 @@ class MemoTest {
             outputFormat = ImageOutputFormat.JPEG,
             animationDropped = false,
         )
-        assertEquals("图片已自动压缩后收藏：21.0 MB → 3.0 MB", onlySize)
+        assertEquals("图片已自动压缩后收藏：21.0 MB → 3.0 MB", zh(onlySize))
 
         val gif = ImageCompressionPolicy.describeCompression(
             originalByteCount = 30 * 1024 * 1024,
@@ -560,7 +574,7 @@ class MemoTest {
             "图片已自动压缩后收藏：30.0 MB → 1.0 MB；" +
                 "尺寸 20000 × 20000 → 5000 × 5000；格式 GIF → JPEG；" +
                 "动图已转为静态图，仅保留第一帧",
-            gif,
+            zh(gif),
         )
     }
 }

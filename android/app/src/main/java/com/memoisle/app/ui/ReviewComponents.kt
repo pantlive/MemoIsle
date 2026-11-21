@@ -43,9 +43,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.memoisle.app.R
 import com.memoisle.app.data.Memo
 import com.memoisle.app.data.TYPE_IDEA
 import com.memoisle.app.data.TYPE_RESOURCE
@@ -85,18 +88,18 @@ internal fun ReviewCard(
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("今日回顾", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.home_title_review), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (totalCount == 0) "今天没有需要回顾的内容" else "共 $totalCount 项，按计划混合排列",
+                        if (totalCount == 0) stringResource(R.string.review_nothing_today) else pluralStringResource(R.plurals.review_total, totalCount, totalCount),
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ReviewStat(wordCount, "个单词", memoKindStyle(TYPE_WORD), Modifier.weight(1f))
-                ReviewStat(resourceCount, "篇待读", memoKindStyle(TYPE_RESOURCE), Modifier.weight(1f))
-                ReviewStat(ideaCount, "条待整理", memoKindStyle(TYPE_IDEA), Modifier.weight(1f))
+                ReviewStat(wordCount, pluralStringResource(R.plurals.review_stat_words, wordCount), memoKindStyle(TYPE_WORD), Modifier.weight(1f))
+                ReviewStat(resourceCount, pluralStringResource(R.plurals.review_stat_to_read, resourceCount), memoKindStyle(TYPE_RESOURCE), Modifier.weight(1f))
+                ReviewStat(ideaCount, pluralStringResource(R.plurals.review_stat_to_sort, ideaCount), memoKindStyle(TYPE_IDEA), Modifier.weight(1f))
             }
             Button(
                 onClick = onStart,
@@ -107,7 +110,7 @@ internal fun ReviewCard(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text(if (totalCount == 0) "今天已完成" else "开始回顾", style = MaterialTheme.typography.titleSmall)
+                Text(if (totalCount == 0) stringResource(R.string.review_done_today) else stringResource(R.string.review_start), style = MaterialTheme.typography.titleSmall)
             }
         }
     }
@@ -147,22 +150,22 @@ internal fun ReviewSettingsDialog(
     var intervalsText by remember(settings) {
         mutableStateOf(settings.intervalsDays.joinToString(", "))
     }
-    var errorText by remember { mutableStateOf<String?>(null) }
+    var errorText by remember { mutableStateOf<Int?>(null) }
 
     AlertDialog(
         onDismissRequest = { if (!isSaving) onDismiss() },
-        title = { Text("复习计划", fontWeight = FontWeight.SemiBold) },
+        title = { Text(stringResource(R.string.review_plan_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "每日队列会混合单词、待读资料和待整理灵感。单词反馈会使用下面的间隔。",
+                    stringResource(R.string.review_plan_text),
                     color = TextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
                     value = dailyLimitText,
                     onValueChange = { dailyLimitText = it },
-                    label = { Text("每日队列上限（1–100）") },
+                    label = { Text(stringResource(R.string.review_daily_limit_label)) },
                     singleLine = true,
                     enabled = !isSaving,
                     modifier = Modifier.fillMaxWidth(),
@@ -170,14 +173,14 @@ internal fun ReviewSettingsDialog(
                 OutlinedTextField(
                     value = intervalsText,
                     onValueChange = { intervalsText = it },
-                    label = { Text("间隔天数（6 个，用逗号分隔）") },
-                    supportingText = { Text("忘记后、模糊后/熟悉度 1、熟悉度 2–5") },
+                    label = { Text(stringResource(R.string.review_intervals_label)) },
+                    supportingText = { Text(stringResource(R.string.review_intervals_hint)) },
                     singleLine = true,
                     enabled = !isSaving,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 errorText?.let { error ->
-                    Text(error, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(error), color = MaterialTheme.colorScheme.error)
                 }
             }
         },
@@ -187,12 +190,12 @@ internal fun ReviewSettingsDialog(
                     val dailyLimit = dailyLimitText.trim().toIntOrNull()
                     val intervals = intervalsText.split(",").map { it.trim().toIntOrNull() }
                     if (dailyLimit == null || dailyLimit !in 1..100) {
-                        errorText = "每日上限需要是 1–100 的整数"
+                        errorText = R.string.review_error_daily_limit
                     } else if (intervals.size != 6 || intervals.any {
                             it == null || it !in 1..365
                         }
                     ) {
-                        errorText = "间隔需要是 6 个 1–365 天的整数"
+                        errorText = R.string.review_error_intervals
                     } else {
                         errorText = null
                         onSave(dailyLimit, intervals.filterNotNull())
@@ -201,12 +204,12 @@ internal fun ReviewSettingsDialog(
                 enabled = !isSaving,
                 colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
             ) {
-                Text(if (isSaving) "保存中…" else "保存")
+                Text(if (isSaving) stringResource(R.string.relay_ui_saving) else stringResource(R.string.common_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("取消")
+                Text(stringResource(R.string.common_cancel))
             }
         },
         containerColor = SurfaceWhite,
@@ -243,22 +246,22 @@ internal fun ReviewSession(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             listOf(
-                "all" to "混合 ${wordCount + resourceCount + ideaCount}",
-                TYPE_WORD to "单词 $wordCount",
-                TYPE_RESOURCE to "待读 $resourceCount",
-                TYPE_IDEA to "待整理 $ideaCount",
+                "all" to stringResource(R.string.review_filter_mixed, wordCount + resourceCount + ideaCount),
+                TYPE_WORD to stringResource(R.string.review_filter_words, wordCount),
+                TYPE_RESOURCE to stringResource(R.string.review_filter_to_read, resourceCount),
+                TYPE_IDEA to stringResource(R.string.review_filter_to_sort, ideaCount),
             ).forEach { (value, label) ->
                 MemoFilterChip(label = label, selected = filter == value, onClick = { onFilterChange(value) })
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "今日计划 $dailyLimit 条，还剩 $remainingCount 条",
+                pluralStringResource(R.plurals.review_plan_remaining, remainingCount, dailyLimit, remainingCount),
                 color = TextMuted,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onOpenSettings) { Text("调整计划") }
+            TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.review_adjust_plan)) }
         }
         if (current == null) {
             Card(
@@ -269,8 +272,8 @@ internal fun ReviewSession(
             ) {
                 EmptyState(
                     icon = Icons.Outlined.TaskAlt,
-                    title = "今天的回顾已经完成",
-                    message = "到期单词、待读资料和待整理灵感会显示在这里。",
+                    title = stringResource(R.string.review_all_done),
+                    message = stringResource(R.string.review_all_done_hint),
                 )
             }
             return@Column
@@ -289,16 +292,16 @@ internal fun ReviewSession(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     InfoPill(
                         text = when (current.type) {
-                            TYPE_WORD -> "单词复习"
-                            TYPE_RESOURCE -> "待阅读"
-                            else -> "待整理灵感"
+                            TYPE_WORD -> stringResource(R.string.review_kind_word)
+                            TYPE_RESOURCE -> stringResource(R.string.review_kind_resource)
+                            else -> stringResource(R.string.review_kind_idea)
                         },
                         color = kind.accent,
                         background = kind.soft,
                         icon = kind.icon,
                     )
                     Spacer(Modifier.weight(1f))
-                    Text("还剩 $remainingCount 条", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+                    Text(pluralStringResource(R.plurals.review_remaining, remainingCount, remainingCount), color = TextMuted, style = MaterialTheme.typography.labelMedium)
                 }
                 Text(current.title, style = MaterialTheme.typography.headlineSmall)
                 when (current.type) {
@@ -315,7 +318,7 @@ internal fun ReviewSession(
                             )
                         }
                         Text(
-                            "上次 ${current.lastReviewAt?.let(::formatTime) ?: "尚未复习"} · 下次 ${current.nextReviewAt?.let(::formatTime) ?: "待安排"}",
+                            stringResource(R.string.review_last_next, current.lastReviewAt?.let(::formatTime) ?: stringResource(R.string.review_never), current.nextReviewAt?.let(::formatTime) ?: stringResource(R.string.review_unscheduled)),
                             color = TextMuted,
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -329,7 +332,7 @@ internal fun ReviewSession(
                             ) {
                                 Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("显示答案")
+                                Text(stringResource(R.string.review_show_answer))
                             }
                         } else {
                             Text(
@@ -347,21 +350,21 @@ internal fun ReviewSession(
                                     enabled = !isSaving,
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
-                                ) { Text("忘记") }
+                                ) { Text(stringResource(R.string.review_forgot)) }
                                 OutlinedButton(
                                     onClick = { onReviewWord("fuzzy") },
                                     modifier = Modifier.weight(1f),
                                     enabled = !isSaving,
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = WarmAmberText),
-                                ) { Text("模糊") }
+                                ) { Text(stringResource(R.string.review_fuzzy)) }
                                 Button(
                                     onClick = { onReviewWord("remembered") },
                                     modifier = Modifier.weight(1f),
                                     enabled = !isSaving,
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = DeepTeal),
-                                ) { Text("记得") }
+                                ) { Text(stringResource(R.string.review_remembered)) }
                             }
                         }
                     }
@@ -373,7 +376,7 @@ internal fun ReviewSession(
                             Text(
                                 listOf(
                                     host,
-                                    resourceCategoryLabel(current.resourceCategory, current.resourceCategoryLabel),
+                                    resourceCategoryLabel(current.resourceCategory, current.resourceCategoryLabel).asString(),
                                 ).filter { it.isNotBlank() }.joinToString(" · "),
                                 color = TextMuted,
                                 style = MaterialTheme.typography.bodySmall,
@@ -393,7 +396,7 @@ internal fun ReviewSession(
                         ) {
                             Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("打开原网页")
+                            Text(stringResource(R.string.review_open_source))
                         }
                         OutlinedButton(
                             onClick = onStarResource,
@@ -408,7 +411,7 @@ internal fun ReviewSession(
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(if (current.starred) "取消星标" else "星标")
+                            Text(if (current.starred) stringResource(R.string.review_unstar) else stringResource(R.string.row_star))
                         }
                     }
                     else -> {
@@ -424,7 +427,7 @@ internal fun ReviewSession(
                         ) {
                             Icon(Icons.Outlined.TaskAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("整理完成")
+                            Text(stringResource(R.string.row_sorted))
                         }
                         OutlinedButton(
                             onClick = onArchiveIdea,
@@ -434,7 +437,7 @@ internal fun ReviewSession(
                         ) {
                             Icon(Icons.Outlined.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("归档")
+                            Text(stringResource(R.string.row_archive))
                         }
                     }
                 }
@@ -443,7 +446,7 @@ internal fun ReviewSession(
                     enabled = !isSaving,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 ) {
-                    Text("跳过这一条", color = TextMuted)
+                    Text(stringResource(R.string.review_skip), color = TextMuted)
                 }
             }
         }

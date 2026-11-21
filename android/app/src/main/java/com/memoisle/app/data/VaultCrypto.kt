@@ -1,5 +1,10 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.R
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextStateException
+import com.memoisle.app.ui.requireUi
 import java.nio.ByteBuffer
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
@@ -12,9 +17,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-class WrongMasterPasswordException : RuntimeException("主密码不正确。")
+class WrongMasterPasswordException : RuntimeException("Wrong master password."), HasUiText {
+    override val text: UiText get() = UiText.res(R.string.vault_error_wrong_master_password)
+}
 
-class VaultDecryptException : RuntimeException("有条目无法解密，可能已损坏或被篡改。")
+class VaultDecryptException : RuntimeException("An entry could not be decrypted."), HasUiText {
+    override val text: UiText get() = UiText.res(R.string.vault_error_decrypt_failed)
+}
 
 /** 解锁所需的包裹参数，来自服务器的密码库状态。 */
 data class VaultKeyMaterial(
@@ -44,7 +53,7 @@ object VaultCrypto {
     fun deriveWrappingKey(password: String, salt: ByteArray, iterations: Int): ByteArray {
         val passwordBytes = Normalizer.normalize(password, Normalizer.Form.NFC).toByteArray(Charsets.UTF_8)
         val mac = Mac.getInstance("HmacSHA256")
-        require(passwordBytes.isNotEmpty()) { "请输入主密码" }
+        requireUi(passwordBytes.isNotEmpty()) { UiText.res(R.string.vault_error_master_password_required) }
         mac.init(SecretKeySpec(passwordBytes, "HmacSHA256"))
         mac.update(salt)
         mac.update(ByteBuffer.allocate(4).putInt(1).array())
@@ -63,9 +72,9 @@ object VaultCrypto {
     }
 
     fun unlock(password: String, material: VaultKeyMaterial): SecretKey {
-        require(password.isNotEmpty()) { "请输入主密码" }
+        requireUi(password.isNotEmpty()) { UiText.res(R.string.vault_error_master_password_required) }
         if (material.kdf != KDF) {
-            throw IllegalStateException("不支持的密码库格式，请更新 MemoIsle。")
+            throw UiTextStateException(UiText.res(R.string.vault_error_unsupported_format))
         }
         val wrappingKey = deriveWrappingKey(password, decode(material.salt), material.iterations)
         return try {

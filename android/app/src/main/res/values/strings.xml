@@ -1,0 +1,1016 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 默认（英文）文案；中文在 values-zh/strings.xml，两边的键必须一致（见 StringsParityTest）。 -->
+<resources>
+    <!-- 00_common -->
+    <string name="app_name">MemoIsle</string>
+    <string name="error_unknown">Unknown error</string>
+    <string name="error_api_request_failed">API request failed (%1$s): %2$s</string>
+    <string name="error_operation_failed_retry">Operation failed (%1$s). Please try again.</string>
+    <string name="common_back">Back</string>
+    <string name="common_refresh">Refresh</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_save">Save</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_close">Close</string>
+    <string name="common_edit">Edit</string>
+    <string name="common_copy">Copy</string>
+    <string name="common_untitled">Untitled</string>
+    <string name="common_other">Other</string>
+    <string name="common_expired">Expired</string>
+    <string name="common_list_separator">", "</string>
+    <string name="language_menu">Language</string>
+    <string name="language_dialog_title">Interface language</string>
+    <string name="language_follow_system">Follow system</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
+    <string name="error_operation_failed_later">Operation failed. Try again later.</string>
+    <string name="error_server_unreachable">Can\'t reach the server. Check your network and try again.</string>
+
+    <!-- 10_memo_data -->
+    <string name="memo_error_resource_url_required">A web resource needs a valid URL</string>
+    <string name="memo_error_word_lemma_required">An English word needs the word itself</string>
+    <string name="content_default_idea_title">Idea</string>
+    <string name="content_default_voice_body">Voice note</string>
+    <string name="content_default_resource_title">Web resource</string>
+    <string name="content_default_image_title">Image</string>
+    <string name="content_default_meeting_recording">Meeting recording</string>
+    <string name="content_default_voice_recording">Voice idea</string>
+    <string name="resource_category_learning">Learning</string>
+    <string name="resource_category_article">Articles</string>
+    <string name="resource_category_media">Video &amp; audio</string>
+    <string name="resource_category_tool">Tools &amp; services</string>
+    <string name="resource_category_book_paper">Books &amp; papers</string>
+    <string name="resource_category_product">Products</string>
+    <string name="resource_category_pending">Classifying</string>
+    <string name="resource_kind_article">Article</string>
+    <string name="resource_kind_video">Video</string>
+    <string name="resource_kind_course">Course</string>
+    <string name="resource_kind_tool">Tool</string>
+    <string name="resource_kind_book">Book</string>
+    <string name="resource_reading_reading">Reading</string>
+    <string name="resource_reading_completed">Completed</string>
+    <string name="resource_reading_archived">Archived</string>
+    <string name="resource_reading_unread">Unread</string>
+    <string name="link_health_healthy">Page OK</string>
+    <string name="link_health_redirected">Redirected</string>
+    <string name="link_health_changed">Page changed</string>
+    <string name="link_health_auth_required">Sign-in required</string>
+    <string name="link_health_temporary_failure">Temporarily unreachable</string>
+    <string name="link_health_failed">Page gone</string>
+    <string name="link_health_ignored">Checks ignored</string>
+    <string name="link_health_pending">Waiting for check</string>
+    <string name="image_dimensions_px">%1$s × %2$s px</string>
+    <string name="image_ocr_pending">Queued</string>
+    <string name="image_ocr_processing">Recognizing</string>
+    <string name="image_ocr_ready">Recognized</string>
+    <string name="image_ocr_failed">Recognition failed</string>
+    <string name="image_ocr_disabled">Not enabled</string>
+    <string name="image_ocr_none">Not recognized</string>
+    <string name="image_ocr_source_local">On-device recognition</string>
+    <string name="image_ocr_source_llm">AI recognition</string>
+    <string name="content_default_untitled">Untitled</string>
+
+    <!-- 11_vault_data -->
+    <string name="vault_kind_login">Login</string>
+    <string name="vault_kind_secret">Key</string>
+    <string name="vault_kind_recovery">Recovery codes</string>
+    <string name="vault_kind_server">Cloud server</string>
+    <string name="vault_kind_subscription">AI subscription</string>
+    <string name="vault_provider_claude">Claude</string>
+    <string name="vault_provider_chatgpt">ChatGPT</string>
+    <string name="vault_provider_grok">Grok</string>
+    <string name="vault_billing_monthly">Monthly</string>
+    <string name="vault_billing_yearly">Yearly</string>
+    <string name="vault_billing_none">One-time / pay as you go</string>
+    <string name="vault_reminder_type_expiring">Expiring soon</string>
+    <string name="vault_reminder_type_rotate">Time to rotate</string>
+    <string name="vault_reminder_type_rotate_soon">Rotate soon</string>
+    <string name="vault_reminder_type_reused">Reused password</string>
+    <string name="vault_reminder_type_weak">Weak password</string>
+    <string name="vault_reminder_type_codes_empty">Codes used up</string>
+    <string name="vault_reminder_type_codes_low">Few codes left</string>
+    <string name="vault_reminder_type_missing_key">Key missing</string>
+    <string name="vault_reminder_codes_empty">All recovery codes are used. Generate a new set on the website.</string>
+    <plurals name="vault_reminder_codes_low">
+        <item quantity="one">Only %1$s recovery code left. Consider generating a new set.</item>
+        <item quantity="other">Only %1$s recovery codes left. Consider generating a new set.</item>
+    </plurals>
+    <string name="vault_reminder_missing_key">The referenced key was deleted. Choose another or enter the private key directly.</string>
+    <plurals name="vault_reminder_subscription_expired">
+        <item quantity="one">Expired on %1$s (%2$s day ago). Renew or update the expiry date.</item>
+        <item quantity="other">Expired on %1$s (%2$s days ago). Renew or update the expiry date.</item>
+    </plurals>
+    <plurals name="vault_reminder_expired">
+        <item quantity="one">Expired on %1$s (%2$s day ago). Please replace it.</item>
+        <item quantity="other">Expired on %1$s (%2$s days ago). Please replace it.</item>
+    </plurals>
+    <string name="vault_reminder_subscription_due_today">Due today. Confirm the renewal.</string>
+    <string name="vault_reminder_due_today">Expires today. Replace it soon.</string>
+    <plurals name="vault_reminder_subscription_expiring">
+        <item quantity="one">Renews in %1$s day (%2$s).</item>
+        <item quantity="other">Renews in %1$s days (%2$s).</item>
+    </plurals>
+    <plurals name="vault_reminder_expiring">
+        <item quantity="one">Expires in %1$s day (%2$s).</item>
+        <item quantity="other">Expires in %1$s days (%2$s).</item>
+    </plurals>
+    <plurals name="vault_reminder_rotate">
+        <item quantity="one">Not changed for %1$s day; set to rotate every %2$s days.</item>
+        <item quantity="other">Not changed for %1$s days; set to rotate every %2$s days.</item>
+    </plurals>
+    <plurals name="vault_reminder_rotate_soon">
+        <item quantity="one">Rotation due in %1$s day (every %2$s days).</item>
+        <item quantity="other">Rotation due in %1$s days (every %2$s days).</item>
+    </plurals>
+    <string name="vault_reminder_reused_one">Uses the same password as \"%1$s\".</string>
+    <string name="vault_reminder_reused_two">Uses the same password as \"%1$s\" and \"%2$s\".</string>
+    <string name="vault_reminder_reused_many">Uses the same password as \"%1$s\", \"%2$s\" and others (%3$s in total).</string>
+    <string name="vault_reminder_weak">Weak password. Use \"Generate\" to replace it with a random 20-character one.</string>
+
+    <!-- 12_ledger_relay_forget_data -->
+    <string name="ledger_category_food">Food</string>
+    <string name="ledger_category_transport">Transport</string>
+    <string name="ledger_category_shopping">Shopping</string>
+    <string name="ledger_category_subscription">Subscriptions</string>
+    <string name="ledger_category_housing">Housing</string>
+    <string name="ledger_category_entertainment">Entertainment</string>
+    <string name="ledger_category_medical">Medical</string>
+    <string name="ledger_category_salary">Salary</string>
+    <string name="ledger_kind_income">Income</string>
+    <string name="ledger_kind_expense">Expense</string>
+    <string name="ledger_error_kind">Choose income or expense.</string>
+    <string name="ledger_error_amount">The amount must be greater than 0 and at most 1 billion.</string>
+    <string name="ledger_error_currency">The currency must be three letters, e.g. CNY.</string>
+    <string name="ledger_error_date">The date must be YYYY-MM-DD, with a year from 1900 to 2100.</string>
+    <string name="ledger_error_category">The category must be 1–30 characters.</string>
+    <string name="ledger_error_account">The account can be at most 30 characters.</string>
+    <string name="ledger_error_note">The note can be at most 500 characters.</string>
+    <string name="relay_device_web">Web</string>
+    <string name="relay_device_android">Phone</string>
+    <string name="relay_error_text_empty">Enter something to send.</string>
+    <string name="relay_error_text_too_large">Text can\'t exceed 100 KB. Send it as a file instead.</string>
+    <string name="relay_error_file_empty">\"%1$s\" is an empty file.</string>
+    <string name="relay_error_file_too_large">\"%1$s\" is %2$s; a single file can\'t exceed 20 MB.</string>
+    <string name="forget_error_title_too_long">The title can be at most %1$s characters</string>
+    <string name="forget_error_content_too_long">The text can be at most %1$s characters</string>
+    <string name="error_attachment_empty">The attachment is empty</string>
+    <string name="forget_error_attachment_too_large">Attachments can\'t exceed 20 MB</string>
+
+    <!-- 13_sync_errors -->
+    <string name="error_conflict_needs_server_id">A conflicting item must have a server ID</string>
+    <string name="error_audio_play_needs_sync">Sync before playing the recording</string>
+    <string name="error_image_not_synced">This image hasn\'t synced yet, so the original can\'t be viewed</string>
+    <string name="error_image_view_needs_sync">Sync before viewing the image</string>
+    <string name="error_merge_needs_sync">Sync the word before merging</string>
+    <string name="error_synced_item_needs_server_id">A synced item must have a server ID</string>
+    <string name="error_restore_needs_sync">Sync before restoring</string>
+    <string name="error_purge_needs_sync">Sync before deleting permanently</string>
+    <string name="error_review_needs_sync">Sync the word before reviewing</string>
+    <string name="error_skip_needs_sync">Sync before skipping the review</string>
+    <string name="error_audio_upload_needs_sync">Sync the idea before uploading the recording</string>
+    <string name="error_audio_too_large">The recording file is too large</string>
+    <string name="error_image_memo_type">An image item must have type \"image\"</string>
+    <string name="error_image_upload_needs_memo">Create the image item before uploading the image</string>
+    <string name="error_image_unsupported_type">Only PNG/JPEG/WebP/GIF images are supported</string>
+    <string name="error_image_empty">The image is empty</string>
+    <string name="error_file_empty">The file is empty</string>
+    <string name="error_duplicate_word">This word is already saved</string>
+    <string name="error_duplicate_url">This URL is already saved</string>
+
+    <!-- 14_vault_crypto -->
+    <string name="vault_error_master_password_required">Enter the master password</string>
+    <string name="vault_error_unsupported_format">Unsupported vault format. Please update MemoIsle.</string>
+    <string name="vault_error_wrong_master_password">Wrong master password.</string>
+    <string name="vault_error_decrypt_failed">Some entries can\'t be decrypted; they may be corrupted or tampered with.</string>
+
+    <!-- 15_audio -->
+    <string name="speech_error_empty_recording">The recording is empty</string>
+    <string name="speech_error_no_speech">No speech was recognized</string>
+    <string name="speech_error_archive_too_large">The model archive exceeds the size limit</string>
+    <string name="speech_error_archive_duplicate_model">The model archive contains duplicate model files</string>
+    <string name="speech_error_model_not_regular">The model file isn\'t a regular file</string>
+    <string name="speech_error_archive_duplicate_tokens">The model archive contains duplicate token files</string>
+    <string name="speech_error_tokens_not_regular">The token file isn\'t a regular file</string>
+    <string name="speech_error_archive_missing_files">The model archive is missing SenseVoice files</string>
+    <string name="speech_error_model_too_large">The model file exceeds the size limit</string>
+    <string name="speech_error_model_not_extracted">The model file wasn\'t extracted</string>
+    <string name="speech_error_model_invalid_size">The model file size is invalid</string>
+    <string name="speech_error_model_checksum">The model file failed verification</string>
+    <string name="speech_error_model_missing">The on-device speech model isn\'t installed yet. Connect to the internet and try again</string>
+    <string name="speech_error_model_download_failed">Couldn\'t download the on-device speech model. Check your network and try again</string>
+    <string name="speech_error_model_http">The model download service returned HTTP %1$s</string>
+    <string name="audio_error_sample_rate">The target sample rate must be greater than 0</string>
+    <string name="audio_error_file_missing">The recording file doesn\'t exist</string>
+    <string name="audio_error_no_audio_track">The recording has no audio track</string>
+    <string name="audio_error_no_mime">The recording format has no MIME type</string>
+    <string name="audio_error_no_input_buffer">Couldn\'t get a decoder input buffer</string>
+    <string name="audio_error_no_pcm">The recording has no usable PCM data</string>
+    <string name="audio_error_source_sample_rate">The source sample rate is invalid</string>
+
+    <!-- 16_update -->
+    <string name="update_error_size_mismatch">The package size didn\'t match and was deleted. Try again later</string>
+    <string name="update_error_checksum">The package failed verification and was deleted. Try again later</string>
+
+    <!-- 17_image -->
+    <string name="image_compress_detail_dimensions">size %1$s × %2$s → %3$s × %4$s</string>
+    <string name="image_compress_detail_format">format %1$s → %2$s</string>
+    <string name="image_format_unknown">image</string>
+    <string name="image_compress_detail_animation_dropped">the animation was converted to a still image (first frame only)</string>
+    <string name="image_compress_detail_join">%1$s; %2$s</string>
+    <string name="image_compress_reminder">Image compressed automatically and saved: %1$s</string>
+    <string name="image_compress_error_no_dimensions">Can\'t read the image size and the image is over 20 MB. Choose another image</string>
+    <string name="image_compress_error_still_too_large">The image is still over 20 MB after compression. Choose another image</string>
+    <string name="image_error_read_failed">Can\'t read the selected image</string>
+    <string name="image_compress_error_decode">Couldn\'t decode the image to compress it. Choose another image</string>
+
+    <!-- 20_memo_vm -->
+    <string name="memo_msg_synced_partial">Synced. Some items will retry automatically when online</string>
+    <string name="memo_msg_synced_with_web">Synced with the web app</string>
+    <string name="memo_msg_offline">You\'re offline; showing local content: %1$s</string>
+    <string name="memo_msg_export_open_failed">Couldn\'t open the export file</string>
+    <string name="memo_msg_exported">Your data was exported; recordings aren\'t included in the JSON</string>
+    <string name="memo_msg_export_failed">Export failed: %1$s</string>
+    <string name="memo_msg_save_file_open_failed">Couldn\'t open the file to save</string>
+    <string name="memo_msg_audio_saved">The recording was saved to the location you chose</string>
+    <string name="memo_msg_audio_download_failed">Recording download failed: %1$s</string>
+    <string name="memo_msg_used_server_version">Using the server version</string>
+    <string name="memo_msg_conflict_server_unavailable">Can\'t read the server version right now. Resolve the conflict when online: %1$s</string>
+    <string name="memo_msg_sync_complete_safe">Sync complete. It\'s safe to sign out</string>
+    <string name="memo_msg_sync_incomplete">Some items haven\'t synced. Stay signed in and try again</string>
+    <string name="memo_msg_sync_failed_stay">Sync didn\'t finish. Stay signed in and try again: %1$s</string>
+    <string name="memo_msg_idea_saved">Idea saved</string>
+    <string name="memo_msg_saved_locally_retry">Saved on this device; sync will retry when online: %1$s</string>
+    <string name="memo_msg_resource_saved">Web resource saved</string>
+    <string name="memo_msg_duplicate_url">This URL is already saved. View the existing item or save anyway.</string>
+    <string name="memo_msg_word_saved">English word saved</string>
+    <string name="memo_msg_duplicate_word">This word is already saved. View it, merge examples, or save anyway.</string>
+    <string name="memo_msg_lookup_no_meaning">The dictionary returned no Chinese meaning. Please fill it in manually</string>
+    <string name="memo_msg_lookup_found">Found Chinese meanings; you can pick other senses too</string>
+    <string name="memo_msg_lookup_failed">Lookup failed: %1$s</string>
+    <string name="memo_msg_merged">Merged the new context into the existing word</string>
+    <string name="memo_msg_merge_failed">Merge failed: %1$s</string>
+    <string name="memo_msg_trashed">Moved to trash; restorable within 30 days</string>
+    <string name="memo_msg_trash_failed">Couldn\'t move to trash: %1$s</string>
+    <string name="memo_msg_restored">Restored from trash</string>
+    <string name="memo_msg_restore_failed">Restore failed: %1$s</string>
+    <string name="memo_msg_purged">Permanently deleted</string>
+    <string name="memo_msg_purge_failed">Permanent delete failed: %1$s</string>
+    <string name="memo_msg_undo_done">Undid the save; it can be restored from the trash</string>
+    <string name="memo_msg_undo_failed">Undo failed: %1$s</string>
+    <string name="memo_msg_voice_saved">Voice idea saved</string>
+    <string name="memo_msg_voice_saved_locally">The recording was saved on this device; sync will retry later: %1$s</string>
+    <string name="memo_msg_image_saved">Image saved</string>
+    <string name="memo_msg_image_compressed_but">The image was compressed automatically, but: %1$s</string>
+    <string name="memo_msg_original_image_failed">Couldn\'t load the original image: %1$s</string>
+    <string name="memo_msg_image_too_large">Images can\'t exceed 20 MB</string>
+    <string name="memo_msg_image_invalid">The image file is invalid or corrupted</string>
+    <string name="memo_msg_image_conflict">The image was updated on another device. Refresh and choose again</string>
+    <string name="memo_msg_image_failed_kept">Couldn\'t save the image; a local copy was kept and will retry when online: %1$s</string>
+    <string name="memo_msg_resource_read_only">Web resources are read-only on Android. Organize them in the web app</string>
+    <string name="memo_msg_edit_synced">Changes synced</string>
+    <string name="memo_msg_edit_conflict_refresh">This idea was updated on another device. Refresh and edit again.</string>
+    <string name="memo_msg_edit_conflict_loaded">This idea was updated on another device. The latest version was loaded; review it and save again.</string>
+    <string name="memo_msg_edit_saved_locally">Changes saved on this device; sync will retry later: %1$s</string>
+    <string name="memo_msg_review_recorded">Review recorded</string>
+    <string name="memo_msg_review_failed">Couldn\'t submit the review: %1$s</string>
+    <string name="memo_msg_review_skipped">Skipped; it won\'t show up again until tomorrow</string>
+    <string name="memo_msg_skip_failed">Skip failed: %1$s</string>
+    <string name="memo_msg_review_plan_updated">Review plan updated</string>
+    <string name="memo_msg_review_plan_failed">Couldn\'t save the review plan: %1$s</string>
+    <string name="memo_msg_opened_source">Opened the original page</string>
+    <string name="memo_msg_reading_sync_failed">Couldn\'t sync the reading status: %1$s</string>
+    <string name="memo_msg_star_sync_failed">Couldn\'t sync the star: %1$s</string>
+    <string name="memo_msg_idea_sorted">Idea sorted</string>
+    <string name="memo_msg_sort_saved_locally">Sorting saved on this device: %1$s</string>
+    <string name="memo_msg_idea_archived">Idea archived</string>
+    <string name="memo_msg_archive_saved_locally">Archiving saved on this device: %1$s</string>
+    <string name="memo_msg_item_archived">Item archived</string>
+    <string name="memo_msg_audio_play_failed">Couldn\'t play the recording: %1$s</string>
+
+    <!-- 21_auth_vm -->
+    <string name="auth_error_login_retry">Sign-in failed. Please try again</string>
+    <string name="auth_error_login_later">Sign-in failed. Try again later</string>
+    <string name="auth_error_invite_required">Enter an invitation code</string>
+    <string name="auth_msg_code_sent">Verification code sent. Check your email (valid for 10 minutes).</string>
+    <string name="auth_error_code_send_failed">Couldn\'t send the code. Try again later</string>
+    <string name="auth_msg_reset_sent">If the email is registered, a reset link has been sent. Check your inbox.</string>
+    <string name="auth_error_reset_failed">Couldn\'t send the reset link. Try again later</string>
+    <string name="auth_error_password_mismatch">The passwords don\'t match</string>
+    <string name="auth_error_code_required">Enter the 6-digit email code</string>
+    <string name="auth_msg_logged_out_no_providers">Signed out. Sign-in methods can\'t be loaded right now</string>
+    <string name="auth_error_session_expired">Your session expired. Please sign in again</string>
+    <string name="auth_msg_registered">Registered. Sign in with your email.</string>
+    <string name="auth_error_email_login_failed">Email sign-in failed. Try again later</string>
+    <string name="auth_error_server_unreachable">Can\'t reach the server. Check your network and try again</string>
+
+    <!-- 22_relay_vm -->
+    <string name="relay_poll_session_expired">Your session expired. Please sign in again.</string>
+    <string name="relay_poll_reconnecting">Connection to the server was lost. Retrying…</string>
+    <string name="relay_msg_text_sent">Text sent to the web app. Open \"Transfer\" there within 10 minutes to receive it.</string>
+    <string name="relay_msg_file_sent">\"%1$s\" (%2$s) was sent to the web app. Valid for 10 minutes.</string>
+    <string name="relay_msg_file_saved">Saved \"%1$s\". It was deleted from the server.</string>
+    <string name="relay_msg_image_copied">Image copied to the clipboard and deleted from the server.</string>
+    <string name="relay_msg_clipboard_failed_saved">Couldn\'t write to the clipboard; saved \"%1$s\" instead.</string>
+    <string name="relay_msg_text_copied">Copied to the clipboard; the text was deleted from the server.</string>
+    <string name="relay_msg_dismissed">Dismissed.</string>
+    <string name="relay_error_gone">This item was already taken or has expired.</string>
+    <string name="relay_error_cannot_read">Can\'t read \"%1$s\"</string>
+    <string name="relay_error_file_over_limit">\"%1$s\" is over 20 MB; a single file can\'t exceed 20 MB.</string>
+    <string name="relay_error_cannot_send">This file can\'t be sent.</string>
+    <string name="relay_error_offline">Can\'t reach the server. Transfer needs a connection; check your network and try again.</string>
+    <string name="relay_error_permission">No permission to read or write this file.</string>
+    <string name="relay_error_generic">Transfer failed. Try again later.</string>
+
+    <!-- 23_update_vm -->
+    <string name="update_error_check_failed">Couldn\'t check for updates. Check your network and try again</string>
+    <string name="update_msg_up_to_date">You\'re on the latest version (%1$s)</string>
+    <string name="update_error_download_failed">Download failed. Check your network and try again</string>
+    <string name="update_error_installer_failed">Couldn\'t open the system installer. Try again later</string>
+
+    <!-- 24_vault_vm -->
+    <string name="vault_msg_verified">Verified.</string>
+    <string name="vault_msg_unlocked">Unlocked. It locks automatically after 5 minutes of inactivity or when the app goes to the background.</string>
+    <string name="vault_msg_locked">Vault locked.</string>
+    <string name="vault_msg_saved">Encrypted and saved \"%1$s\".</string>
+    <string name="vault_error_save_conflict">This entry was just changed elsewhere. The list was refreshed; reopen it to edit.</string>
+    <string name="vault_msg_deleted">Deleted \"%1$s\".</string>
+    <string name="vault_error_delete_conflict">This entry was just changed elsewhere. Refresh before deleting.</string>
+    <string name="vault_error_operation_failed_code">Operation failed (%1$s). Try again later.</string>
+    <string name="vault_msg_code_sent">Code sent</string>
+
+    <!-- 25_ledger_vm -->
+    <string name="ledger_error_quick_too_long">A sentence can be at most %1$s characters.</string>
+    <string name="ledger_conflict_reloading">Changed on another device. Reloading; reopen it to continue.</string>
+    <string name="ledger_msg_quick_saved">Recorded: %1$s</string>
+    <string name="ledger_msg_quick_saved_local">Recorded: %1$s (recognized by the local model)</string>
+    <string name="ledger_msg_saved">Saved.</string>
+    <string name="ledger_error_image_unusable">This image can\'t be used for the ledger.</string>
+    <string name="ledger_error_offline">Can\'t reach the server. The ledger works online only; check your network and try again.</string>
+    <string name="ledger_error_generic">Loading or saving failed. Try again later.</string>
+
+    <!-- 26_forget_vm -->
+    <string name="forget_preview_too_large">The image is over 8 MB. Save it to view.</string>
+    <string name="forget_preview_failed">Preview failed. Save it to view.</string>
+    <string name="forget_msg_recorded">Noted.</string>
+    <string name="forget_msg_deleted">Deleted this item.</string>
+    <string name="forget_msg_attachment_deleted">Attachment deleted.</string>
+    <string name="forget_msg_attachment_saved">Attachment saved.</string>
+    <string name="forget_msg_file_saved">Saved \"%1$s\".</string>
+    <string name="forget_conflict_reloading">Changed on another device. Reloading.</string>
+    <string name="forget_error_too_many_attachments">Each item can have at most 20 attachments</string>
+    <string name="forget_error_named_file">\"%1$s\": %2$s</string>
+    <string name="forget_error_cannot_save_file">This file can\'t be saved.</string>
+    <string name="forget_error_offline">Can\'t reach the server. Reminders work online only; check your network and try again.</string>
+
+    <!-- 30_update_ui -->
+    <string name="update_dialog_title">New version %1$s available</string>
+    <string name="update_dialog_current">Current version %1$s · Package %2$s</string>
+    <string name="update_downloading">Downloading…</string>
+    <string name="update_downloading_progress">Downloading %1$s%%</string>
+    <string name="update_downloaded_hint">Downloaded and verified. Tap \"Install\" and confirm in the system screen; the first time, allow MemoIsle to install unknown apps.</string>
+    <string name="update_failed">Update failed. Try again later</string>
+    <string name="update_install">Install</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_update">Update</string>
+    <string name="update_ignore_version">Skip this version</string>
+    <string name="update_later">Later</string>
+
+    <!-- 31_components -->
+    <string name="kind_word">Word</string>
+    <string name="kind_resource">Web resource</string>
+    <string name="kind_image">Image</string>
+    <string name="kind_voice_idea">Voice idea</string>
+    <string name="kind_idea">Idea</string>
+
+    <!-- 32_quick_access -->
+    <string name="quick_access_title">Quick access</string>
+    <string name="quick_access_sorted">Sorted by opens</string>
+    <string name="quick_access_empty">No opens yet. After you tap \"Open original page\" on web resources, frequently used pages appear here by number of opens.</string>
+    <string name="quick_access_remove">Remove \"%1$s\" from Quick access</string>
+    <string name="quick_access_no_summary">No summary</string>
+    <plurals name="quick_access_open_count">
+        <item quantity="one">%1$s open · %2$s</item>
+        <item quantity="other">%1$s opens · %2$s</item>
+    </plurals>
+
+    <!-- 33_pronunciation -->
+    <string name="pron_playing">Playing…</string>
+    <string name="pron_read_aloud">Read example / content aloud</string>
+    <string name="pron_phonetic">Phonetics</string>
+    <string name="pron_phonetic_placeholder">Filled in automatically after you enter the word</string>
+    <string name="pron_phonetic_hint_ready">Tap the US / UK buttons on the right to hear it</string>
+    <string name="pron_phonetic_hint_empty">Enter a word first to hear it</string>
+    <string name="pron_tap_to_play">Tap to hear it</string>
+    <string name="pron_us">US</string>
+    <string name="pron_uk">UK</string>
+    <string name="pron_play_us">Play US pronunciation</string>
+    <string name="pron_play_uk">Play UK pronunciation</string>
+
+    <!-- 34_relay_ui -->
+    <string name="relay_ui_clipboard_failed_no_location">Couldn\'t write to the clipboard and no save location was chosen; the item may already be deleted from the server.</string>
+    <string name="relay_ui_no_clipboard_image">There\'s no image on the clipboard</string>
+    <string name="relay_ui_clipboard_failed_choose">Couldn\'t write to the clipboard. Choose a save location so the content isn\'t lost.</string>
+    <string name="relay_ui_clipboard_failed_no_manager">Couldn\'t write to the clipboard, and no file manager is available to save the file.</string>
+    <string name="relay_ui_no_file_manager">No file manager is available to save the file.</string>
+    <string name="relay_ui_clip_label_image">MemoIsle image</string>
+    <string name="relay_ui_title">Transfer</string>
+    <string name="relay_ui_intro">Send text, images and small files between your phone and the web app. The server only relays and doesn\'t store them; items are valid for 10 minutes.</string>
+    <string name="relay_ui_send_to_web">Send to web</string>
+    <string name="relay_ui_text_label">Text to send</string>
+    <string name="relay_ui_text_placeholder">A link, a code or some text</string>
+    <string name="relay_ui_sending">Sending…</string>
+    <string name="relay_ui_send_text">Send text</string>
+    <string name="relay_ui_paste_image">Paste clipboard image</string>
+    <string name="relay_ui_choose_file">Choose file</string>
+    <string name="relay_ui_file_limit">Up to 20 MB per file.</string>
+    <string name="relay_ui_received">Received</string>
+    <string name="relay_ui_keep_open">Keep this page open to receive automatically</string>
+    <string name="relay_ui_empty">Nothing yet. Send text, images or files from \"Transfer\" in the web app and they\'ll appear here.</string>
+    <string name="relay_ui_copying">Copying…</string>
+    <string name="relay_ui_copy_image">Copy image</string>
+    <string name="relay_ui_saving">Saving…</string>
+    <string name="relay_ui_dismiss">Dismiss</string>
+    <string name="relay_item_meta">From %1$s · %2$s · %3$s left</string>
+
+    <!-- 35_forget_ui -->
+    <string name="forget_title">Reminders</string>
+    <string name="forget_intro">Keep text, images and files you tend to forget here. Requires a connection.</string>
+    <string name="forget_search">Search titles or text</string>
+    <string name="forget_new">New</string>
+    <string name="forget_empty">No items yet. Write down something you tend to forget, or add images and files.</string>
+    <string name="forget_new_item">New item</string>
+    <string name="forget_title_counter">Title %1$s/100</string>
+    <string name="forget_content_counter">Text %1$s/10000</string>
+    <string name="forget_pin">Pin</string>
+    <string name="forget_record">Save</string>
+    <string name="forget_save_text">Save text</string>
+    <string name="forget_delete_item">Delete item</string>
+    <string name="forget_choose_files">Choose images or files</string>
+    <string name="forget_files_hint">You can pick several at once. Up to 20 MB each, at most 20 per item.</string>
+    <string name="forget_delete_title">Delete this item?</string>
+    <string name="forget_delete_text">The text and all attachments will be deleted, including files on disk. This doesn\'t go to the trash.</string>
+    <string name="forget_confirm_delete">Delete</string>
+    <string name="forget_delete_attachment_title">Delete this attachment?</string>
+    <string name="forget_delete_attachment_text">\"%1$s\" will be removed from this item and from disk.</string>
+    <string name="forget_save_as">Save as</string>
+    <string name="forget_pinned_title">Pinned · %1$s</string>
+    <string name="forget_no_attachments">No attachments</string>
+    <plurals name="forget_attachment_count">
+        <item quantity="one">%1$s attachment</item>
+        <item quantity="other">%1$s attachments</item>
+    </plurals>
+    <string name="forget_attachment_meta">%1$s · %2$s</string>
+    <string name="forget_kind_file">File</string>
+
+    <!-- 36_ledger_ui -->
+    <string name="ledger_title">Ledger</string>
+    <string name="ledger_online_only">Online only</string>
+    <string name="ledger_recognize_image">Recognize image</string>
+    <string name="ledger_add">Add entry</string>
+    <string name="ledger_quick_label">Quick entry</string>
+    <string name="ledger_quick_placeholder">e.g. Spent 10 on breakfast today</string>
+    <string name="ledger_prev_month">Previous month</string>
+    <string name="ledger_this_month">This month</string>
+    <string name="ledger_next_month">Next month</string>
+    <string name="ledger_reload">Reload</string>
+    <string name="ledger_all_categories">All categories</string>
+    <string name="ledger_empty_month">No entries this month. Tap + at the bottom right to add one</string>
+    <string name="ledger_load_more">Load more</string>
+    <string name="ledger_delete_title">Permanently delete this entry?</string>
+    <string name="ledger_balance">Balance</string>
+    <string name="ledger_summary_unfiltered">Not affected by the filters below</string>
+    <string name="ledger_category_subtotals">Category subtotals</string>
+    <string name="ledger_collapse_subtotals">Collapse category subtotals</string>
+    <string name="ledger_expand_subtotals">Expand category subtotals</string>
+    <string name="ledger_edit_entry">Edit entry</string>
+    <string name="ledger_amount">Amount</string>
+    <string name="ledger_currency_label">Currency, e.g. CNY / USD</string>
+    <string name="ledger_date_label">Date YYYY-MM-DD</string>
+    <string name="ledger_category_label">Category (custom allowed)</string>
+    <string name="ledger_choose_category">Choose a common category</string>
+    <string name="ledger_account_label">Account (optional)</string>
+    <string name="ledger_note_label">Note (optional)</string>
+    <string name="ledger_filter_all">All</string>
+    <string name="ledger_filter_category">Category: %1$s</string>
+    <plurals name="ledger_month_entry_count">
+        <item quantity="one">This month · %1$s entry</item>
+        <item quantity="other">This month · %1$s entries</item>
+    </plurals>
+    <string name="ledger_avatar_fallback">L</string>
+    <string name="ledger_source_vision">vision model</string>
+    <string name="ledger_source_llm">local model</string>
+    <string name="ledger_source_rule">rules</string>
+    <string name="ledger_source_hint">Recognized by: %1$s. Check it before saving; nothing has been recorded yet.</string>
+    <string name="ledger_error_amount_input">Enter an amount greater than 0, with at most two decimals and up to 1 billion.</string>
+
+    <!-- 37_auth_ui -->
+    <string name="auth_title_register_invite">Register with an invitation code</string>
+    <string name="auth_title_register">Join MemoIsle</string>
+    <string name="auth_title_login">Welcome back to MemoIsle</string>
+    <string name="auth_subtitle_register">Starting today, keep every moment worth meeting again</string>
+    <string name="auth_subtitle_login">Keep organizing what\'s worth meeting again</string>
+    <string name="auth_checking">Checking sign-in status…</string>
+    <string name="auth_forgot_password">Forgot password?</string>
+    <string name="auth_entering">Signing in…</string>
+    <string name="auth_dev_login">Local dev sign-in</string>
+    <string name="auth_register_terms">By registering, you agree that we store only what\'s needed for sync</string>
+    <string name="auth_footer">↔  Your data is yours alone · Syncs between web and Android</string>
+    <string name="auth_nickname_label">Nickname (optional)</string>
+    <string name="auth_nickname_placeholder">Enter a nickname (optional)</string>
+    <string name="auth_email_label">Email</string>
+    <string name="auth_email_placeholder">Enter your email address</string>
+    <string name="auth_email_invalid">Enter a valid email address</string>
+    <string name="auth_invite_label">Invitation code</string>
+    <string name="auth_invite_placeholder">Enter the invitation code</string>
+    <string name="auth_code_label">Email code</string>
+    <string name="auth_code_placeholder">Enter the 6-digit code</string>
+    <string name="auth_code_digits">Enter 6 digits</string>
+    <string name="auth_send_code">Send code</string>
+    <string name="auth_password_label">Password</string>
+    <string name="auth_password_placeholder_register">Set a password of at least 8 characters</string>
+    <string name="auth_password_placeholder">Enter your password</string>
+    <string name="auth_hide">Hide</string>
+    <string name="auth_show">Show</string>
+    <string name="auth_password_hint">At least 8 characters; letters and numbers recommended</string>
+    <string name="auth_confirm_password_label">Confirm password</string>
+    <string name="auth_confirm_password_placeholder">Enter the password again</string>
+    <string name="auth_confirm_password_mismatch">The two passwords must match</string>
+    <string name="auth_processing">Processing…</string>
+    <string name="auth_create_account">Create account</string>
+    <string name="auth_login">Sign in</string>
+    <string name="auth_have_account">Already have an account?</string>
+    <string name="auth_no_account">Don\'t have an account?</string>
+    <string name="auth_back_to_login">Back to sign-in</string>
+    <string name="auth_register_now">Register now</string>
+    <string name="auth_other_methods">Or use another method</string>
+
+    <!-- 38_home_ui -->
+    <string name="home_logout_busy">Some items are still saving. Try signing out later</string>
+    <string name="home_logout_sync_failed">Sync didn\'t finish. You\'re still signed in and nothing was cleared</string>
+    <string name="home_clipboard_filled">Filled in \"%1$s\" from the clipboard</string>
+    <string name="home_meanings_applied">Applied the selected meanings; your manual entries were kept</string>
+    <string name="home_transcribing">Transcribing with on-device SenseVoice…</string>
+    <string name="home_downloading_model">Downloading the on-device speech model for first use (about 160 MB)…</string>
+    <string name="home_no_text_recognized">No usable text was recognized. Please add it manually.</string>
+    <string name="home_transcribe_done">Transcription done. You can edit the result.</string>
+    <string name="home_quick_access_remove_failed">Can\'t remove it right now. Check your network and try again</string>
+    <string name="home_clip_label_link">MemoIsle web link</string>
+    <string name="home_link_copied">Link copied</string>
+    <string name="home_share_resource">Share web resource</string>
+    <string name="home_share_image">Share image</string>
+    <string name="home_record_failed">The recording wasn\'t saved. Please try again.</string>
+    <string name="home_resume_unsupported">This device can\'t resume recording. Please stop the current recording.</string>
+    <string name="home_pause_unsupported">This device can\'t pause recording. Please stop the recording.</string>
+    <string name="home_title_inbox">Inbox</string>
+    <string name="home_title_trash">Trash</string>
+    <string name="home_title_review">Today\'s review</string>
+    <string name="home_title_library">Library</string>
+    <string name="home_back_home">Back to home</string>
+    <string name="home_inbox_no_match">Nothing in the inbox matches</string>
+    <string name="home_inbox_empty">Your inbox is empty</string>
+    <string name="home_inbox_empty_hint">Quick notes land here first and leave once sorted or archived.</string>
+    <string name="home_trash_no_match">Nothing in the trash matches</string>
+    <string name="home_trash_empty">Trash is empty</string>
+    <string name="home_trash_empty_hint">Deleted items stay here for 30 days and can be restored in that time.</string>
+    <string name="home_section_search">Search results</string>
+    <string name="home_section_all">All items</string>
+    <string name="home_section_recent_ideas">Recent ideas</string>
+    <string name="home_logout_title">Some items haven\'t synced</string>
+    <string name="home_syncing">Syncing…</string>
+    <string name="home_sync_and_logout">Sync and sign out</string>
+    <string name="home_keep_editing">Keep editing</string>
+    <string name="home_duplicate_word_text">\"%1$s\" is already in your library. Merge the new example into it, or save it separately anyway.</string>
+    <string name="home_merge_examples">Merge examples</string>
+    <string name="home_view">View</string>
+    <string name="home_save_anyway">Save anyway</string>
+    <string name="home_duplicate_url_text">\"%1$s\" is already in your library. View the existing item, or save it separately anyway.</string>
+    <string name="home_view_existing">View existing</string>
+    <string name="home_discard_title">Discard this recording?</string>
+    <string name="home_discard_text">The recording and current text won\'t be saved. Discard them?</string>
+    <string name="home_discard">Discard</string>
+    <string name="home_move_to_trash">Move to trash</string>
+    <string name="home_move_to_trash_text">\"%1$s\" will be moved to the trash and permanently deleted after 30 days. Continue?</string>
+    <string name="home_purge">Delete permanently</string>
+    <string name="home_purge_text">\"%1$s\" will be permanently deleted. This can\'t be undone. Continue?</string>
+    <string name="home_relay_cd">Transfer: send text and files to and from the web app</string>
+    <string name="home_sync">Sync</string>
+    <string name="home_more_actions">More actions</string>
+    <string name="home_checking">Checking…</string>
+    <string name="home_check_update">Check for updates</string>
+    <string name="home_exporting">Exporting…</string>
+    <string name="home_export">Export data</string>
+    <string name="home_logout">Sign out</string>
+    <string name="home_search_placeholder">Search titles, text, URLs, meanings or tags</string>
+    <string name="home_clear_search">Clear search</string>
+    <string name="home_nav_home">Home</string>
+    <string name="home_nav_review">Review</string>
+    <string name="home_nav_forget">Reminders</string>
+    <string name="home_nav_vault">Vault</string>
+    <string name="word_field_meaning">Chinese meaning</string>
+    <string name="word_field_example">example</string>
+    <string name="home_auto_filled">Auto-filled %1$s</string>
+    <string name="home_model_download_failed">Couldn\'t download the on-device model. You can type the text manually.</string>
+    <string name="home_transcribe_failed">On-device transcription failed. You can type the text manually.</string>
+    <string name="home_undo">Undo</string>
+    <string name="home_quick_access_removed">Removed \"%1$s\" from Quick access</string>
+    <plurals name="home_inbox_pending">
+        <item quantity="one">%1$s item to sort</item>
+        <item quantity="other">%1$s items to sort</item>
+    </plurals>
+    <plurals name="home_trash_subtitle">
+        <item quantity="one">%1$s item · permanently deleted after 30 days</item>
+        <item quantity="other">%1$s items · permanently deleted after 30 days</item>
+    </plurals>
+    <plurals name="home_count_items">
+        <item quantity="one">%1$s item</item>
+        <item quantity="other">%1$s items</item>
+    </plurals>
+    <plurals name="home_count_images">
+        <item quantity="one">%1$s image</item>
+        <item quantity="other">%1$s images</item>
+    </plurals>
+    <plurals name="home_count_ideas">
+        <item quantity="one">%1$s idea</item>
+        <item quantity="other">%1$s ideas</item>
+    </plurals>
+    <plurals name="home_count_resources">
+        <item quantity="one">%1$s resource</item>
+        <item quantity="other">%1$s resources</item>
+    </plurals>
+    <plurals name="home_count_words">
+        <item quantity="one">%1$s word</item>
+        <item quantity="other">%1$s words</item>
+    </plurals>
+    <plurals name="home_logout_unsynced">
+        <item quantity="one">%1$s item is waiting to sync or be handled. Sync before signing out so local recordings and edits aren\'t cleared.</item>
+        <item quantity="other">%1$s items are waiting to sync or be handled. Sync before signing out so local recordings and edits aren\'t cleared.</item>
+    </plurals>
+    <plurals name="home_inbox_cd">
+        <item quantity="one">Inbox, %1$s item to sort</item>
+        <item quantity="other">Inbox, %1$s items to sort</item>
+    </plurals>
+
+    <!-- 39_home_composers -->
+    <string name="home_action_write_idea">Idea</string>
+    <string name="home_action_voice">Voice</string>
+    <string name="home_action_word">Word</string>
+    <string name="home_action_browse">Browse</string>
+    <string name="home_image_title">Save an image</string>
+    <string name="home_image_hint">Uploads the original; the title comes from the file name. Add notes in the web app.</string>
+    <string name="home_uploading">Uploading…</string>
+    <string name="home_choose">Choose</string>
+    <string name="home_looking_up">Looking up…</string>
+    <string name="home_lookup_again">Look up again</string>
+    <string name="home_clear_preview">Clear preview</string>
+    <string name="home_dictionary_preview">Dictionary preview</string>
+    <string name="home_lookup_by_lemma">Looked up by lemma %1$s</string>
+    <string name="home_choose_meanings">Choose the Chinese meanings to save</string>
+    <string name="home_collapse">Collapse</string>
+    <string name="home_no_meaning">The dictionary returned no Chinese meaning. Please fill it in manually.</string>
+    <string name="home_example_prefix">Example: %1$s</string>
+    <string name="home_use_selected">Use selected meanings</string>
+    <string name="home_keep_manual">Keep manual entries</string>
+    <string name="home_word_title">Save an English word</string>
+    <string name="home_word_filling">Filling in the Chinese meaning, phonetics and example…</string>
+    <string name="home_word_hint">The meaning, phonetics and example fill in automatically</string>
+    <string name="home_clipboard">Clipboard</string>
+    <string name="home_word_label">Word or phrase</string>
+    <string name="home_word_placeholder">e.g. serendipity</string>
+    <string name="home_meaning_label">Chinese meaning (auto-filled)</string>
+    <string name="home_example_label">Example (auto-filled)</string>
+    <string name="home_save_word">Save word</string>
+    <string name="home_resource_hint">Read-only on the phone. To save a page, share it to MemoIsle from your browser; organize in the web app.</string>
+    <string name="home_idea_placeholder">Jot down what\'s on your mind; sort it later…</string>
+    <string name="home_idea_inbox_hint">Saved ideas go to the inbox first</string>
+    <string name="home_save_idea">Save idea</string>
+    <string name="home_action_uploading">Uploading</string>
+    <string name="home_filter_resources">Resources</string>
+    <string name="home_filter_cat_media">Video &amp; audio</string>
+    <string name="home_filter_cat_tool">Tools</string>
+    <string name="home_filter_cat_book_paper">Books &amp; papers</string>
+    <string name="home_filter_cat_product">Products</string>
+
+    <!-- 40_rows -->
+    <string name="row_waiting_meaning">Meaning to be added</string>
+    <string name="row_star">Star</string>
+    <string name="row_familiarity">Familiarity %1$s/5</string>
+    <string name="row_image_pending_upload">Image waiting to upload</string>
+    <string name="row_archive">Archive</string>
+    <string name="row_sorted">Mark sorted</string>
+    <string name="row_restore">Restore</string>
+    <string name="row_sync_pending">Pending sync</string>
+    <string name="row_sync_failed">Sync failed</string>
+    <string name="row_sync_conflict">Conflict</string>
+    <string name="row_conflict_title">Edit conflict</string>
+    <string name="row_conflict_text">\"%1$s\" was updated on another device. Your local changes were kept; choose which version to use.</string>
+    <string name="row_conflict_use_server">Use server version</string>
+    <string name="row_conflict_keep_mine">Keep my changes</string>
+    <string name="row_conflict_later">Decide later</string>
+    <string name="row_empty_no_match">No matching items</string>
+    <string name="row_empty_library">Your library is empty</string>
+    <string name="row_empty_resource">No web resources yet</string>
+    <string name="row_empty_word">Start with your first English word</string>
+    <string name="row_empty_image">No images yet</string>
+    <string name="row_empty_idea">Your first idea is waiting</string>
+    <string name="row_empty_no_match_hint">Try another keyword, or clear the search to browse everything.</string>
+    <string name="row_empty_library_hint">Start by saving an idea, an English word, an image or a web resource.</string>
+    <string name="row_empty_resource_hint">Save them in the web app, or share links to MemoIsle from your phone\'s browser.</string>
+    <string name="row_empty_word_hint">Save the word, its meaning and examples, and review on schedule.</string>
+    <string name="row_empty_image_hint">Choose images from your gallery; originals and thumbnails sync to the web.</string>
+    <string name="row_empty_idea_hint">Saved items go to the local library and sync to the web when online.</string>
+    <string name="row_voice_seconds">Voice %1$ss</string>
+    <string name="row_voice">Voice</string>
+    <plurals name="row_trash_days_left">
+        <item quantity="one">%1$s · deleted permanently in %2$s day</item>
+        <item quantity="other">%1$s · deleted permanently in %2$s days</item>
+    </plurals>
+
+    <!-- 41_review -->
+    <string name="review_nothing_today">Nothing to review today</string>
+    <string name="review_done_today">Done for today</string>
+    <string name="review_start">Start review</string>
+    <string name="review_plan_title">Review plan</string>
+    <string name="review_plan_text">The daily queue mixes words, resources to read and ideas to sort. Word feedback uses the intervals below.</string>
+    <string name="review_daily_limit_label">Daily queue limit (1–100)</string>
+    <string name="review_intervals_label">Interval days (6, comma-separated)</string>
+    <string name="review_intervals_hint">After forgot, after fuzzy / familiarity 1, familiarity 2–5</string>
+    <string name="review_filter_mixed">Mixed %1$s</string>
+    <string name="review_filter_words">Words %1$s</string>
+    <string name="review_filter_to_read">To read %1$s</string>
+    <string name="review_filter_to_sort">To sort %1$s</string>
+    <string name="review_adjust_plan">Adjust plan</string>
+    <string name="review_all_done">Today\'s review is complete</string>
+    <string name="review_all_done_hint">Due words, resources to read and ideas to sort will appear here.</string>
+    <string name="review_kind_word">Word review</string>
+    <string name="review_kind_resource">To read</string>
+    <string name="review_kind_idea">Idea to sort</string>
+    <string name="review_last_next">Last %1$s · Next %2$s</string>
+    <string name="review_never">not reviewed yet</string>
+    <string name="review_unscheduled">not scheduled</string>
+    <string name="review_show_answer">Show answer</string>
+    <string name="review_forgot">Forgot</string>
+    <string name="review_fuzzy">Fuzzy</string>
+    <string name="review_remembered">Remembered</string>
+    <string name="review_open_source">Open original page</string>
+    <string name="review_unstar">Unstar</string>
+    <string name="review_skip">Skip this one</string>
+    <plurals name="review_stat_words">
+        <item quantity="one">word</item>
+        <item quantity="other">words</item>
+    </plurals>
+    <plurals name="review_stat_to_read">
+        <item quantity="one">to read</item>
+        <item quantity="other">to read</item>
+    </plurals>
+    <plurals name="review_stat_to_sort">
+        <item quantity="one">to sort</item>
+        <item quantity="other">to sort</item>
+    </plurals>
+    <string name="review_error_daily_limit">The daily limit must be a whole number from 1 to 100</string>
+    <string name="review_error_intervals">Intervals must be 6 whole numbers of days from 1 to 365</string>
+    <plurals name="review_plan_remaining">
+        <item quantity="one">Today\'s plan: %1$s items, %2$s left</item>
+        <item quantity="other">Today\'s plan: %1$s items, %2$s left</item>
+    </plurals>
+    <plurals name="review_remaining">
+        <item quantity="one">%1$s left</item>
+        <item quantity="other">%1$s left</item>
+    </plurals>
+    <plurals name="review_total">
+        <item quantity="one">%1$s item, mixed by plan</item>
+        <item quantity="other">%1$s items, mixed by plan</item>
+    </plurals>
+
+    <!-- 42_dialogs -->
+    <string name="dialog_copy_link">Copy link</string>
+    <string name="dialog_share">Share</string>
+    <string name="dialog_link_health">Link check: %1$s</string>
+    <string name="dialog_purpose">Purpose</string>
+    <string name="dialog_personal_note">Personal note</string>
+    <string name="dialog_saved_at">Saved %1$s</string>
+    <string name="dialog_last_checked">Last checked %1$s</string>
+    <string name="dialog_collapse_original">Hide original</string>
+    <string name="dialog_view_original">View original</string>
+    <string name="dialog_note">Note</string>
+    <string name="dialog_image_not_uploaded">The image hasn\'t finished uploading; it retries automatically when online</string>
+    <string name="dialog_ocr_title">Image text recognition</string>
+    <string name="dialog_ocr_no_text">No text recognized</string>
+    <string name="dialog_auto_tags">Auto tags</string>
+    <string name="dialog_ocr_source">Source: %1$s</string>
+    <string name="dialog_updated_at_value">Updated %1$s</string>
+    <string name="dialog_ocr_failed">Image text recognition failed.</string>
+    <string name="dialog_ocr_disabled">Image text recognition isn\'t enabled.</string>
+    <string name="dialog_ocr_queued">Queued for text recognition.</string>
+    <string name="dialog_ocr_processing">Recognizing text in the image…</string>
+    <string name="dialog_ocr_not_started">Text recognition hasn\'t started.</string>
+    <string name="dialog_updated_at">Updated %1$s</string>
+    <string name="dialog_save_changes">Save changes</string>
+    <string name="dialog_download_recording">Download recording</string>
+    <string name="dialog_meeting_transcript">Meeting transcript (me / them)</string>
+    <string name="dialog_title">Title</string>
+    <string name="dialog_recall_first">Try to recall the meaning and example first</string>
+    <string name="dialog_meaning">Meaning</string>
+    <string name="dialog_example_context">Example or context</string>
+    <string name="dialog_how_well">How well did you remember?</string>
+    <string name="dialog_content">Content</string>
+    <string name="home_action_write_idea_title">Write an idea</string>
+    <string name="dialog_idea_label">What\'s on your mind?</string>
+    <string name="dialog_save_resource">Save resource</string>
+    <string name="dialog_shared_page_title">Save shared page</string>
+    <string name="dialog_shared_page_hint">Confirm the link shared from your browser. Once saved it\'s read-only on the phone; use the web app to organize it.</string>
+    <string name="dialog_link_label">Link</string>
+    <string name="dialog_title_optional">Title (optional)</string>
+    <string name="dialog_note_optional">Personal note (optional)</string>
+    <string name="dialog_fill_from_clipboard">Fill from clipboard</string>
+    <string name="dialog_word_hint">Enter a word and the Chinese meaning, phonetics and example fill in automatically</string>
+    <string name="home_action_voice_title">Voice note</string>
+    <string name="dialog_paused">Paused</string>
+    <string name="dialog_recording">Recording</string>
+    <string name="dialog_recording_ready">Recording ready</string>
+    <string name="dialog_waiting_start">Ready to start</string>
+    <string name="dialog_input_level">Input level</string>
+    <string name="dialog_mic_permission">Recording needs microphone permission. You can still write text notes.</string>
+    <string name="dialog_transcript_label">Transcript (editable, optional)</string>
+    <string name="dialog_transcript_placeholder">The recognized text fills in after you stop recording</string>
+    <string name="dialog_transcribing">Transcribing…</string>
+    <string name="dialog_recording_privacy">The original recording is saved only to your private library; without the model you can still type the text.</string>
+    <string name="dialog_resume">Resume</string>
+    <string name="dialog_pause">Pause</string>
+    <string name="dialog_stop_recording">Stop recording</string>
+    <string name="dialog_save_voice">Save voice idea</string>
+    <string name="dialog_start_recording">Start recording</string>
+    <string name="dialog_record_again">Record again</string>
+    <string name="word_review_meta">Familiarity %1$s/5 · Reviewed %2$s times · Last %3$s · Next %4$s</string>
+    <string name="dialog_play_seconds">Play · %1$ss</string>
+    <string name="dialog_play_recording">Play recording</string>
+    <string name="dialog_seconds">%1$ss</string>
+
+    <!-- 43_vault_ui -->
+    <string name="vault_generate">Generate</string>
+    <string name="vault_add_codes">Add recovery codes</string>
+    <string name="vault_new_entry">New entry</string>
+    <string name="vault_copy_username">Copy username</string>
+    <string name="vault_money_invalid">Only non-negative numbers with up to 9 digits and 2 decimals</string>
+    <string name="vault_due_today">Due today</string>
+    <string name="vault_field_host">Host</string>
+    <string name="vault_ssh_private_key">SSH private key</string>
+    <string name="vault_code">Code</string>
+    <string name="vault_step_up_title">Verify to open the vault</string>
+    <string name="vault_verifying">Verifying…</string>
+    <string name="vault_verify">Verify</string>
+    <string name="vault_currency_invalid">Must be 3 letters, e.g. USD</string>
+    <string name="vault_hide_master">Hide master password</string>
+    <string name="vault_lock">Lock</string>
+    <string name="vault_email_code_current">Email code · current</string>
+    <string name="vault_choose_key">Choose a key</string>
+    <string name="vault_not_set_up">No vault yet</string>
+    <string name="vault_no_saved_keys">No saved keys yet. Create a \"Key\" entry first.</string>
+    <string name="vault_authenticator">Authenticator</string>
+    <string name="vault_authenticator_current">Authenticator · current</string>
+    <string name="vault_balance">Account balance</string>
+    <string name="vault_field_account">Account</string>
+    <string name="vault_choose_key_ref">Choose the key to reference</string>
+    <string name="vault_ip_blocked_hint">Try again later. The phone app normally isn\'t IP-restricted; this usually means the server can\'t identify your address right now.</string>
+    <string name="vault_check_network">Check your network and try again.</string>
+    <string name="vault_date_hint_expiry_key">Use year-month-day, e.g. 2027-01-31</string>
+    <string name="vault_date_hint_expiry">Use year-month-day, e.g. 2026-11-30</string>
+    <string name="vault_date_hint_start">Use year-month-day, e.g. 2026-01-15</string>
+    <string name="vault_setup_on_web">Set a master password in the MemoIsle web app first. Then enter the same master password on your phone to unlock.</string>
+    <string name="vault_subscription_account">Subscription account</string>
+    <string name="vault_started_on">Subscription start date</string>
+    <string name="vault_billing_cycle">Billing cycle</string>
+    <string name="vault_unlocking">Unlocking…</string>
+    <string name="vault_unlock">Unlock</string>
+    <string name="vault_field_url">URL</string>
+    <string name="vault_field_port">Port</string>
+    <string name="vault_subtitle">End-to-end encrypted · the server stores only ciphertext</string>
+    <string name="vault_key_source">Private key source</string>
+    <string name="vault_key_passphrase">Key passphrase (optional)</string>
+    <string name="vault_private_key">Private key</string>
+    <string name="vault_enter_directly">Enter directly</string>
+    <string name="vault_login_user">Login user</string>
+    <string name="vault_login_password">Login password</string>
+    <string name="vault_start_blank">Leave blank to skip the start date</string>
+    <string name="vault_expiry_blank_no_reminder">Leave blank for no expiry reminder</string>
+    <string name="vault_expiry_blank_never">Leave blank if it never expires</string>
+    <string name="vault_currency_blank">Leave blank to save as USD</string>
+    <string name="vault_username_or_email">Username or email</string>
+    <string name="vault_field_username">Username</string>
+    <string name="vault_empty_hint">Tap + at the bottom right to save logins, API keys, servers or two-factor recovery codes.</string>
+    <string name="vault_no_match">No matching entries.</string>
+    <string name="vault_price">Price per period</string>
+    <string name="vault_loading">Loading the vault…</string>
+    <string name="vault_unused_code">Unused recovery code</string>
+    <string name="vault_no_host">No host</string>
+    <string name="vault_provider">Provider</string>
+    <string name="vault_discard_text">You have unsaved changes. Discard them?</string>
+    <string name="vault_load_failed">Can\'t load the vault right now</string>
+    <string name="vault_show_master">Show master password</string>
+    <string name="vault_discard_changes">Discard changes</string>
+    <string name="vault_reminders_done">All reminders are handled.</string>
+    <string name="vault_reminders">Reminders</string>
+    <string name="vault_search_placeholder">Search by name, username, URL or notes</string>
+    <string name="vault_paste_codes_placeholder">Paste the whole block of codes from the website; they\'re split on spaces, line breaks or commas</string>
+    <string name="vault_codes_used_up">Recovery codes used up</string>
+    <string name="vault_manage_on_web">To reset or change the master password or make encrypted backups, use the web app.</string>
+    <string name="vault_ip_blocked_title">The vault can\'t be opened on this network</string>
+    <string name="vault_ref_deleted">The referenced key was deleted; choose another</string>
+    <string name="vault_use_saved_key">Use a saved key</string>
+    <string name="vault_currency">Currency</string>
+    <string name="vault_code_used">Used</string>
+    <string name="vault_linked_account">Linked account</string>
+    <string name="vault_secret_content">Key content</string>
+    <string name="vault_password_reminders">Password reminders</string>
+    <string name="vault_empty">Your vault is empty</string>
+    <string name="vault_locked">Vault locked</string>
+    <string name="vault_weak_password_hint">Weak password: at least 12 characters mixing upper and lower case, numbers and symbols is safer. You can also tap \"Generate\".</string>
+    <string name="vault_rotate">Rotate regularly</string>
+    <string name="vault_plan_placeholder">e.g. Pro, Max, Plus, SuperGrok</string>
+    <string name="vault_price_placeholder">e.g. 20 or 20.00</string>
+    <string name="vault_balance_placeholder">e.g. 12.50</string>
+    <string name="vault_plan">Plan</string>
+    <string name="vault_copy_account">Copy account</string>
+    <string name="vault_copy_code">Copy recovery code</string>
+    <string name="vault_name">Name</string>
+    <string name="vault_code_available">Available</string>
+    <string name="vault_ref_auto_update">When the original key is updated, the new content is used here automatically</string>
+    <string name="vault_totp_code">One-time code</string>
+    <string name="vault_encrypting">Encrypting and saving…</string>
+    <string name="vault_expiry_optional">Expiry date (optional)</string>
+    <string name="vault_expiry_renewal">Expiry / renewal date</string>
+    <string name="vault_delete_code">Delete this recovery code</string>
+    <string name="vault_example_2027">e.g. 2027-01-31</string>
+    <string name="vault_example_2026_11">e.g. 2026-11-30</string>
+    <string name="vault_example_2026_01">e.g. 2026-01-15</string>
+    <string name="vault_balance_value">Balance %1$s</string>
+    <string name="vault_master_password">Master password</string>
+    <string name="vault_skip_checks">Don\'t check this entry\'s password strength or reuse</string>
+    <string name="vault_expires_on">Expires %1$s</string>
+    <string name="vault_no_username">No username</string>
+    <plurals name="vault_secret_chars">
+        <item quantity="one">%1$s character</item>
+        <item quantity="other">%1$s characters</item>
+    </plurals>
+    <string name="vault_no_secret">No key</string>
+    <string name="vault_codes_remaining">%1$s / %2$s available</string>
+    <string name="vault_private_key_ref_missing">Private key (referenced key deleted)</string>
+    <string name="vault_private_key_ref">Private key (uses \"%1$s\")</string>
+    <string name="vault_copied">Copied %1$s. The clipboard clears in %2$s seconds.</string>
+    <plurals name="vault_step_up_hint">
+        <item quantity="one">This phone needs to verify every %1$s hour; changing networks doesn\'t require re-verifying. The code is sent to your account email.</item>
+        <item quantity="other">This phone needs to verify every %1$s hours; changing networks doesn\'t require re-verifying. The code is sent to your account email.</item>
+    </plurals>
+    <plurals name="vault_unlock_hint_count">
+        <item quantity="one">Enter the master password to unlock %1$s entry. Unlocking happens on the phone; the master password is never sent to the server.</item>
+        <item quantity="other">Enter the master password to unlock %1$s entries. Unlocking happens on the phone; the master password is never sent to the server.</item>
+    </plurals>
+    <string name="vault_unlock_hint">Enter the master password to unlock. Unlocking happens on the phone; the master password is never sent to the server.</string>
+    <plurals name="vault_broken_count">
+        <item quantity="one">%1$s entry can\'t be decrypted and may be corrupted or tampered with; it\'s hidden.</item>
+        <item quantity="other">%1$s entries can\'t be decrypted and may be corrupted or tampered with; they\'re hidden.</item>
+    </plurals>
+    <string name="vault_hint_secret">API keys, SSH private keys, tokens</string>
+    <string name="vault_hint_server">Host, port and sign-in method</string>
+    <string name="vault_hint_recovery">Backup codes for two-factor authentication</string>
+    <string name="vault_hint_subscription">Claude, ChatGPT, Grok subscriptions</string>
+    <string name="vault_hint_login">Usernames and passwords for sites or apps</string>
+    <plurals name="vault_reminders_entry_count">
+        <item quantity="one">%1$s entry needs attention</item>
+        <item quantity="other">%1$s entries need attention</item>
+    </plurals>
+    <plurals name="vault_view_all_reminders">
+        <item quantity="one">View %1$s reminder</item>
+        <item quantity="other">View all %1$s reminders</item>
+    </plurals>
+    <string name="vault_filter_count">%1$s %2$s</string>
+    <string name="vault_filter_needs_action">Needs attention</string>
+    <string name="vault_rotate_none">No reminder</string>
+    <plurals name="vault_rotate_every">
+        <item quantity="one">Every %1$s day</item>
+        <item quantity="other">Every %1$s days</item>
+    </plurals>
+    <string name="vault_changed_on_save">Recorded as today after saving</string>
+    <string name="vault_changed_never">Not filled in yet</string>
+    <string name="vault_changed_today">%1$s (today)</string>
+    <plurals name="vault_changed_days_ago">
+        <item quantity="one">%1$s (%2$s day ago)</item>
+        <item quantity="other">%1$s (%2$s days ago)</item>
+    </plurals>
+    <string name="vault_new_kind">New %1$s</string>
+    <string name="vault_last_changed">%1$s last changed: %2$s</string>
+    <string name="vault_login_credentials">Login credentials</string>
+    <plurals name="vault_expired_days">
+        <item quantity="one">Expired %1$s day ago</item>
+        <item quantity="other">Expired %1$s days ago</item>
+    </plurals>
+    <plurals name="vault_expires_in_days">
+        <item quantity="one">Expires in %1$s day; reminders start 14 days before</item>
+        <item quantity="other">Expires in %1$s days; reminders start 14 days before</item>
+    </plurals>
+    <string name="vault_delete_confirm">Permanently delete \"%1$s\"? This can\'t be undone.</string>
+    <plurals name="vault_delete_referenced">
+        <item quantity="one">%1$s cloud server references this key (%2$s); after deletion it can\'t get the private key.</item>
+        <item quantity="other">%1$s cloud servers reference this key (%2$s); after deletion they can\'t get the private key.</item>
+    </plurals>
+    <string name="vault_copy_ssh_command">ssh command</string>
+</resources>

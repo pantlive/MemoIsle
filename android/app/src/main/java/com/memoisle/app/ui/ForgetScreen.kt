@@ -51,8 +51,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.memoisle.app.ForgetViewModel
+import com.memoisle.app.R
 import com.memoisle.app.data.ForgetAttachment
 import com.memoisle.app.data.ForgetItem
 import com.memoisle.app.data.forgetDisplayTitle
@@ -152,10 +155,10 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("易忘事项") },
+                title = { Text(stringResource(R.string.forget_title)) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.common_back))
                     }
                 },
             )
@@ -167,32 +170,32 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
         ) {
             item {
                 Text(
-                    "容易忘掉的文字、图片和文件，放在这里。需要联网。",
+                    stringResource(R.string.forget_intro),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (state.message != null) {
-                item { Text(state.message, color = MaterialTheme.colorScheme.primary) }
+                item { Text(state.message.asString(), color = MaterialTheme.colorScheme.primary) }
             }
             if (state.error != null) {
-                item { Text(state.error, color = MaterialTheme.colorScheme.error) }
+                item { Text(state.error.asString(), color = MaterialTheme.colorScheme.error) }
             }
             item {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("搜索标题或正文") },
+                    label = { Text(stringResource(R.string.forget_search)) },
                     singleLine = true,
                 )
             }
             item {
-                Button(onClick = ::startNew, enabled = !state.busy) { Text("新建") }
+                Button(onClick = ::startNew, enabled = !state.busy) { Text(stringResource(R.string.forget_new)) }
             }
             if (state.loading && state.items.isEmpty()) {
                 item { CircularProgressIndicator() }
             } else if (state.items.isEmpty()) {
-                item { Text("还没有事项。写下一句容易忘掉的话，或直接放上图片和文件。") }
+                item { Text(stringResource(R.string.forget_empty)) }
             } else {
                 items(state.items, key = { it.id }) { item ->
                     Card(
@@ -201,12 +204,21 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                     ) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                (if (item.pinned) "置顶 · " else "") + forgetDisplayTitle(item.title),
+                                if (item.pinned) {
+                                    stringResource(R.string.forget_pinned_title, forgetDisplayTitle(item.title))
+                                } else {
+                                    forgetDisplayTitle(item.title)
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                             )
+                            val attachmentsLabel = if (item.attachments.isEmpty()) {
+                                stringResource(R.string.forget_no_attachments)
+                            } else {
+                                pluralStringResource(R.plurals.forget_attachment_count, item.attachments.size, item.attachments.size)
+                            }
                             Text(
                                 buildString {
-                                    append(if (item.attachments.isEmpty()) "没有附件" else "${item.attachments.size} 个附件")
+                                    append(attachmentsLabel)
                                     if (item.content.isNotBlank()) append(" · ${item.content.trim().take(40)}")
                                 },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,14 +228,14 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                 }
             }
             item {
-                Text(if (editingId == null) "新事项" else "编辑", style = MaterialTheme.typography.titleMedium)
+                Text(if (editingId == null) stringResource(R.string.forget_new_item) else stringResource(R.string.common_edit), style = MaterialTheme.typography.titleMedium)
             }
             item {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("标题 ${forgetTextLength(title.trim())}/100") },
+                    label = { Text(stringResource(R.string.forget_title_counter, forgetTextLength(title.trim()))) },
                     singleLine = true,
                 )
             }
@@ -232,13 +244,13 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                     value = content,
                     onValueChange = { content = it },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                    label = { Text("正文 ${forgetTextLength(content.trim())}/10000") },
+                    label = { Text(stringResource(R.string.forget_content_counter, forgetTextLength(content.trim()))) },
                 )
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = pinned, onCheckedChange = { pinned = it })
-                    Text("置顶")
+                    Text(stringResource(R.string.forget_pin))
                 }
             }
             item {
@@ -254,10 +266,10 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                             }
                         },
                         enabled = !state.busy,
-                    ) { Text(if (editingId == null) "记下" else "保存文字") }
+                    ) { Text(if (editingId == null) stringResource(R.string.forget_record) else stringResource(R.string.forget_save_text)) }
                     if (editingId != null) {
                         OutlinedButton(onClick = { pendingDelete = true }, enabled = !state.busy) {
-                            Text("删除这条")
+                            Text(stringResource(R.string.forget_delete_item))
                         }
                     }
                 }
@@ -266,9 +278,9 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                 OutlinedButton(
                     onClick = { filePicker.launch(arrayOf("*/*")) },
                     enabled = !state.busy,
-                ) { Text("选择图片或文件") }
+                ) { Text(stringResource(R.string.forget_choose_files)) }
                 Text(
-                    "可一次选多个。单个不超过 20 MB，每条最多 20 个。",
+                    stringResource(R.string.forget_files_hint),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -276,7 +288,7 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                 AttachmentRow(
                     attachment = attachment,
                     preview = state.previews[attachment.id],
-                    note = state.previewNotes[attachment.id],
+                    note = state.previewNotes[attachment.id]?.asString(),
                     enabled = !state.busy,
                     onSave = {
                         pendingSaveId = attachment.id
@@ -285,7 +297,7 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                         }
                         if (launched.isFailure) {
                             pendingSaveId = null
-                            viewModel.showError("没有可用的文件管理器来保存文件。")
+                            viewModel.showError(UiText.res(R.string.relay_ui_no_file_manager))
                         }
                     },
                     onDelete = { pendingAttachmentId = attachment.id },
@@ -298,8 +310,8 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
     if (pendingDelete && editingId != null) {
         AlertDialog(
             onDismissRequest = { if (!state.busy) pendingDelete = false },
-            title = { Text("删除这条事项？") },
-            text = { Text("文字和全部附件都会删掉，磁盘上的文件也会清掉。这不会进回收站。") },
+            title = { Text(stringResource(R.string.forget_delete_title)) },
+            text = { Text(stringResource(R.string.forget_delete_text)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -310,18 +322,18 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                         }
                     },
                     enabled = !state.busy,
-                ) { Text("确认删除") }
+                ) { Text(stringResource(R.string.forget_confirm_delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = false }, enabled = !state.busy) { Text("取消") }
+                TextButton(onClick = { pendingDelete = false }, enabled = !state.busy) { Text(stringResource(R.string.common_cancel)) }
             },
         )
     }
     if (pendingAttachment != null && editingId != null) {
         AlertDialog(
             onDismissRequest = { if (!state.busy) pendingAttachmentId = null },
-            title = { Text("删除这个附件？") },
-            text = { Text("「${pendingAttachment.originalName}」会从这条事项和磁盘上一并删除。") },
+            title = { Text(stringResource(R.string.forget_delete_attachment_title)) },
+            text = { Text(stringResource(R.string.forget_delete_attachment_text, pendingAttachment.originalName)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -330,10 +342,10 @@ fun ForgetScreen(viewModel: ForgetViewModel, onClose: () -> Unit) {
                         pendingAttachmentId = null
                     },
                     enabled = !state.busy,
-                ) { Text("确认删除") }
+                ) { Text(stringResource(R.string.forget_confirm_delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingAttachmentId = null }, enabled = !state.busy) { Text("取消") }
+                TextButton(onClick = { pendingAttachmentId = null }, enabled = !state.busy) { Text(stringResource(R.string.common_cancel)) }
             },
         )
     }
@@ -361,13 +373,17 @@ private fun AttachmentRow(
             }
             Text(attachment.originalName.ifBlank { "file" })
             Text(
-                "${if (isForgetImage(attachment)) "图片" else "文件"} · ${formatForgetBytes(attachment.size)}",
+                stringResource(
+                    R.string.forget_attachment_meta,
+                    stringResource(if (isForgetImage(attachment)) R.string.kind_image else R.string.forget_kind_file),
+                    formatForgetBytes(attachment.size),
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (note != null) Text(note, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSave, enabled = enabled) { Text("另存") }
-                OutlinedButton(onClick = onDelete, enabled = enabled) { Text("删除") }
+                OutlinedButton(onClick = onSave, enabled = enabled) { Text(stringResource(R.string.forget_save_as)) }
+                OutlinedButton(onClick = onDelete, enabled = enabled) { Text(stringResource(R.string.common_delete)) }
             }
         }
     }

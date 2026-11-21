@@ -1,5 +1,8 @@
 package com.memoisle.app.data
 
+import com.memoisle.app.R
+import com.memoisle.app.TestStrings.en
+import com.memoisle.app.TestStrings.zh
 import com.memoisle.app.network.ApiException
 import java.time.Instant
 import java.time.LocalDate
@@ -61,7 +64,7 @@ class VaultTest {
             VaultCrypto.unlock("wrong password", material)
             fail("应拒绝错误的主密码")
         } catch (error: WrongMasterPasswordException) {
-            assertEquals("主密码不正确。", error.message)
+            assertEquals("主密码不正确。", zh(error.text))
         }
     }
 
@@ -93,7 +96,7 @@ class VaultTest {
         assertEquals(listOf("aaa-111", "bbb-222", "ccc-333"), parsed.codes.map { it.code })
         assertEquals("me@example.com", parsed.account)
         val legacy = VaultItemData.fromJson("{\"kind\":\"secret\",\"title\":\"\",\"secret\":\"sk\",\"rotateDays\":7}")
-        assertEquals("未命名", legacy.title)
+        assertEquals(ContentDefaults.untitled, legacy.title)
         assertEquals(0, legacy.rotateDays)
     }
 
@@ -157,8 +160,12 @@ class VaultTest {
         assertFalse(byEntry.containsKey("far"))
         assertFalse(byEntry.containsKey("empty"))
         assertTrue(reminders.takeWhile { it.danger }.size == reminders.count { it.danger })
-        assertEquals("已 200 天没有更换，设定为每 90 天换一次。", reminders.first { it.entryId == "old" }.message)
-        assertEquals("和「重复乙」用的是同一个密码。", reminders.first { it.entryId == "r1" }.message)
+        assertEquals("已 200 天没有更换，设定为每 90 天换一次。", zh(reminders.first { it.entryId == "old" }.message))
+        assertEquals("和「重复乙」用的是同一个密码。", zh(reminders.first { it.entryId == "r1" }.message))
+        assertEquals(
+            "Not changed for 200 days; set to rotate every 90 days.",
+            en(reminders.first { it.entryId == "old" }.message),
+        )
     }
 
     @Test
@@ -252,7 +259,7 @@ class VaultTest {
             }
             """.trimIndent(),
         )
-        assertEquals("未命名", normalized.title)
+        assertEquals(ContentDefaults.untitled, normalized.title)
         assertEquals("other", normalized.provider)
         assertEquals("X", normalized.plan)
         assertEquals("", normalized.startedOn)
@@ -362,7 +369,7 @@ class VaultTest {
         assertEquals(listOf(VaultReminderType.WEAK), reminders.filter { it.entryId == "login" }.map { it.type })
         assertEquals(
             "已于 2026-10-13 到期（3 天前），请续费或更新到期日。",
-            reminders.first { it.entryId == "sub" }.message,
+            zh(reminders.first { it.entryId == "sub" }.message),
         )
     }
 
@@ -403,10 +410,10 @@ class VaultTest {
         assertFalse(byEntry.containsKey("far"))
         assertFalse(byEntry.containsKey("rotateNoPw"))
         assertFalse(byEntry.containsKey("rotatePw"))
-        assertEquals("已于 2026-10-13 到期（3 天前），请续费或更新到期日。", reminders.first { it.entryId == "expired" }.message)
-        assertEquals("今天到期，请确认续费。", reminders.first { it.entryId == "today" }.message)
-        assertEquals("10 天后到期续费（2026-10-26）。", reminders.first { it.entryId == "soon" }.message)
-        assertEquals("一次性 / 按量", VAULT_BILLING_LABELS.getValue(VAULT_BILLING_NONE))
+        assertEquals("已于 2026-10-13 到期（3 天前），请续费或更新到期日。", zh(reminders.first { it.entryId == "expired" }.message))
+        assertEquals("今天到期，请确认续费。", zh(reminders.first { it.entryId == "today" }.message))
+        assertEquals("10 天后到期续费（2026-10-26）。", zh(reminders.first { it.entryId == "soon" }.message))
+        assertEquals(R.string.vault_billing_none, VAULT_BILLING_LABELS.getValue(VAULT_BILLING_NONE))
     }
 
     @Test
@@ -593,13 +600,13 @@ class VaultTest {
         val reminders = collectVaultReminders(entries, today, ZoneOffset.UTC)
         val byEntry = reminders.groupBy({ it.entryId }, { it.type })
         assertEquals(listOf(VaultReminderType.ROTATE), byEntry["srv-old-key"])
-        assertEquals("已 200 天没有更换，设定为每 90 天换一次。", reminders.first { it.entryId == "srv-old-key" }.message)
+        assertEquals("已 200 天没有更换，设定为每 90 天换一次。", zh(reminders.first { it.entryId == "srv-old-key" }.message))
         assertEquals(listOf(VaultReminderType.MISSING_KEY), byEntry["srv-missing"])
-        assertEquals("密钥缺失", VaultReminderType.MISSING_KEY.label)
+        assertEquals("密钥缺失", com.memoisle.app.TestStrings.catalog("values-zh").strings[com.memoisle.app.TestStrings.stringName(VaultReminderType.MISSING_KEY.label)])
         assertTrue(reminders.first { it.entryId == "srv-missing" }.danger)
         assertEquals(
             "引用的密钥已被删除，请重新选择或直接填写私钥。",
-            reminders.first { it.entryId == "srv-missing" }.message,
+            zh(reminders.first { it.entryId == "srv-missing" }.message),
         )
         assertFalse(byEntry.containsKey("srv-fresh"))
         assertEquals("2026-03-30T00:00:00Z", lastChangedAt(entries.first { it.id == "srv-old-key" }, entries))

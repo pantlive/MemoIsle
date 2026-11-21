@@ -1,6 +1,7 @@
 package com.memoisle.app
 
 import android.app.Application
+import android.content.Context
 import com.memoisle.app.data.AuthTokenStore
 import com.memoisle.app.data.MemoDatabaseHelper
 import com.memoisle.app.data.MemoRepository
@@ -14,6 +15,10 @@ class MemoIsleApplication : Application() {
         private set
     lateinit var tokenStore: AuthTokenStore
         private set
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(LocaleController.wrap(base))
+    }
 
     override fun onCreate() {
         super.onCreate()

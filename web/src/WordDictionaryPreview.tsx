@@ -1,5 +1,6 @@
 import type { WordLookupResponse } from "./types";
 import WordPronunciation from "./WordPronunciation";
+import { useI18n } from "./I18nProvider";
 
 interface WordDictionaryPreviewProps {
   preview: WordLookupResponse;
@@ -18,19 +19,20 @@ export default function WordDictionaryPreview({
   onApply,
   onClose,
 }: WordDictionaryPreviewProps) {
+  const { t } = useI18n();
   return (
-    <section className="word-lookup-preview" aria-label="词典查词预览">
+    <section className="word-lookup-preview" aria-label={t("词典查词预览")}>
       <div className="word-lookup-header">
         <div>
-          <strong>词典预览</strong>
+          <strong>{t("词典预览")}</strong>
           <span>
             {preview.lemma !== preview.word
-              ? `按词元 ${preview.lemma} 查询中文释义`
-              : "选择要保存的中文释义"}
+              ? t("按词元 {lemma} 查询中文释义", { lemma: preview.lemma })
+              : t("选择要保存的中文释义")}
           </span>
         </div>
         <button type="button" className="word-lookup-close" onClick={onClose}>
-          收起
+          {t("收起")}
         </button>
       </div>
       <WordPronunciation
@@ -54,17 +56,17 @@ export default function WordDictionaryPreview({
                   <em>{sense.part_of_speech}</em>
                 )}
                 <strong>{sense.definition}</strong>
-                {sense.example && <small>例句：{sense.example}</small>}
+                {sense.example && <small>{t("例句：{example}", { example: sense.example })}</small>}
               </span>
             </label>
           ))}
         </div>
       ) : (
-        <p className="word-lookup-empty">词典没有返回中文释义，请手动填写。</p>
+        <p className="word-lookup-empty">{t("词典没有返回中文释义，请手动填写。")}</p>
       )}
       {preview.source_url && (
         <p className="word-lookup-source">
-          来源：
+          {t("来源：")}
           <a href={preview.source_url} target="_blank" rel="noreferrer">
             {preview.source_name || preview.source_url}
           </a>
@@ -77,10 +79,10 @@ export default function WordDictionaryPreview({
           disabled={busy || selectedIndices.length === 0}
           onClick={onApply}
         >
-          使用所选释义
+          {t("使用所选释义")}
         </button>
         <button type="button" disabled={busy} onClick={onClose}>
-          保留手动填写
+          {t("保留手动填写")}
         </button>
       </div>
     </section>

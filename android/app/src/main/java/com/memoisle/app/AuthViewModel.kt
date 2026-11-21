@@ -10,6 +10,8 @@ import com.memoisle.app.network.AuthSession
 import com.memoisle.app.network.AuthUser
 import com.memoisle.app.network.EmailRegisterResponse
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.toUiText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,7 +36,7 @@ data class AuthUiState(
     val status: AuthStatus = AuthStatus.LOADING,
     val user: AuthUser? = null,
     val providers: AuthProvidersResponse? = null,
-    val message: String? = null,
+    val message: UiText? = null,
     val messageTone: AuthMessageTone = AuthMessageTone.ERROR,
     val isBusy: Boolean = false,
     val isSendingVerificationCode: Boolean = false,
@@ -86,7 +88,7 @@ class AuthViewModel(
                 onFailure = { error ->
                     tokenStore.clear()
                     api.clearSession()
-                    loadAnonymousState(error.message ?: "登录失败，请重新尝试")
+                    loadAnonymousState(error.toUiText(R.string.auth_error_login_retry))
                 },
             )
         }
@@ -116,7 +118,7 @@ class AuthViewModel(
                     mutableUiState.value = mutableUiState.value.copy(
                         status = AuthStatus.ANONYMOUS,
                         isBusy = false,
-                        message = error.message ?: "登录失败，请稍后重试",
+                        message = error.toUiText(R.string.auth_error_login_later),
                         messageTone = AuthMessageTone.ERROR,
                     )
                 },
@@ -139,7 +141,7 @@ class AuthViewModel(
         val state = mutableUiState.value
         if (state.providers?.inviteRequired == true && inviteCode.isBlank()) {
             mutableUiState.value = state.copy(
-                message = "请输入邀请码",
+                message = UiText.res(R.string.auth_error_invite_required),
                 messageTone = AuthMessageTone.ERROR,
             )
             return
@@ -167,7 +169,7 @@ class AuthViewModel(
                     mutableUiState.value = mutableUiState.value.copy(
                         isSendingVerificationCode = false,
                         verificationCodeCooldownSeconds = 60,
-                        message = "验证码已发送，请查收邮箱（10 分钟内有效）。",
+                        message = UiText.res(R.string.auth_msg_code_sent),
                         messageTone = AuthMessageTone.NOTICE,
                     )
                     startVerificationCodeCooldown()
@@ -175,7 +177,7 @@ class AuthViewModel(
                 onFailure = { error ->
                     mutableUiState.value = mutableUiState.value.copy(
                         isSendingVerificationCode = false,
-                        message = error.message ?: "验证码发送失败，请稍后重试",
+                        message = error.toUiText(R.string.auth_error_code_send_failed),
                         messageTone = AuthMessageTone.ERROR,
                     )
                 },
@@ -201,14 +203,14 @@ class AuthViewModel(
                 onSuccess = {
                     mutableUiState.value = mutableUiState.value.copy(
                         isBusy = false,
-                        message = "如果邮箱已注册，重置链接已发送，请查收邮件。",
+                        message = UiText.res(R.string.auth_msg_reset_sent),
                         messageTone = AuthMessageTone.NOTICE,
                     )
                 },
                 onFailure = { error ->
                     mutableUiState.value = mutableUiState.value.copy(
                         isBusy = false,
-                        message = error.message ?: "重置链接发送失败，请稍后重试",
+                        message = error.toUiText(R.string.auth_error_reset_failed),
                         messageTone = AuthMessageTone.ERROR,
                     )
                 },
@@ -226,14 +228,14 @@ class AuthViewModel(
     ): Unit {
         if (mutableUiState.value.providers?.inviteRequired == true && inviteCode.isBlank()) {
             mutableUiState.value = mutableUiState.value.copy(
-                message = "请输入邀请码",
+                message = UiText.res(R.string.auth_error_invite_required),
                 messageTone = AuthMessageTone.ERROR,
             )
             return
         }
         if (password != confirmPassword) {
             mutableUiState.value = mutableUiState.value.copy(
-                message = "两次输入的密码不一致",
+                message = UiText.res(R.string.auth_error_password_mismatch),
                 messageTone = AuthMessageTone.ERROR,
             )
             return
@@ -243,7 +245,7 @@ class AuthViewModel(
             verificationCode.any { character -> !character.isDigit() }
         ) {
             mutableUiState.value = mutableUiState.value.copy(
-                message = "请输入 6 位邮箱验证码",
+                message = UiText.res(R.string.auth_error_code_required),
                 messageTone = AuthMessageTone.ERROR,
             )
             return
@@ -279,7 +281,7 @@ class AuthViewModel(
             mutableUiState.value = AuthUiState(
                 status = AuthStatus.ANONYMOUS,
                 providers = providers,
-                message = if (providers == null) "已退出登录，当前无法读取登录方式" else null,
+                message = if (providers == null) UiText.res(R.string.auth_msg_logged_out_no_providers) else null,
             )
         }
     }
@@ -308,7 +310,7 @@ class AuthViewModel(
                 onFailure = {
                     tokenStore.clear()
                     api.clearSession()
-                    loadAnonymousState("登录已过期，请重新登录")
+                    loadAnonymousState(UiText.res(R.string.auth_error_session_expired))
                 },
             )
         }
@@ -362,7 +364,7 @@ class AuthViewModel(
                         mutableUiState.value = mutableUiState.value.copy(
                             status = AuthStatus.ANONYMOUS,
                             isBusy = false,
-                            message = "注册成功，请使用邮箱登录。",
+                            message = UiText.res(R.string.auth_msg_registered),
                             messageTone = AuthMessageTone.NOTICE,
                         )
                     }
@@ -371,7 +373,7 @@ class AuthViewModel(
                     mutableUiState.value = mutableUiState.value.copy(
                         status = AuthStatus.ANONYMOUS,
                         isBusy = false,
-                        message = error.message ?: "邮箱登录失败，请稍后重试",
+                        message = error.toUiText(R.string.auth_error_email_login_failed),
                         messageTone = AuthMessageTone.ERROR,
                     )
                 },
@@ -393,7 +395,7 @@ class AuthViewModel(
         }
     }
 
-    private suspend fun loadAnonymousState(message: String? = null): Unit {
+    private suspend fun loadAnonymousState(message: UiText? = null): Unit {
         val providers = runCatching {
             withContext(Dispatchers.IO) { api.getAuthProviders() }
         }.getOrNull()
@@ -401,7 +403,7 @@ class AuthViewModel(
             status = AuthStatus.ANONYMOUS,
             providers = providers,
             message = message ?: if (providers == null) {
-                "当前无法连接服务端，请检查网络后重试"
+                UiText.res(R.string.auth_error_server_unreachable)
             } else {
                 null
             },

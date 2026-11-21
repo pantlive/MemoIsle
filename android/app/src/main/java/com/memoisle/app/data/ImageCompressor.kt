@@ -5,13 +5,17 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
+import com.memoisle.app.ui.UiTextStateException
 import java.io.ByteArrayOutputStream
 
 /**
  * 必须压缩但压缩失败时抛出。继承 [IllegalArgumentException]，让 ViewModel 直接把原因展示给用户，
  * 而不是当成“已保存到本机、稍后重试”的网络错误。
  */
-class ImageCompressionException(message: String) : IllegalArgumentException(message)
+class ImageCompressionException(text: UiText) : UiTextException(text)
 
 /**
  * 一次图片上传前的准备结果。
@@ -34,11 +38,11 @@ data class ImageCompressionResult(
 ) {
     val newByteCount: Int get() = bytes.size
 
-    /** 压缩后展示给用户的中文提醒；未压缩时返回空串。 */
-    fun reminderMessage(): String {
-        val format = outputFormat ?: return ""
+    /** 压缩后展示给用户的提醒；未压缩时返回 null。 */
+    fun reminderMessage(): UiText? {
+        val format = outputFormat ?: return null
         if (!compressed) {
-            return ""
+            return null
         }
         return ImageCompressionPolicy.describeCompression(
             originalByteCount = originalByteCount,
@@ -109,7 +113,7 @@ object ImageCompressor {
 
         val originalBytes = readBytes(contentResolver, uri)
         if (originalBytes.isEmpty()) {
-            throw IllegalArgumentException("图片内容不能为空")
+            throw UiTextException(UiText.res(R.string.error_image_empty))
         }
         val originalByteCount = originalBytes.size.toLong()
         if (!ImageCompressionPolicy.needsCompression(
@@ -121,7 +125,7 @@ object ImageCompressor {
             return unchangedResult(originalBytes, sourceMimeType, sourceWidth, sourceHeight)
         }
         if (!hasDimensions) {
-            throw ImageCompressionException("无法解析图片尺寸，且图片超过 20 MB，请换一张图片")
+            throw ImageCompressionException(UiText.res(R.string.image_compress_error_no_dimensions))
         }
         return compressBitmap(
             contentResolver = contentResolver,
@@ -228,7 +232,7 @@ object ImageCompressor {
             }
             val fallback = bestBytes?.takeIf {
                 it.size <= ImageCompressionPolicy.MAX_UPLOAD_BYTES
-            } ?: throw ImageCompressionException("图片压缩后仍无法小于 20 MB，请换一张图片")
+            } ?: throw ImageCompressionException(UiText.res(R.string.image_compress_error_still_too_large))
             return compressedResult(
                 bytes = fallback,
                 outputFormat = outputFormat,
@@ -288,7 +292,7 @@ object ImageCompressor {
 
     private fun readBytes(contentResolver: ContentResolver, uri: Uri): ByteArray {
         return contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw IllegalStateException("无法读取所选图片")
+            ?: throw UiTextStateException(UiText.res(R.string.image_error_read_failed))
     }
 
     /**
@@ -322,7 +326,7 @@ object ImageCompressor {
             }
             sampleSize *= 2
         }
-        throw ImageCompressionException("图片解码失败，无法压缩，请换一张图片")
+        throw ImageCompressionException(UiText.res(R.string.image_compress_error_decode))
     }
 
     /** 编码到内存；返回 null 表示编码器拒绝该格式或没有产出内容。 */

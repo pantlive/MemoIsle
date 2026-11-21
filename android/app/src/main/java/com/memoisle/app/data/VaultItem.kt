@@ -8,6 +8,8 @@ import java.time.format.DateTimeParseException
 import java.time.temporal.ChronoUnit
 import org.json.JSONArray
 import org.json.JSONObject
+import com.memoisle.app.R
+import com.memoisle.app.ui.UiText
 
 const val VAULT_KIND_LOGIN = "login"
 const val VAULT_KIND_SECRET = "secret"
@@ -30,12 +32,13 @@ const val VAULT_BILLING_NONE = "none"
 const val VAULT_CURRENCY_USD = "USD"
 const val VAULT_CURRENCY_CNY = "CNY"
 
+/** 各类型的显示名（字符串资源 id）。 */
 val VAULT_KIND_LABELS = mapOf(
-    VAULT_KIND_LOGIN to "账号密码",
-    VAULT_KIND_SECRET to "密钥",
-    VAULT_KIND_RECOVERY to "恢复码",
-    VAULT_KIND_SERVER to "云服务器",
-    VAULT_KIND_SUBSCRIPTION to "AI 订阅",
+    VAULT_KIND_LOGIN to R.string.vault_kind_login,
+    VAULT_KIND_SECRET to R.string.vault_kind_secret,
+    VAULT_KIND_RECOVERY to R.string.vault_kind_recovery,
+    VAULT_KIND_SERVER to R.string.vault_kind_server,
+    VAULT_KIND_SUBSCRIPTION to R.string.vault_kind_subscription,
 )
 
 val VAULT_PROVIDER_OPTIONS = listOf(
@@ -46,10 +49,10 @@ val VAULT_PROVIDER_OPTIONS = listOf(
 )
 
 val VAULT_PROVIDER_LABELS = mapOf(
-    VAULT_PROVIDER_CLAUDE to "Claude",
-    VAULT_PROVIDER_CHATGPT to "ChatGPT",
-    VAULT_PROVIDER_GROK to "Grok",
-    VAULT_PROVIDER_OTHER to "其他",
+    VAULT_PROVIDER_CLAUDE to R.string.vault_provider_claude,
+    VAULT_PROVIDER_CHATGPT to R.string.vault_provider_chatgpt,
+    VAULT_PROVIDER_GROK to R.string.vault_provider_grok,
+    VAULT_PROVIDER_OTHER to R.string.common_other,
 )
 
 val VAULT_BILLING_OPTIONS = listOf(
@@ -59,9 +62,9 @@ val VAULT_BILLING_OPTIONS = listOf(
 )
 
 val VAULT_BILLING_LABELS = mapOf(
-    VAULT_BILLING_MONTHLY to "每月",
-    VAULT_BILLING_YEARLY to "每年",
-    VAULT_BILLING_NONE to "一次性 / 按量",
+    VAULT_BILLING_MONTHLY to R.string.vault_billing_monthly,
+    VAULT_BILLING_YEARLY to R.string.vault_billing_yearly,
+    VAULT_BILLING_NONE to R.string.vault_billing_none,
 )
 
 private val VAULT_MONEY_PATTERN = Regex("""^\d{1,9}(\.\d{1,2})?$""")
@@ -84,8 +87,14 @@ fun normalizeVaultMoney(value: String): String =
 fun normalizeVaultCurrency(value: String): String =
     value.takeIf { VAULT_CURRENCY_PATTERN.matches(it) } ?: VAULT_CURRENCY_USD
 
+/** 订阅的默认标题（保存后是用户内容）：品牌名不翻译，「其他」按创建时的界面语言。 */
 fun defaultSubscriptionTitle(provider: String, plan: String): String {
-    val name = VAULT_PROVIDER_LABELS.getValue(normalizeVaultProvider(provider))
+    val name = when (normalizeVaultProvider(provider)) {
+        VAULT_PROVIDER_CLAUDE -> "Claude"
+        VAULT_PROVIDER_CHATGPT -> "ChatGPT"
+        VAULT_PROVIDER_GROK -> "Grok"
+        else -> ContentDefaults.otherProvider
+    }
     val trimmedPlan = plan.trim()
     return if (trimmedPlan.isNotEmpty()) "$name $trimmedPlan" else name
 }
@@ -217,7 +226,7 @@ data class VaultItemData(
         /** 解密后按类型补齐字段，旧版本或缺字段的数据也能正常显示。 */
         fun fromJson(text: String): VaultItemData {
             val raw = JSONObject(text)
-            val title = raw.optString("title").ifBlank { "未命名" }
+            val title = raw.optString("title").ifBlank { ContentDefaults.untitled }
             val notes = raw.optString("notes")
             val changedAt = raw.optString("changedAt").takeIf { value ->
                 value.isNotBlank() && runCatching { Instant.parse(value) }.isSuccess
@@ -423,16 +432,16 @@ fun generateVaultPassword(length: Int = 20): String {
     }
 }
 
-enum class VaultReminderType(val label: String) {
-    EXPIRED("已过期"),
-    EXPIRING("即将到期"),
-    ROTATE("该更换了"),
-    ROTATE_SOON("快该换了"),
-    REUSED("重复密码"),
-    WEAK("弱密码"),
-    CODES_EMPTY("恢复码用完"),
-    CODES_LOW("恢复码不足"),
-    MISSING_KEY("密钥缺失"),
+enum class VaultReminderType(val label: Int) {
+    EXPIRED(R.string.common_expired),
+    EXPIRING(R.string.vault_reminder_type_expiring),
+    ROTATE(R.string.vault_reminder_type_rotate),
+    ROTATE_SOON(R.string.vault_reminder_type_rotate_soon),
+    REUSED(R.string.vault_reminder_type_reused),
+    WEAK(R.string.vault_reminder_type_weak),
+    CODES_EMPTY(R.string.vault_reminder_type_codes_empty),
+    CODES_LOW(R.string.vault_reminder_type_codes_low),
+    MISSING_KEY(R.string.vault_reminder_type_missing_key),
 }
 
 data class VaultReminder(
@@ -440,7 +449,7 @@ data class VaultReminder(
     val title: String,
     val type: VaultReminderType,
     val danger: Boolean,
-    val message: String,
+    val message: UiText,
 )
 
 private const val EXPIRY_WARN_DAYS = 14
@@ -487,7 +496,7 @@ fun collectVaultReminders(
     zone: ZoneId = ZoneId.systemDefault(),
 ): List<VaultReminder> {
     val reminders = mutableListOf<VaultReminder>()
-    fun add(entry: VaultEntry, type: VaultReminderType, danger: Boolean, message: String) {
+    fun add(entry: VaultEntry, type: VaultReminderType, danger: Boolean, message: UiText) {
         reminders += VaultReminder(entry.id, entry.data.title, type, danger, message)
     }
     val byPassword = entries
@@ -500,9 +509,9 @@ fun collectVaultReminders(
             if (data.codes.isEmpty()) continue
             val remaining = data.codes.count { !it.used }
             if (remaining == 0) {
-                add(entry, VaultReminderType.CODES_EMPTY, true, "恢复码已全部用完，请到网站重新生成一组。")
+                add(entry, VaultReminderType.CODES_EMPTY, true, UiText.res(R.string.vault_reminder_codes_empty))
             } else if (remaining <= LOW_RECOVERY_CODES) {
-                add(entry, VaultReminderType.CODES_LOW, false, "只剩 $remaining 个可用恢复码，建议重新生成一组。")
+                add(entry, VaultReminderType.CODES_LOW, false, UiText.plural(R.plurals.vault_reminder_codes_low, remaining))
             }
             continue
         }
@@ -511,7 +520,7 @@ fun collectVaultReminders(
             data.privateKeyRef.isNotEmpty() &&
             data.resolvePrivateKey(entries).missing
         ) {
-            add(entry, VaultReminderType.MISSING_KEY, true, "引用的密钥已被删除，请重新选择或直接填写私钥。")
+            add(entry, VaultReminderType.MISSING_KEY, true, UiText.res(R.string.vault_reminder_missing_key))
         }
         val effective = data.effectiveSecret(entries)
         // 订阅的到期提醒只看续费日。
@@ -529,27 +538,31 @@ fun collectVaultReminders(
                     entry,
                     VaultReminderType.EXPIRED,
                     true,
-                    if (subscription) {
-                        "已于 ${data.expiresOn} 到期（${-days} 天前），请续费或更新到期日。"
-                    } else {
-                        "已于 ${data.expiresOn} 过期（${-days} 天前），请更换。"
-                    },
+                    UiText.plural(
+                        if (subscription) R.plurals.vault_reminder_subscription_expired else R.plurals.vault_reminder_expired,
+                        (-days).toInt(),
+                        data.expiresOn,
+                        -days,
+                    ),
                 )
                 days == 0L -> add(
                     entry,
                     VaultReminderType.EXPIRED,
                     true,
-                    if (subscription) "今天到期，请确认续费。" else "今天到期，请尽快更换。",
+                    UiText.res(
+                        if (subscription) R.string.vault_reminder_subscription_due_today else R.string.vault_reminder_due_today,
+                    ),
                 )
                 days <= EXPIRY_WARN_DAYS -> add(
                     entry,
                     VaultReminderType.EXPIRING,
                     false,
-                    if (subscription) {
-                        "$days 天后到期续费（${data.expiresOn}）。"
-                    } else {
-                        "$days 天后到期（${data.expiresOn}）。"
-                    },
+                    UiText.plural(
+                        if (subscription) R.plurals.vault_reminder_subscription_expiring else R.plurals.vault_reminder_expiring,
+                        days.toInt(),
+                        days,
+                        data.expiresOn,
+                    ),
                 )
             }
         }
@@ -557,21 +570,24 @@ fun collectVaultReminders(
             val age = daysSince(lastChangedAt(entry, entries), today, zone)
             val left = data.rotateDays - age
             if (left <= 0) {
-                add(entry, VaultReminderType.ROTATE, true, "已 $age 天没有更换，设定为每 ${data.rotateDays} 天换一次。")
+                add(entry, VaultReminderType.ROTATE, true, UiText.plural(R.plurals.vault_reminder_rotate, age.toInt(), age, data.rotateDays))
             } else if (left <= ROTATE_WARN_DAYS) {
-                add(entry, VaultReminderType.ROTATE_SOON, false, "$left 天后到了更换周期（每 ${data.rotateDays} 天）。")
+                add(entry, VaultReminderType.ROTATE_SOON, false, UiText.plural(R.plurals.vault_reminder_rotate_soon, left.toInt(), left, data.rotateDays))
             }
         }
         if (data.participatesInPasswordChecks()) {
             val others = byPassword[data.password].orEmpty().filter { it.id != entry.id }
             if (others.isNotEmpty()) {
                 val titles = others.map { it.data.title }
-                val shown = titles.take(2).joinToString("") { "「$it」" }
-                val suffix = if (titles.size > 2) "等 ${titles.size} 条" else ""
-                add(entry, VaultReminderType.REUSED, true, "和$shown${suffix}用的是同一个密码。")
+                val message = when (titles.size) {
+                    1 -> UiText.res(R.string.vault_reminder_reused_one, titles[0])
+                    2 -> UiText.res(R.string.vault_reminder_reused_two, titles[0], titles[1])
+                    else -> UiText.res(R.string.vault_reminder_reused_many, titles[0], titles[1], titles.size)
+                }
+                add(entry, VaultReminderType.REUSED, true, message)
             }
             if (isWeakVaultPassword(data.password)) {
-                add(entry, VaultReminderType.WEAK, false, "密码偏弱，建议用「生成」换成 20 位随机密码。")
+                add(entry, VaultReminderType.WEAK, false, UiText.res(R.string.vault_reminder_weak))
             }
         }
     }

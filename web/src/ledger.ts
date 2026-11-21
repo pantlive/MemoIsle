@@ -5,6 +5,7 @@
  */
 
 import type { LedgerKind } from "./types";
+import { currentLocale, getLanguage, t } from "./i18n";
 
 /** 单笔上限 10 亿元，与后端一致。 */
 export const LEDGER_MAX_AMOUNT_CENTS = 100_000_000_000;
@@ -16,25 +17,32 @@ export const LEDGER_NOTE_MAX_LENGTH = 500;
 export const LEDGER_CURRENCIES = ["CNY", "USD", "EUR", "HKD", "JPY", "GBP"] as const;
 
 export const ledgerKindLabels: Record<LedgerKind, string> = {
-  expense: "支出",
-  income: "收入",
+  get expense() { return t("支出"); },
+  get income() { return t("收入"); },
 };
 
 /** 预置分类；用过的自定义分类由服务端 /ledger/categories 补充。 */
+/** 预置分类按当前界面语言给出；分类是自由文本，选中后按显示的文字保存。 */
 export const LEDGER_PRESET_CATEGORIES: Record<LedgerKind, readonly string[]> = {
-  expense: ["餐饮", "交通", "购物", "订阅", "住房", "娱乐", "医疗", "其他"],
-  income: ["工资", "其他"],
+  get expense() {
+    return [t("餐饮"), t("交通"), t("购物"), t("订阅"), t("住房"), t("娱乐"), t("医疗"), t("其他")];
+  },
+  get income() {
+    return [t("工资"), t("其他")];
+  },
 };
 
-export const LEDGER_ACCOUNT_SUGGESTIONS = ["现金", "银行卡", "信用卡", "支付宝", "微信"] as const;
+export function ledgerAccountSuggestions(): string[] {
+  return [t("现金"), t("银行卡"), t("信用卡"), t("支付宝"), t("微信")];
+}
 
 export const currencyLabels: Record<string, string> = {
-  CNY: "人民币",
-  USD: "美元",
-  EUR: "欧元",
-  HKD: "港币",
-  JPY: "日元",
-  GBP: "英镑",
+  get CNY() { return t("人民币"); },
+  get USD() { return t("美元"); },
+  get EUR() { return t("欧元"); },
+  get HKD() { return t("港币"); },
+  get JPY() { return t("日元"); },
+  get GBP() { return t("英镑"); },
 };
 
 const currencySymbols: Record<string, string> = {
@@ -136,13 +144,19 @@ export function shiftMonth(month: string, delta: number): string {
 /** "2026-11" -> "2026年11月"。 */
 export function formatMonthLabel(month: string): string {
   const match = MONTH_PATTERN.exec(month);
-  return match ? `${match[1]}年${Number(match[2])}月` : month;
+  if (!match) return month;
+  if (getLanguage() === "zh") return `${match[1]}年${Number(match[2])}月`;
+  return new Intl.DateTimeFormat(currentLocale(), { year: "numeric", month: "short", timeZone: "UTC" })
+    .format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)));
 }
 
 /** "2026-11-03" -> "11月3日"。 */
 export function formatEntryDate(isoDate: string): string {
   const [, month, day] = isoDate.split("-");
-  return month && day ? `${Number(month)}月${Number(day)}日` : isoDate;
+  if (!month || !day) return isoDate;
+  if (getLanguage() === "zh") return `${Number(month)}月${Number(day)}日`;
+  return new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2000, Number(month) - 1, Number(day))));
 }
 
 /** 新建时的分类候选：预置在前，用过的自定义分类按使用次数追加。 */

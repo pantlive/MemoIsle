@@ -2,6 +2,7 @@
 
 import { RELAY_MAX_FILE_BYTES, RELAY_MAX_TEXT_BYTES } from "./api";
 import type { RelayDevice, RelayItem } from "./types";
+import { t } from "./i18n";
 
 const CLIPBOARD_IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
@@ -16,8 +17,8 @@ const CLIPBOARD_IMAGE_EXTENSIONS: Record<string, string> = {
 };
 
 export const relayDeviceLabels: Record<RelayDevice, string> = {
-  web: "网页",
-  android: "手机",
+  get web() { return t("网页"); },
+  get android() { return t("手机"); },
 };
 
 export function utf8ByteLength(value: string): number {
@@ -32,24 +33,24 @@ export function formatBytes(size: number): string {
 
 /** 发送前在本地挡住超限内容，返回中文提示；可以发送时返回 null。 */
 export function relayTextError(text: string): string | null {
-  if (!text.trim()) return "请输入要发送的内容。";
+  if (!text.trim()) return t("请输入要发送的内容。");
   if (utf8ByteLength(text) > RELAY_MAX_TEXT_BYTES) {
-    return "文本不能超过 100 KB，请改用文件发送。";
+    return t("文本不能超过 100 KB，请改用文件发送。");
   }
   return null;
 }
 
 export function relayFileError(file: Pick<File, "name" | "size">): string | null {
-  if (file.size <= 0) return `「${file.name}」是空文件。`;
+  if (file.size <= 0) return t("「{name}」是空文件。", { name: file.name });
   if (file.size > RELAY_MAX_FILE_BYTES) {
-    return `「${file.name}」有 ${formatBytes(file.size)}，单个文件不能超过 20 MB。`;
+    return t("「{name}」有 {value}，单个文件不能超过 20 MB。", { name: file.name, value: formatBytes(file.size) });
   }
   return null;
 }
 
 /** 剩余有效时间，如「9:58」；到期返回「已过期」。 */
 export function formatRemaining(seconds: number): string {
-  if (seconds <= 0) return "已过期";
+  if (seconds <= 0) return t("已过期");
   const whole = Math.ceil(seconds);
   const minutes = Math.floor(whole / 60);
   const rest = whole % 60;

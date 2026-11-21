@@ -1,15 +1,16 @@
 package com.memoisle.app.network
 
+import com.memoisle.app.R
 import com.memoisle.app.data.AndroidRelease
 import com.memoisle.app.data.ForgetItem
 import com.memoisle.app.data.ForgetItemInput
-import com.memoisle.app.data.Memo
+import com.memoisle.app.data.LedgerCategoryUsage
 import com.memoisle.app.data.LedgerEntry
 import com.memoisle.app.data.LedgerEntryInput
 import com.memoisle.app.data.LedgerImageDraft
 import com.memoisle.app.data.LedgerQuickResult
 import com.memoisle.app.data.LedgerSummary
-import com.memoisle.app.data.LedgerCategoryUsage
+import com.memoisle.app.data.Memo
 import com.memoisle.app.data.MemoDeletion
 import com.memoisle.app.data.MemoSyncCursor
 import com.memoisle.app.data.RELAY_DEVICE_ANDROID
@@ -21,6 +22,10 @@ import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
 import com.memoisle.app.data.normalizeImageMimeType
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
+import com.memoisle.app.ui.UiTextException
+import com.memoisle.app.ui.requireUi
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -33,16 +38,21 @@ import org.json.JSONObject
 
 class DuplicateLemmaException(
     val existing: Memo,
-) : RuntimeException("已收藏相同词形")
+) : RuntimeException("Duplicate word"), HasUiText {
+    override val text: UiText get() = UiText.res(R.string.error_duplicate_word)
+}
 
 class DuplicateResourceException(
     val existing: Memo,
-) : RuntimeException("已收藏相同网址")
+) : RuntimeException("Duplicate URL"), HasUiText {
+    override val text: UiText get() = UiText.res(R.string.error_duplicate_url)
+}
 
+/** 服务端返回非 2xx。界面显示时用 [com.memoisle.app.ui.toUiText]，message 只用于日志。 */
 class ApiException(
     val statusCode: Int,
-    responseBody: String,
-) : RuntimeException("API 请求失败（$statusCode）：$responseBody") {
+    val responseBody: String,
+) : RuntimeException("API request failed ($statusCode): $responseBody") {
     val code: String?
     val current: Memo?
 
@@ -446,7 +456,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun mergeWord(memo: Memo, incoming: Memo): Memo {
-        val remoteId = requireNotNull(memo.id) { "合并前必须先完成单词同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_merge_needs_sync)))
         val body = JSONObject().apply {
             put("expected_version", memo.version)
             incoming.wordPhonetic?.let { put("word_phonetic", it) }
@@ -459,7 +469,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun updateMemo(memo: Memo): Memo {
-        val remoteId = requireNotNull(memo.id) { "同步后的条目必须包含服务端标识" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_synced_item_needs_server_id)))
         val body = JSONObject().apply {
             put("expected_version", memo.version)
             put("title", memo.title)
@@ -479,7 +489,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun restoreMemo(memo: Memo): Memo {
-        val remoteId = requireNotNull(memo.id) { "恢复前必须先完成同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_restore_needs_sync)))
         return execute(
             "POST",
             "memos/$remoteId/restore?expected_version=${memo.version}",
@@ -487,7 +497,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun permanentlyDeleteMemo(memo: Memo) {
-        val remoteId = requireNotNull(memo.id) { "永久删除前必须先完成同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_purge_needs_sync)))
         execute(
             "DELETE",
             "memos/$remoteId/permanent?expected_version=${memo.version}",
@@ -495,7 +505,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun reviewWord(memo: Memo, feedback: String): Memo {
-        val remoteId = requireNotNull(memo.id) { "复习前必须先完成单词同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_review_needs_sync)))
         val body = JSONObject().apply {
             put("expected_version", memo.version)
             put("feedback", feedback)
@@ -519,7 +529,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun skipReview(memo: Memo): Memo {
-        val remoteId = requireNotNull(memo.id) { "跳过回顾前必须先完成同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_skip_needs_sync)))
         val body = JSONObject().apply {
             put("expected_version", memo.version)
         }
@@ -562,7 +572,7 @@ class MemoApiClient(baseUrl: String) {
     }
 
     fun uploadAudio(memo: Memo, audioPath: Path, durationMs: Int): Memo {
-        val remoteId = requireNotNull(memo.id) { "上传录音前必须先完成灵感同步" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_audio_upload_needs_sync)))
         val connection = URL(
             normalizedBaseUrl + "memos/$remoteId/audio?expected_version=${memo.version}",
         ).openConnection() as HttpURLConnection
@@ -579,7 +589,7 @@ class MemoApiClient(baseUrl: String) {
             connection.setRequestProperty("Content-Type", "audio/mp4")
             connection.setRequestProperty("X-Audio-Duration-Ms", durationMs.toString())
             val audioSize = Files.size(audioPath)
-            require(audioSize <= Int.MAX_VALUE) { "录音文件过大" }
+            requireUi(audioSize <= Int.MAX_VALUE) { UiText.res(R.string.error_audio_too_large) }
             connection.setFixedLengthStreamingMode(audioSize.toInt())
             connection.outputStream.use { output ->
                 Files.newInputStream(audioPath).use { input -> input.copyTo(output) }
@@ -638,7 +648,7 @@ class MemoApiClient(baseUrl: String) {
      * 创建图片收藏条目；图片字节随后通过 [uploadMemoImage] 以原始请求体上传。
      */
     fun createImageMemo(memo: Memo): Memo {
-        require(memo.type == TYPE_IMAGE) { "创建图片收藏时类型必须为 image" }
+        requireUi(memo.type == TYPE_IMAGE) { UiText.res(R.string.error_image_memo_type) }
         return createMemo(memo)
     }
 
@@ -653,10 +663,10 @@ class MemoApiClient(baseUrl: String) {
         mimeType: String,
         expectedVersion: Int,
     ): Memo {
-        val remoteId = requireNotNull(memo.id) { "上传图片前必须先创建图片收藏" }
+        val remoteId = (memo.id ?: throw UiTextException(UiText.res(R.string.error_image_upload_needs_memo)))
         val normalizedMimeType = normalizeImageMimeType(mimeType)
-        require(normalizedMimeType != null) { "仅支持 PNG/JPEG/WebP/GIF 图片" }
-        require(bytes.isNotEmpty()) { "图片内容不能为空" }
+        requireUi(normalizedMimeType != null) { UiText.res(R.string.error_image_unsupported_type) }
+        requireUi(bytes.isNotEmpty()) { UiText.res(R.string.error_image_empty) }
         val connection = URL(
             normalizedBaseUrl + "memos/$remoteId/image?expected_version=$expectedVersion",
         ).openConnection() as HttpURLConnection
@@ -789,9 +799,10 @@ class MemoApiClient(baseUrl: String) {
 
     fun getVaultAccess(): VaultAccessStatus = execute("GET", "vault/access").toVaultAccessStatus()
 
-    fun requestVaultAccessCode(): String {
+    /** 返回服务端的说明；没有说明时返回 null，由界面显示默认提示。 */
+    fun requestVaultAccessCode(): String? {
         val response = execute("POST", "vault/access/code")
-        return response.optString("detail").ifBlank { "验证码已发送" }
+        return response.optString("detail").ifBlank { null }
     }
 
     fun verifyVaultAccess(method: String, code: String): VaultAccessStatus {
@@ -829,8 +840,8 @@ class MemoApiClient(baseUrl: String) {
      */
     fun recognizeLedgerImage(bytes: ByteArray, mimeType: String, today: String): LedgerImageDraft {
         val normalizedMimeType = normalizeImageMimeType(mimeType)
-            ?: throw IllegalArgumentException("仅支持 PNG/JPEG/WebP/GIF 图片")
-        require(bytes.isNotEmpty()) { "图片内容不能为空" }
+            ?: throw UiTextException(UiText.res(R.string.error_image_unsupported_type))
+        requireUi(bytes.isNotEmpty()) { UiText.res(R.string.error_image_empty) }
         val connection = URL(
             normalizedBaseUrl + "ledger/image/recognize?today=" + URLEncoder.encode(today, "UTF-8"),
         ).openConnection() as HttpURLConnection
@@ -906,7 +917,7 @@ class MemoApiClient(baseUrl: String) {
         name: String,
         mimeType: String?,
     ): ForgetItem {
-        require(bytes.isNotEmpty()) { "附件内容不能为空" }
+        requireUi(bytes.isNotEmpty()) { UiText.res(R.string.error_attachment_empty) }
         val connection = URL(normalizedBaseUrl + "forget/items/$itemId/attachments")
             .openConnection() as HttpURLConnection
         connection.applyMemoIsleHeaders()
@@ -979,7 +990,7 @@ class MemoApiClient(baseUrl: String) {
         mimeType: String?,
         target: String = RELAY_DEVICE_WEB,
     ): RelayItem {
-        require(bytes.isNotEmpty()) { "文件内容不能为空" }
+        requireUi(bytes.isNotEmpty()) { UiText.res(R.string.error_file_empty) }
         val query = "target=" + URLEncoder.encode(target, "UTF-8") +
             "&source=" + RELAY_DEVICE_ANDROID +
             "&filename=" + URLEncoder.encode(name.ifBlank { "file" }, "UTF-8")

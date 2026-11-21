@@ -6,10 +6,13 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.memoisle.app.BuildConfig
+import com.memoisle.app.R
 import com.memoisle.app.data.AndroidRelease
 import com.memoisle.app.data.isStaleUpdateFile
 import com.memoisle.app.data.updateApkFileName
 import com.memoisle.app.network.MemoApiClient
+import com.memoisle.app.ui.HasUiText
+import com.memoisle.app.ui.UiText
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -20,7 +23,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** 下载的安装包与服务端公布的大小或 SHA-256 对不上。 */
-class UpdateVerificationException(message: String) : IOException(message)
+class UpdateVerificationException(override val text: UiText) : IOException(text.toString()), HasUiText
 
 /**
  * 下载、校验并交给系统安装器安装新版 APK。
@@ -73,10 +76,10 @@ class AppUpdater(
             }
             downloadContext.ensureActive()
             if (partial.length() != release.size) {
-                throw UpdateVerificationException("安装包大小不一致，已删除，请稍后重试")
+                throw UpdateVerificationException(UiText.res(R.string.update_error_size_mismatch))
             }
             if (sha256(partial) != release.sha256) {
-                throw UpdateVerificationException("安装包校验失败，已删除，请稍后重试")
+                throw UpdateVerificationException(UiText.res(R.string.update_error_checksum))
             }
             Files.move(partial.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
             target

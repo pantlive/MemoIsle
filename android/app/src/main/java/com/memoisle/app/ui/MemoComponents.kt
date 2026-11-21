@@ -1,5 +1,6 @@
 package com.memoisle.app.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.memoisle.app.R
 import com.memoisle.app.data.TYPE_IMAGE
 import com.memoisle.app.data.TYPE_RESOURCE
 import com.memoisle.app.data.TYPE_WORD
@@ -54,19 +57,19 @@ import com.memoisle.app.data.TYPE_WORD
 /** 一种内容类型的图标、名称和配色。 */
 data class MemoKindStyle(
     val icon: ImageVector,
-    val label: String,
+    @param:StringRes val label: Int,
     val accent: Color,
     val soft: Color,
 )
 
 fun memoKindStyle(type: String, isVoice: Boolean = false): MemoKindStyle = when (type) {
-    TYPE_WORD -> MemoKindStyle(Icons.Outlined.Translate, "单词", WordAccent, WordSoft)
-    TYPE_RESOURCE -> MemoKindStyle(Icons.Outlined.Language, "网页资料", ResourceAccent, ResourceSoft)
-    TYPE_IMAGE -> MemoKindStyle(Icons.Outlined.Image, "图片", ImageAccent, ImageSoft)
+    TYPE_WORD -> MemoKindStyle(Icons.Outlined.Translate, R.string.kind_word, WordAccent, WordSoft)
+    TYPE_RESOURCE -> MemoKindStyle(Icons.Outlined.Language, R.string.kind_resource, ResourceAccent, ResourceSoft)
+    TYPE_IMAGE -> MemoKindStyle(Icons.Outlined.Image, R.string.kind_image, ImageAccent, ImageSoft)
     else -> if (isVoice) {
-        MemoKindStyle(Icons.Outlined.Mic, "语音灵感", IdeaAccent, IdeaSoft)
+        MemoKindStyle(Icons.Outlined.Mic, R.string.kind_voice_idea, IdeaAccent, IdeaSoft)
     } else {
-        MemoKindStyle(Icons.Outlined.Lightbulb, "灵感", IdeaAccent, IdeaSoft)
+        MemoKindStyle(Icons.Outlined.Lightbulb, R.string.kind_idea, IdeaAccent, IdeaSoft)
     }
 }
 
@@ -265,7 +268,7 @@ fun DetailScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onClose, enabled = closeEnabled) {
-                        Icon(Icons.Outlined.Close, contentDescription = "关闭")
+                        Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.common_close))
                     }
                     Row(
                         modifier = Modifier.weight(1f),
@@ -273,7 +276,7 @@ fun DetailScreen(
                     ) {
                         Icon(kind.icon, contentDescription = null, tint = kind.accent, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text(kind.label, color = kind.accent, style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(kind.label), color = kind.accent, style = MaterialTheme.typography.labelLarge)
                     }
                     actions()
                 }
