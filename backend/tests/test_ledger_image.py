@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 from app.config import Settings
-from app.image_ocr_service import OcrUnavailableError
+from app.image_ocr_service import OcrResult, OcrUnavailableError
 from app.ledger_api import _check_image_size
 from app.ledger_image import (
     LedgerImageUnavailableError,
@@ -317,6 +317,101 @@ def test_unconfigured_without_ocr_raises_unavailable() -> None:
         )
 
 
+def test_easyocr_fallback_parses_receipt_by_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    forbid_cloud_ocr(monkeypatch)
+
+    def no_rapidocr(_image: bytes, _languages: str) -> str:
+        raise OcrUnavailableError("未安装本地 OCR")
+
+    captured: list[Path] = []
+
+    def fake_easyocr(_image: bytes, model_directory: Path) -> OcrResult:
+        captured.append(model_directory)
+        return OcrResult(text="便利店\n合计 10.50\n", tags=[], source="local_pytorch")
+
+    monkeypatch.setattr("app.ledger_image.extract_text_local", no_rapidocr)
+    monkeypatch.setattr("app.ledger_image.recognize_local_image", fake_easyocr)
+
+    parsed = recognize_ledger_image(
+        png_bytes(),
+        "image/png",
+        TODAY,
+        [],
+        settings(
+            ledger_llm_base_url=None,
+            image_directory=Path("/tmp/memoisle-test-images"),
+        ),
+    )
+    entry, parsed_by = parsed
+    assert parsed_by == "rule"
+    assert entry.amount_cents == 1_050
+    assert captured
+    assert captured[0].name == "ocr-models"
+
+
+def test_easyocr_fallback_unavailable_raises_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    forbid_cloud_ocr(monkeypatch)
+
+    def no_rapidocr(_image: bytes, _languages: str) -> str:
+        raise OcrUnavailableError("未安装本地 OCR")
+
+    def no_easyocr(_image: bytes, _directory: Path) -> OcrResult:
+        raise OcrUnavailableError("本地 OCR 模型不可用")
+
+    monkeypatch.setattr("app.ledger_image.extract_text_local", no_rapidocr)
+    monkeypatch.setattr("app.ledger_image.recognize_local_image", no_easyocr)
+    monkeypatch.setattr("app.ledger_image._easyocr_installed", lambda: True)
+
+    with pytest.raises(LedgerImageUnavailableError, match="模型还没准备"):
+        recognize_ledger_image(
+            png_bytes(),
+            "image/png",
+            TODAY,
+            [],
+            settings(ledger_llm_base_url=None),
+        )
+
+    monkeypatch.setattr("app.ledger_image._easyocr_installed", lambda: False)
+    with pytest.raises(LedgerImageUnavailableError, match="配置"):
+        recognize_ledger_image(
+            png_bytes(),
+            "image/png",
+            TODAY,
+            [],
+            settings(ledger_llm_base_url=None),
+        )
+
+
+def test_rapidocr_success_does_not_call_easyocr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    forbid_cloud_ocr(monkeypatch)
+
+    def extractor(_image: bytes, _languages: str) -> str:
+        return "便利店\n合计 10.50\n"
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("rapidocr 可用时不应调用 EasyOCR")
+
+    monkeypatch.setattr("app.ledger_image.extract_text_local", extractor)
+    monkeypatch.setattr("app.ledger_image.recognize_local_image", forbidden)
+
+    parsed = recognize_ledger_image(
+        png_bytes(),
+        "image/png",
+        TODAY,
+        [],
+        settings(ledger_llm_base_url=None),
+    )
+    entry, parsed_by = parsed
+    assert parsed_by == "rule"
+    assert entry.amount_cents == 1_050
+
+
 def test_invalid_image_is_rejected_and_long_summary_is_truncated() -> None:
     with pytest.raises(ImageValidationError):
         recognize_ledger_image(
@@ -405,7 +500,12 @@ def test_image_route_503_when_nothing_is_configured(
     def extractor(_image: bytes, _languages: str) -> str:
         raise OcrUnavailableError("未安装")
 
+    def no_easyocr(_image: bytes, _directory: Path) -> OcrResult:
+        raise OcrUnavailableError("未安装")
+
     monkeypatch.setattr("app.ledger_image.extract_text_local", extractor)
+    monkeypatch.setattr("app.ledger_image.recognize_local_image", no_easyocr)
+    monkeypatch.setattr("app.ledger_image._easyocr_installed", lambda: False)
     response = client.post(
         f"{BASE}/image/recognize",
         params={"today": TODAY.isoformat()},

@@ -3,13 +3,15 @@
 只识别、不保存、不落盘。顺序是：
 
 1. 配置了 ``MEMOISLE_LEDGER_LLM_VISION_MODEL`` 时，把 JPEG 预览直接发给本地视觉模型；
-2. 否则（或视觉模型失败时）用本地 OCR 取文字。配了文本模型就让它拆字段，
-   没配就用规则找「实付 / 支付金额 / 合计」；
+2. 否则（或视觉模型失败时）用本地 OCR 取文字：先 ``extract_text_local``
+   （rapidocr-onnxruntime / pytesseract），都不可用时再走已安装的 EasyOCR
+   （``recognize_local_image``，权重在数据目录旁的 ``ocr-models``，运行时不下载）。
+   配了文本模型就让它拆字段，没配就用规则找「实付 / 支付金额 / 合计」；
 3. 视觉模型、文本模型和本地 OCR 都不可用时，调用方返回 503。
 
 只使用 ``MEMOISLE_LEDGER_LLM_*`` 指向的本地服务和本地 OCR，不调用
 ``MEMOISLE_LLM_*`` / ``MEMOISLE_VISION_MODEL``，也不走 ``run_image_ocr``
-（那条路径会在本地 OCR 失败时回退到云端视觉模型）。
+（那条路径会在本地 OCR 失败时回退到云端视觉模型；EasyOCR 兜底同样不走它、不连云端）。
 日志只记固定短语、状态码或异常类型，不写 OCR 文本、图片内容和密钥。
 """
 
@@ -26,6 +28,7 @@ import httpx
 from PIL import UnidentifiedImageError
 
 from app.config import Settings
+from app.image_local_ocr import recognize_local_image
 from app.image_ocr_service import (
     OcrUnavailableError,
     build_ocr_preview,
@@ -68,7 +71,13 @@ IMAGE_DATE_PAST_DAYS = 366
 _WEEKDAYS = "一二三四五六日"
 _NOTE_PREFIX = "图片："
 _UNAVAILABLE = "还没有配置图片记账识别，请在服务器配置本地模型或安装本地 OCR"
+_MODELS_UNAVAILABLE = (
+    "图片记账的本地 OCR 模型还没准备好，请在服务器运行 "
+    "backend/scripts/prepare_local_ocr.py 准备中英文模型"
+)
 _FAILED = "没能从这张图片识别出一笔收支，请换一张更清晰的图片，或手动记一笔"
+_OCR_MISSING_DEPS = "missing_dependency"
+_OCR_MISSING_MODELS = "missing_models"
 _NO_TEXT = "没有从图片里识别出文字，请换一张更清晰的图片，或手动记一笔"
 _NO_AMOUNT = "没有识别到实付或合计金额，请换一张更清晰的小票，或手动记一笔"
 _NUMERIC_LINE = re.compile(r"^[\d\s.,:：¥￥$€£元块\-—]+$")
@@ -149,6 +158,42 @@ LocalExtractor = Callable[[bytes, str], str]
 
 class LedgerImageUnavailableError(RuntimeError):
     """没有可用的本地图片识别能力；消息是给用户看的中文提示。"""
+
+
+class _LocalOcrUnavailable(OcrUnavailableError):
+    """本地 OCR 全部不可用；missing_models 表示 EasyOCR 已安装但权重没准备好。"""
+
+    def __init__(self, missing_models: bool) -> None:
+        self.missing_models = missing_models
+        super().__init__(
+            "missing_models" if missing_models else "missing_dependency"
+        )
+
+
+def _easyocr_installed() -> bool:
+    try:
+        import easyocr  # noqa: F401
+        import torch  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _default_local_text(image_bytes: bytes, settings: Settings) -> str:
+    """rapidocr / pytesseract 优先，不可用时再走本地 EasyOCR，不连云端。"""
+
+    try:
+        return extract_text_local(image_bytes, settings.image_ocr_languages)
+    except OcrUnavailableError as error:
+        logger.warning("本地 OCR 改用 EasyOCR（%s）", type(error).__name__)
+    try:
+        result = recognize_local_image(
+            image_bytes,
+            settings.image_directory.parent / "ocr-models",
+        )
+    except OcrUnavailableError as error:
+        raise _LocalOcrUnavailable(missing_models=_easyocr_installed()) from error
+    return result.text
 
 
 def ledger_vision_enabled(settings: Settings) -> bool:
@@ -293,22 +338,29 @@ def _read_ocr(
     image_bytes: bytes,
     settings: Settings,
     local_extractor: LocalExtractor | None,
-) -> tuple[str, bool]:
-    """返回 (文字, 引擎是否不可用)。空字符串表示引擎可用但没认出字。"""
+) -> tuple[str, str | None]:
+    """返回 (文字, 不可用原因)。原因为空表示引擎可用；空字符串表示没认出字。"""
 
-    extractor = local_extractor or extract_text_local
     try:
-        raw = extractor(image_bytes, settings.image_ocr_languages)
+        if local_extractor is not None:
+            raw = local_extractor(image_bytes, settings.image_ocr_languages)
+        else:
+            raw = _default_local_text(image_bytes, settings)
+    except _LocalOcrUnavailable as error:
+        logger.warning("本地 OCR 不可用（%s）", type(error).__name__)
+        if error.missing_models:
+            return "", _OCR_MISSING_MODELS
+        return "", _OCR_MISSING_DEPS
     except OcrUnavailableError as error:
         logger.warning("本地 OCR 不可用（%s）", type(error).__name__)
-        return "", True
+        return "", _OCR_MISSING_DEPS
     except Exception as error:  # noqa: BLE001 - 引擎异常不把细节写进日志
         logger.warning("本地 OCR 不可用（%s）", type(error).__name__)
-        return "", True
+        return "", _OCR_MISSING_DEPS
     if not isinstance(raw, str):
         logger.warning("本地 OCR 不可用（%s）", type(raw).__name__)
-        return "", True
-    return _clean_ocr(raw), False
+        return "", _OCR_MISSING_DEPS
+    return _clean_ocr(raw), None
 
 
 def _summary_text(data: dict[str, object]) -> str:
@@ -541,8 +593,10 @@ def recognize_ledger_image(
                 )
 
         ocr_text, ocr_unavailable = _read_ocr(image_bytes, settings, local_extractor)
-        if ocr_unavailable:
+        if ocr_unavailable is not None:
             if not ledger_vision_enabled(settings) and not ledger_llm_enabled(settings):
+                if ocr_unavailable == _OCR_MISSING_MODELS:
+                    raise LedgerImageUnavailableError(_MODELS_UNAVAILABLE)
                 raise LedgerImageUnavailableError(_UNAVAILABLE)
             raise LedgerParseError(_FAILED)
         if not ocr_text:
