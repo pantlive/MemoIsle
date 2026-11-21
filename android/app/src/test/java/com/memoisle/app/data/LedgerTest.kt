@@ -120,4 +120,35 @@ class LedgerTest {
             valid.copy(note = "注".repeat(501))).forEach { assertNotNull(ledgerValidationError(it)) }
         assertEquals("USD", normalizeLedgerCurrency(" usd "))
     }
+
+    @Test
+    fun signedAmountUsesKindSignWithoutCurrency() {
+        assertEquals("+0.00", formatLedgerSigned("income", 0))
+        assertEquals("-0.00", formatLedgerSigned("expense", 0))
+        assertEquals("+25.50", formatLedgerSigned("income", 2550))
+        assertEquals("-25.50", formatLedgerSigned("expense", 2550))
+        assertEquals("+1,234.56", formatLedgerSigned("income", 123456))
+        assertEquals("-1,234.56", formatLedgerSigned("expense", 123456))
+        assertEquals("+1,000,000,000.00", formatLedgerSigned("income", 100_000_000_000L))
+        assertEquals("-15.00", formatLedgerSigned("expense", -1500))
+    }
+
+    @Test
+    fun entrySubtitleSkipsBlanksAndFlattensNotes() {
+        val base = LedgerEntryInput(
+            kind = "expense",
+            amountCents = 14890,
+            occurredOn = "2026-11-21",
+            category = "打车",
+            account = "微信",
+            note = "早饭",
+        )
+        assertEquals("2026-11-21 · 微信 · 早饭", ledgerEntrySubtitle(base))
+        assertEquals("2026-11-21 · 早饭", ledgerEntrySubtitle(base.copy(account = null)))
+        assertEquals("2026-11-21 · 早饭", ledgerEntrySubtitle(base.copy(account = "  ")))
+        assertEquals("2026-11-21 · 微信", ledgerEntrySubtitle(base.copy(note = null)))
+        assertEquals("2026-11-21", ledgerEntrySubtitle(base.copy(account = null, note = null)))
+        assertEquals("2026-11-21 · 微信 · 星巴克 拿铁", ledgerEntrySubtitle(base.copy(note = "星巴克\n拿铁")))
+        assertEquals("2026-11-21 · 微信 · 星巴克 拿铁", ledgerEntrySubtitle(base.copy(note = "星巴克\n\n 拿铁")))
+    }
 }

@@ -155,6 +155,20 @@ fun centsToAmountInput(cents: Long): String {
 }
 
 fun formatLedgerMoney(cents: Long, currency: String): String = "$currency ${formatCents(cents)}"
+
+/** 列表金额：按收支带正负号，不重复写币种。 */
+fun formatLedgerSigned(kind: String, cents: Long): String {
+    val amount = formatCents(kotlin.math.abs(cents))
+    return if (kind == "income") "+$amount" else "-$amount"
+}
+
+/** 流水副标题：日期 · 账户 · 备注，空值跳过，换行压成空格。 */
+fun ledgerEntrySubtitle(data: LedgerEntryInput): String = listOfNotNull(
+    data.occurredOn.takeIf { it.isNotBlank() },
+    data.account?.trim()?.takeIf { it.isNotBlank() },
+    data.note?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotBlank() },
+).joinToString(" · ")
+
 fun ledgerKindLabel(kind: String): String = if (kind == "income") "收入" else "支出"
 fun currentLedgerMonth(): String = YearMonth.now().toString()
 fun shiftLedgerMonth(month: String, delta: Long): String = YearMonth.parse(month).plusMonths(delta).toString()
